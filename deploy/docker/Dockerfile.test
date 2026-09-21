@@ -1,0 +1,6 @@
+FROM python:3.12-slim
+ARG AGENT_UID=1000
+ARG AGENT_GID=1000
+RUN mkdir -p /home/agent && chown ${AGENT_UID}:${AGENT_GID} /home/agent
+USER ${AGENT_UID}:${AGENT_GID}
+WORKDIR /work

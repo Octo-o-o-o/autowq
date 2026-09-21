@@ -16,3 +16,18 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: PYTHONPATH=src python -m unittest discover -s tests
       - run: python -m pip wheel --no-deps --wheel-dir /tmp/wheels .
+  linux-container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate generated systemd units
+        run: |
+          python scripts/setup_linux.py
+          systemd-analyze --user verify ~/.local/share/autowq-runtime/autowq.service ~/.local/share/autowq-runtime/autowq.timer
+      - name: Build isolated fixture image
+        run: docker build --build-arg AGENT_UID=$(id -u) --build-arg AGENT_GID=$(id -g) -f deploy/docker/Dockerfile.test -t autowq-test:ci deploy/docker
+      - name: Exercise real container isolation and timeout
+        run: WQ_DOCKER_TEST_IMAGE=autowq-test:ci PYTHONPATH=src:tests python -m unittest test_linux_deployment -v

@@ -17,7 +17,7 @@
 - `config/autopilot-policy.json`：缺真实证据的占位策略，不能开启研究。
 - `~/.local/share/autowq-runtime/`：沙箱、launchers、jobs 和 launchd plist。
 
-可用 `--runtime /绝对路径` 选择项目之外的新目录；不能覆盖已有配置。macOS 启动器依赖 `/usr/bin/sandbox-exec`，Linux 目前只支持离线工具/测试，不能直接复用这些启动器。
+可用 `--runtime /绝对路径` 选择项目之外的新目录；不能覆盖已有配置。macOS 启动器依赖 `/usr/bin/sandbox-exec`，Linux/Windows WSL2 使用单独的 Docker Provider 与 systemd 路径，见 [跨平台部署](linux-windows.md)，不复用 macOS 启动器。
 
 分别通过供应商自己的 CLI 完成安装和登录，再核对 `config/profiles.json` 中 argv、模型名称与 timeout。Grok 默认 `~/.grok/bin/grok`，Devin 默认 `~/.local/bin/devin`，Cursor 默认 `~/.local/bin/cursor-agent`，ZCode 默认 `/Applications/ZCode.app`。Cursor 可通过 `WQ_CURSOR_BIN` 指定；ZCode Node 可通过 `WQ_NODE_BIN` 指定。定时器不继承交互 shell 的环境，必要时在自己的 launchd 环境中配置。
 

@@ -61,6 +61,11 @@ def render(root, runtime):
 
 
 def main():
+    if sys.platform.startswith("linux"):
+        from setup_linux import main as linux_main
+        return linux_main()
+    if sys.platform != "darwin":
+        raise SystemExit("On Windows, run this project inside WSL2 Ubuntu.")
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--root',type=Path,default=Path(__file__).resolve().parents[1])
     p.add_argument('--runtime',type=Path,default=Path.home()/'.local/share/autowq-runtime')

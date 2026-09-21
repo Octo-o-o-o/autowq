@@ -13,8 +13,9 @@ PYTHONPATH=src python3 -m unittest discover -s tests
 ./wq tasks
 ```
 
-`setup_local.py` 只生成**全部关闭**的本机配置、macOS 沙箱入口和 launchd 文件，拒绝覆盖已有部署，不登录、不调用模型、不安装定时器。已有运行实例无需执行此初始化。
+`setup_local.py` 只生成**全部关闭**的本机配置、对应平台的隔离入口与调度文件（macOS launchd，Linux/WSL2 systemd + Docker），拒绝覆盖已有部署，不登录、不调用模型、不安装定时器。已有运行实例无需执行此初始化。
 
+- [Linux 服务器与 Windows WSL2 部署](docs/linux-windows.md)
 - [运行、配置、重试与恢复](docs/operations.md)
 - [架构、数据边界和验收层次](docs/architecture.md)
 - [本次检查与交付记录](docs/release-review.md)
