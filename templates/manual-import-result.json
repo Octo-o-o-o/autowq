@@ -1,0 +1,37 @@
+{
+  "_comment": "manual-import 模板：在 BRAIN UI 完成一次真实模拟后逐项填写，存到 ~/.worldquant-pilot/imports/ 再导入。synthetic 必须保持 false 且导入时用 --real。带 <...> 处全部替换为真实值；填完先 `wq validate result <file>` 再 `wq import-results <file> --real`。此文件不发给 Grok/Devin。",
+  "schema": "wq.imported-result/v1",
+  "synthetic": false,
+  "source": "manual",
+  "simulation": {
+    "remote_id": "<平台返回的真实模拟 ID>",
+    "observed_at": "<模拟完成时间 ISO8601，如 2026-09-21T10:30:00+08:00>",
+    "expression": "<实际提交模拟的完整表达式>",
+    "config": {
+      "region": "USA",
+      "universe": "TOP3000",
+      "delay": 1,
+      "neutralization": "<实际值>",
+      "decay": 0,
+      "truncation": 0.0,
+      "data_version": "<平台显示的数据版本，无则删此行>",
+      "catalog_verified": false
+    },
+    "stats": {
+      "sharpe": 0.0,
+      "fitness": 0.0,
+      "turnover": 0.0,
+      "returns": 0.0
+    },
+    "checks": {
+      "passed": true,
+      "raw": {"_note": "原样粘贴平台返回的检查项明细；不换算不省略"}
+    },
+    "pnl": {
+      "kind": "<cumulative|daily —— 按平台导出语义如实填，累计值才允许差分>",
+      "points": [{"date": "YYYY-MM-DD", "value": 0.0}]
+    }
+  },
+  "quality": {"status": "unknown", "notes": "<质量评审结论后补；pass/fail/unknown>"},
+  "evidence": {"note": "<记录方式：如 BRAIN UI 手录 + 截图文件名>"}
+}

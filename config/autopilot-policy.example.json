@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "scope": "exploratory_only_no_submission",
+  "verified_at": null,
+  "valid_until": null,
+  "source": "REPLACE_WITH_VERIFIED_SOURCE",
+  "bindings": {
+    "daily_return": {
+      "expression": "",
+      "fields": [],
+      "source": ""
+    },
+    "activity_rank": {
+      "expression": "",
+      "fields": [],
+      "source": ""
+    },
+    "cashflow_strength": {
+      "expression": "",
+      "fields": [],
+      "source": ""
+    }
+  },
+  "evidence_files": [],
+  "settings": {},
+  "limits": "Only exploratory screens. No automatic submission."
+}

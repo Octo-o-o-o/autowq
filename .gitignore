@@ -1,0 +1,37 @@
+# 运行时状态与日志（注意：本文件只防误提交，不构成访问控制；
+# 凭证应放在 config.paths.private_dir，默认 ~/.worldquant-pilot，权限 0700）
+var/
+*.db
+*.db-wal
+*.db-shm
+__pycache__/
+*.pyc
+config/config.json
+.DS_Store
+
+# Local account evidence, approvals, real Alpha artifacts and machine-specific deployment.
+config/profiles.json
+config/autopilot-policy.json
+CURRENT_STATE.md
+BLOCKERS.md
+reports/
+automation/
+research/
+prompts/
+launchd/
+docs/*2026*.md
+docs/plan/
+docs/README.md
+docs/Provider_Presets.md
+docs/ops-launchd.md
+docs/first-real-loop.md
+docs/manual-import.md
+.env
+.env.*
+*.cookies
+*.pem
+*.key
+.venv/
+build/
+dist/
+*.egg-info/

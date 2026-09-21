@@ -1,0 +1,101 @@
+{
+  "account_alias": "default",
+  "paths": {
+    "db": "var/wq.db",
+    "run_dir": "var/run",
+    "private_dir": "~/.worldquant-pilot"
+  },
+  "limits": {
+    "sims_per_week": 24,
+    "sim_concurrency": 1,
+    "grok_calls_per_week": 3,
+    "devin_tickets_per_week": 1,
+    "max_repair_attempts_per_incident": 2,
+    "families_max": 3,
+    "configs_per_family_max": 4,
+    "rate_limit_max_wait_s": 900
+  },
+  "budgets": {
+    "simulation": {
+      "enabled": false,
+      "remaining": null,
+      "unit": "unknown"
+    },
+    "grok": {
+      "enabled": false,
+      "remaining": null,
+      "unit": "unknown"
+    },
+    "devin": {
+      "enabled": false,
+      "remaining": null,
+      "unit": "unknown"
+    },
+    "cursor": {
+      "enabled": false,
+      "remaining": null,
+      "unit": "calls"
+    },
+    "zcode": {
+      "enabled": false,
+      "remaining": null,
+      "unit": "calls"
+    }
+  },
+  "adapters": {
+    "brain": {
+      "mode": "manual",
+      "endpoint": null,
+      "verified": false
+    }
+  },
+  "models": {
+    "grok": {
+      "bin": "~/.grok/bin/grok",
+      "enabled": false,
+      "timeout_s": 900,
+      "workdir": null,
+      "extra_args": []
+    },
+    "devin": {
+      "bin": "~/.local/bin/devin",
+      "enabled": false,
+      "timeout_s": 1800,
+      "workdir": null,
+      "extra_args": []
+    },
+    "cursor": {
+      "enabled": false,
+      "timeout_s": 900
+    },
+    "zcode": {
+      "enabled": false,
+      "timeout_s": 900
+    }
+  },
+  "debug_authorization": {
+    "enabled": false,
+    "starts_at": null,
+    "expires_at": null,
+    "agents": [],
+    "unlimited": false,
+    "evidence": ""
+  },
+  "brain_api": {
+    "enabled": false,
+    "authorized_until": null
+  },
+  "routing": {
+    "profiles_file": "config/profiles.json",
+    "work_root": "{runtime}/jobs",
+    "authorized_until": null
+  },
+  "autopilot": {
+    "enabled": false,
+    "policy_file": "config/autopilot-policy.json",
+    "interval_s": 3600,
+    "error_cooldown_s": 3600,
+    "max_cycles_per_day": 4,
+    "max_simulations_per_week": 24
+  }
+}

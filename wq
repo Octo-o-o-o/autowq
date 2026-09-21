@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# wq — WorldQuant 研究试点本地工具入口。纯标准库，无第三方依赖。
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m wq "$@"

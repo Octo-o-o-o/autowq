@@ -1,0 +1,32 @@
+{
+  "schema": "wq.imported-result/v1",
+  "synthetic": true,
+  "source": "fixture",
+  "simulation": {
+    "remote_id": "FIXTURE-SIM-001",
+    "observed_at": "2026-09-20T12:00:00+00:00",
+    "expression": "rank(synthetic_signal) * 0.5",
+    "config": {
+      "region": "USA",
+      "universe": "TOP3000",
+      "delay": 1,
+      "neutralization": "MARKET",
+      "decay": 4,
+      "truncation": 0.08,
+      "data_version": "fixture-v0",
+      "catalog_verified": false
+    },
+    "stats": {"sharpe": 1.31, "fitness": 1.02, "turnover": 0.18, "returns": 0.04},
+    "checks": {"passed": true, "raw": {"note": "fixture checks, 非平台官方结果"}},
+    "pnl": {
+      "kind": "cumulative",
+      "points": [
+        {"date": "2024-01-02", "value": 0.0},
+        {"date": "2024-01-03", "value": 0.4},
+        {"date": "2024-01-05", "value": 0.1}
+      ]
+    }
+  },
+  "quality": {"status": "pass", "notes": "fixture 数据，仅用于验证管线"},
+  "evidence": {"note": "synthetic fixture — 不得用于真实研究/收益报告"}
+}

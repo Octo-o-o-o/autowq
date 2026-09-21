@@ -1,0 +1,14 @@
+{
+  "schema": "wq.research-card/v1",
+  "hypothesis_id": "SYNTH-H1",
+  "family_id": "fam-synth-h1",
+  "mechanism": "合成示例：盈利质量与估值差异（仅为契约演示，非可执行假设）",
+  "sources": ["fixture — 无真实字段目录"],
+  "variants": [
+    {"variant_id": "v1", "config": {"region": "USA", "universe": "TOP3000", "delay": 1, "catalog_verified": false}},
+    {"variant_id": "v2", "config": {"region": "USA", "universe": "TOP3000", "delay": 5, "catalog_verified": false}}
+  ],
+  "failure_modes": ["合成示例，无实证"],
+  "max_trials": 4,
+  "provenance": {"synthetic": true, "origin": "fixture"}
+}
