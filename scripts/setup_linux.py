@@ -48,7 +48,7 @@ def render(root,runtime):
     for path,data in [(targets[0],cfg),(targets[1],profiles),(runtime/'containers.json',containers)]:
         path.write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n');path.chmod(0o600)
     shutil.copyfile(root/'config/autopilot-policy.example.json',targets[2])
-    service='\n'.join(['[Unit]','Description=autowq single research queue tick','After=network-online.target','Wants=network-online.target','','[Service]','Type=oneshot','WorkingDirectory='+systemd_quote(root),
+    service='\n'.join(['[Unit]','Description=autowq single research queue tick','After=network-online.target','Wants=network-online.target','','[Service]','Type=oneshot','WorkingDirectory='+str(root).replace('%','%%'),
         'ExecStart='+systemd_quote(sys.executable)+' -m wq run-once --lease 3600',
         'Environment='+systemd_quote('PYTHONPATH='+str(root/'src')),'Environment=PYTHONUNBUFFERED=1',
         'TimeoutStartSec=3700','TimeoutStopSec=15','KillMode=control-group','UMask=0077','SuccessExitStatus=3 6',''])

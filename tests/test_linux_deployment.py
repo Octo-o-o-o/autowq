@@ -33,6 +33,7 @@ class LinuxDeploymentTests(unittest.TestCase):
         self.assertNotIn('zcode',profiles['providers']);self.assertEqual(profiles['default'],'core-only')
         self.assertIn('OnUnitInactiveSec=60',(self.runtime/'autowq.timer').read_text())
         self.assertIn('KillMode=control-group',(self.runtime/'autowq.service').read_text())
+        self.assertIn('WorkingDirectory='+str(self.root)+'\n',(self.runtime/'autowq.service').read_text())
         with self.assertRaises(ValueError):linux.render(self.root,self.runtime)
 
     def test_container_mounts_only_attempt_and_one_home(self):
