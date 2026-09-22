@@ -190,6 +190,8 @@ def provider(conn,tid):
 
 
 def make_job(conn,cfg,cid,role,text,exclude=None):
+    from . import workflow
+    text=workflow.customize(cfg,role,text)
     root=Path(cfg.private_dir)/'autopilot'/str(cid);root.mkdir(parents=True,exist_ok=True,mode=0o700)
     prompt=root/(role+'.md');prompt.write_text(text);prompt.chmod(0o600)
     # 仅这份公开概念提示进入受沙箱限制的副本。
@@ -334,7 +336,8 @@ def advance(conn,cfg,row,p):
         run=conn.execute('SELECT alpha_id FROM brain_runs WHERE task_id=?',(t['task_id'],)).fetchone()
         sim=conn.execute('SELECT status FROM simulations WHERE remote_id=? AND synthetic=0',(run[0],)).fetchone() if run else None
         if not sim:raise ValueError('缺真实入账结果')
-        if cfg.get('research_feedback','enabled'):
+        from . import workflow
+        if cfg.get('research_feedback','enabled') and workflow.stage_enabled(cfg,'feedback'):
             ft,_=feedback.enqueue(conn,cfg,run[0])
             state=task(conn,ft)['status']
             if state in ACTIVE_TASKS:
@@ -375,6 +378,9 @@ def advance(conn,cfg,row,p):
         if provider(conn,row['research_task'])==provider(conn,row['review_task']):raise ValueError('研究和审查必须来自不同渠道')
         if not validate_review(artifact(conn,t['task_id']),row['candidate_hash']):
             finish(conn,cfg,row,'模型审查拒绝，不回测');return
+        from . import workflow
+        if not workflow.stage_enabled(cfg,"simulate"):
+            finish(conn,cfg,row,"高级流程仅研究与审查，本轮不回测");return
         admit(conn,cfg,row,p)
 
 
@@ -433,10 +439,13 @@ def tick(conn,cfg):
         cid=cur.lastrowid
         from . import feedback
         context=None;public_plan=None
-        if cfg.get('research_feedback','enabled'):
+        from . import workflow
+        if cfg.get('research_feedback','enabled') and workflow.stage_enabled(cfg,'feedback'):
             feedback.setup(conn)
             context=feedback.model_context(conn)
-            plan=feedback.next_combination(conn,cfg.get('research_feedback','max_combination_plans',default=2))
+            advanced=workflow.load(cfg)
+            combo=advanced['combinations'] if advanced else {'enabled':True,'max_plans':cfg.get('research_feedback','max_combination_plans',default=2)}
+            plan=feedback.next_combination(conn,combo['max_plans']) if combo['enabled'] else None
             if plan:
                 conn.execute('INSERT INTO combination_plans VALUES(?,?,?,?)',(plan['pair_key'],cid,json.dumps(plan),util.now_iso()))
                 public_plan={k:plan[k] for k in ('parent_cycles','ast','experiment')}

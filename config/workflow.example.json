@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "name": "My research workflow",
+  "routes": {
+    "research": [
+      "grok"
+    ],
+    "review": [
+      "devin"
+    ],
+    "engineering": [
+      "devin"
+    ]
+  },
+  "stages": [
+    {
+      "id": "research",
+      "enabled": true,
+      "prompt": ""
+    },
+    {
+      "id": "review",
+      "enabled": true,
+      "prompt": ""
+    },
+    {
+      "id": "simulate",
+      "enabled": true,
+      "prompt": ""
+    },
+    {
+      "id": "feedback",
+      "enabled": true,
+      "prompt": ""
+    },
+    {
+      "id": "pre_submit",
+      "enabled": true,
+      "prompt": ""
+    }
+  ],
+  "combinations": {
+    "enabled": true,
+    "max_plans": 2
+  }
+}

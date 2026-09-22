@@ -29,6 +29,7 @@ def render(root, runtime, binaries=None):
     quote = lambda p: json.dumps(str(p))
     denied = [root, private, home/'Downloads', home/'Library/Application Support/Google/Chrome']
     writes = [jobs, home/'.grok', home/'.local/share/devin', home/'.config/devin',
+              home/'.claude', home/'.claude.json', home/'.codex', home/'.gemini', home/'.copilot', home/'.qwen', home/'.config/opencode', home/'.local/share/opencode',
               home/'.cache', home/'.cursor', home/'.local/share/cursor-agent',
               home/'.zcode', home/'.zcode-ai', home/'.zai',
               home/'Library/Application Support/ZCode', home/'Library/Logs/ZCode',

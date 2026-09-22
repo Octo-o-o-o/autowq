@@ -124,6 +124,13 @@ def for_call(call: dict, usage_dirs: list[str] | None = None) -> dict | None:
     Devin 的 `--export` 文件写在其 workdir；该目录通常与本地日志目录
     不同，所以调用方可传入当前配置中的 workdir 作为额外候选路径。
     """
+    log = call.get("log_path")
+    if log and Path(log).is_file():
+        with open(log, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if line.startswith('{"wq_usage":'):
+                    try: return json.loads(line)["wq_usage"]
+                    except (ValueError, KeyError): pass
     if call.get("agent") == "grok":
         return grok_log(call.get("log_path"))
     if call.get("agent") != "devin":
@@ -162,7 +169,8 @@ def display(value: dict | None, running: bool = False) -> str:
     inp = value.get("input_tokens")
     cache = value.get("cache_read_tokens")
     out = value.get("output_tokens")
-    parts = f"总 {total:,}（输入 {inp:,}，缓存读 {cache:,}，输出 {out:,}）"
+    fmt = lambda n: f"{n:,}" if isinstance(n, int) and n >= 0 else "未知"
+    parts = f"总 {fmt(total)}（输入 {fmt(inp)}，缓存读 {fmt(cache)}，输出 {fmt(out)}）"
     cost = value.get("cost_usd")
     if isinstance(cost, (int, float)):
         money = f"${cost:.4f}"

@@ -8,7 +8,7 @@ A local WorldQuant BRAIN research workflow: propose a hypothesis → review thro
 
 ## First run
 
-Requirements: Python 3.11+, Git, and model CLIs installed and authenticated using your own accounts. Runtime dependencies are Python standard library only. macOS is supported; Linux and Windows WSL2 use Docker-isolated providers. Native Windows is not supported.
+Requirements: Python 3.11+, Git, and your own CLI subscription accounts or API keys. Runtime dependencies are Python standard library only. macOS is supported; Linux and Windows WSL2 use Docker-isolated providers. Native Windows is not supported.
 
 ```sh
 git clone https://github.com/Octo-o-o-o/autowq.git
@@ -22,7 +22,16 @@ cd autowq
 
 The wizard detects host executables and lets you select providers, model IDs, research/review/engineering roles and optional reasoning effort. It generates local configuration and isolated launchers. **It never overwrites an existing deployment, starts paid inference or installs a scheduler.** The default language is Chinese for Chinese locales and English otherwise. Choose another language at the first prompt or pass `--lang zh/en`. The wizard includes vendor CLI and BRAIN login, with the [official registration URL](https://platform.worldquantbrain.com/sign-up). You can skip and resume with `./wq onboard --login-only`. A successful login command does not verify model entitlement.
 
-Built-in adapters cover Grok Build, Devin and Cursor CLI, plus the ZCode app on macOS. One provider supports offline or single-provider work; continuous research requires two distinct providers. Another CLI requires an adapter, not just an arbitrary provider name. Most operational CLI output is currently Chinese; structured output is available for supported commands.
+Adapters include Grok Build, Devin, Cursor, ZCode, plus Claude Code, Codex, Gemini CLI, GitHub Copilot CLI, Qwen Code and OpenCode. Standard OpenAI Chat Completions/Responses and Anthropic Messages APIs accept manual Base URL, key references and model IDs. See the **[bilingual provider/workflow guide](docs/providers-workflow.md)** for model discovery, platform support and verification limits. Continuous research still requires distinct review providers.
+
+Advanced mode offers versioned JSON, a step-by-step CLI editor and natural-language AI draft editing. Configure role routes, additional prompts, simulation/feedback switches and bounded combinations, then use `workflow validate/diff/apply`. Existing budgets and submission gates stay enforced.
+
+```bash
+./wq providers list
+./wq providers models devin
+./wq workflow init --output config/workflow.draft.json
+./wq workflow edit config/workflow.draft.json --output config/workflow.edited.json
+```
 
 Follow the **[complete bilingual onboarding checklist](docs/onboarding.md)**: sign in → configure budgets and expiration → verify BRAIN access → verify field evidence → validate one real cycle → install scheduling. Models, API access, automatic research and submissions start disabled. Evidence templates deliberately remain unverified.
 

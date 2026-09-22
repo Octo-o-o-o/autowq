@@ -1,5 +1,7 @@
 # 首次使用 / First-run onboarding
 
+新增订阅CLI、手动API与高级JSON流程，请同时阅读 [Provider与高级流程指南 / Providers and advanced workflows](providers-workflow.md)。
+
 [中文 README](../README.md) · [English README](../README.en.md)
 
 ## 1. 检测并选择 / Detect and choose
@@ -143,9 +145,9 @@ Do not rerun onboarding over an existing deployment. Stop new cycles, let active
 
 ## 通用命令与导出 / Common commands and export
 
-`wq help [command ...]`等价于对应命令的`--help`，支持嵌套，如`wq help brain submit`。`wq --version`显示版本。`budget`支持所有内置渠道（simulation/grok/devin/cursor/zcode），启用预算不代替模型开关。
+`wq help [command ...]`等价于对应命令的`--help`，支持嵌套，如`wq help brain submit`。`wq --version`显示版本。`budget`支持所有内置渠道（simulation、内置渠道及已配置的自定义渠道），启用预算不代替模型开关。
 
-`wq help [command ...]` is equivalent to command --help and supports nested commands such as `wq help brain submit`. `wq --version` shows the version. Budget configuration accepts every built-in provider (simulation/grok/devin/cursor/zcode); enabling a budget does not enable a model.
+`wq help [command ...]` is equivalent to command --help and supports nested commands such as `wq help brain submit`. `wq --version` shows the version. Budget configuration accepts every built-in provider (simulation, built-in and configured custom providers); enabling a budget does not enable a model.
 
 ```sh
 ./wq export --kind summary --output exports/summary.json

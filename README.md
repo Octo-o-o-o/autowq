@@ -8,7 +8,7 @@
 
 ## 第一次使用
 
-需要 Python 3.11+、Git，以及你自己安装和登录的模型 CLI。运行时只使用 Python 标准库。支持 macOS；Linux/Windows WSL2 使用 Docker 隔离模型进程。原生 Windows 暂不支持。
+需要 Python 3.11+、Git，以及你自己的模型 CLI 订阅账号或 API Key。运行时只使用 Python 标准库。支持 macOS；Linux/Windows WSL2 使用 Docker 隔离模型进程。原生 Windows 暂不支持。
 
 ```sh
 git clone https://github.com/Octo-o-o-o/autowq.git
@@ -22,7 +22,16 @@ cd autowq
 
 向导检测宿主 CLI，让你选择渠道、模型 ID、研究/审查/工程角色及可选思考强度。它生成本机配置与隔离运行入口，**不覆盖已有部署、不启动付费推理、不安装调度器**。默认语言按环境判断：中文环境用中文，其余用英文；第一步可以切换，也可用 `--lang zh/en` 显式指定。向导包含供应商CLI与BRAIN登录，并提供[官方注册链接](https://platform.worldquantbrain.com/sign-up)。可以跳过登录，随后用 `./wq onboard --login-only` 继续。模型是否能用取决于你自己的账号；登录命令成功不等于验证了模型权限。
 
-支持的内置适配器：Grok Build、Devin、Cursor CLI，另有 macOS ZCode 应用入口。可以只选一个渠道做离线或单模型工作；持续自动研究必须有两个不同渠道，不能把同一模型自审当成独立检查。其他 CLI 需要实现适配器，而非任意填一个名称。
+支持 Grok Build、Devin、Cursor、ZCode，以及新增 Claude Code、Codex、Gemini CLI、GitHub Copilot CLI、Qwen Code、OpenCode。支持 OpenAI Chat Completions/Responses 和 Anthropic Messages API，可手动配置 Base URL、Key 和模型。不同渠道的模型列举、平台支持与核验范围见 **[Provider与高级流程指南（中英）](docs/providers-workflow.md)**。持续自动研究仍要求不同渠道审查。
+
+高级模式提供规范 JSON、CLI 分步骤编辑和自然语言 AI 编辑草稿；可以调整角色路由、补充 Prompt、模拟/反馈开关和有限组合。统一通过 `workflow validate/diff/apply` 应用，预算和提交质量门槛继续生效。
+
+```bash
+./wq providers list
+./wq providers models devin
+./wq workflow init --output config/workflow.draft.json
+./wq workflow edit config/workflow.draft.json --output config/workflow.edited.json
+```
 
 接下来请按 **[完整 onboarding 操作单（中英双语）](docs/onboarding.md)** 完成：本人登录 → 本地预算/期限 → BRAIN 登录与权限 → 字段证据 → 单轮真实核验 → 安装调度。初始模型、API、自动研究和提交全部关闭，数据证据模板故意保持未验证。
 

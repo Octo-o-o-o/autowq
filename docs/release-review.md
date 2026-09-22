@@ -56,3 +56,13 @@
 验证：274项离线测试，272通过、2项Docker集成跳过。新增用例覆盖locale优先级、英文嵌套帮助、导出字段/权限/覆盖保护、其他Provider预算和交互语言/登录状态恢复。登录流程用替代服务返回验证，不声称替新用户完成真实注册或登录。上一提交的GitHub全部检查已通过；本次远端结果以对应Actions为准。
 
 同一暂存内容在无本机配置的干净副本再次通过274项检查（272通过、2跳过）。另实测中文locale下非交互初始化默认中文、显式英文帮助、合成结果导入、默认真实结果JSON导出为空以及显式包含合成结果的CSV导出。测试全程使用临时配置/运行目录，没有重新登录现有生产账号。
+
+## Provider and advanced-workflow extension (2026-09-22)
+
+- Added six macOS CLI JSON transports (Claude Code, Codex, Gemini, Copilot, Qwen Code, OpenCode), installation discovery, vendor model listing where supported, and explicit model selection. Existing CLI routes remain unchanged. Devin's installed CLI requires `models list`; that read-only listing succeeded on this host.
+- Added OpenAI Chat Completions, OpenAI Responses and Anthropic Messages transports with configurable endpoints/model IDs, private key references, no credential-forwarding redirects, result validation, queue budgets and token accounting. Dollar cost stays unknown when not supplied.
+- Added a versioned workflow JSON/schema, manual and interactive editing, queued AI draft editing, validation/diff/apply, idle-queue/runner-lock checks and real routing/prompt/stage/combination integration. Required review and submission gates stay enforced.
+- Updated both READMEs and the bilingual provider/workflow guide, including platform limits and configuration versus account verification boundaries.
+- Focused integration: 15 tests passed, including local HTTP wire requests for all three APIs, actual subprocess CLI fixtures, actual macOS sandbox execution with denied project reads, no-secret HTTP error output, budget enforcement, usage rendering and workflow application. No production API inference or newly supported CLI inference was executed. Existing live account/configuration was not edited.
+
+- Final clean-source full suite: 289 discovered, 287 passed, 2 optional Docker tests skipped. Wheel build passed using isolated build dependencies. The first no-build-isolation attempt failed because the host Python lacks setuptools; no global dependency was installed. macOS sandbox integration passed; Linux CI skips that one host-specific test.

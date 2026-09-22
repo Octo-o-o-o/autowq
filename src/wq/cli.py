@@ -60,10 +60,24 @@ def cmd_doctor(args) -> int:
         exists, mode_ok = True, True
     add("private_dir 0700", exists and mode_ok,
         f"{priv} {'0700' if mode_ok else '(缺失或权限不对；--fix-private 可创建)'}")
-    for agent in ("grok", "devin"):
+    provider_defs = {}
+    profile_path = cfg.resolve(cfg.get('routing','profiles_file',default='config/profiles.json'))
+    if os.path.isfile(profile_path):
+        provider_defs = util.read_json(profile_path).get('providers',{})
+    for agent in (provider_defs or cfg.get('models',default={})):
         m = cfg.model(agent)
-        b = m.get("bin", "")
-        add(f"{agent} bin 存在", os.path.isfile(b) and os.access(b, os.X_OK), b)
+        transport = provider_defs.get(agent,{}).get('transport',{})
+        b = transport.get('binary') or m.get('bin','')
+        if transport.get('kind') == 'api':
+            from .provider_runtime import validate_api
+            try:
+                validate_api(transport)
+                key_file=transport.get('api_key_file')
+                has_key=bool(os.environ.get(transport.get('api_key_env',''))) or bool(key_file and os.path.isfile(os.path.expanduser(key_file))) or transport.get('allow_no_key',False)
+                add(f'{agent} API configuration',has_key,'Key reference present; access not verified' if has_key else 'API key missing')
+            except ValueError as exc: add(f'{agent} API configuration',False,str(exc))
+        else:
+            add(f"{agent} bin 存在", os.path.isfile(b) and os.access(b, os.X_OK), b)
         if args.probe and os.path.isfile(b):
             import subprocess
             try:
@@ -307,6 +321,9 @@ def cmd_budget(args) -> int:
     cfg = Config.load(args.config, os.getcwd())
     if not cfg.path:
         raise WqExit(INVALID, "无 config.json；先 cp config/config.example.json config/config.json")
+    from .providers import NAMES
+    if args.name != "simulation" and args.name not in NAMES and args.name not in cfg.get("models", default={}):
+        raise WqExit(INVALID, "Unknown provider / 未配置渠道")
     b = cfg.data["budgets"].setdefault(args.name, {})
     if args.enable:
         b["enabled"] = True
@@ -561,6 +578,9 @@ def build_parser(lang=None) -> argparse.ArgumentParser:
     p.add_argument("--config", help="config.json 路径，默认 ./config/config.json")
     p.add_argument("--db", help="覆盖 SQLite 路径（测试用）")
     sub = p.add_subparsers(dest="cmd", required=True)
+    from . import providers, workflow
+    providers.add_parser(sub)
+    workflow.add_parser(sub)
 
     sub.add_parser('help',help=text(lang,'显示命令帮助：wq help [命令]','Show command help: wq help [command]'))
     s=sub.add_parser('login',help=text(lang,'登录BRAIN（含注册链接）','Sign in to BRAIN (includes registration URL)'))
@@ -697,7 +717,7 @@ def build_parser(lang=None) -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_account_stage)
 
     s = sub.add_parser("budget", help="设置预算闸门（写回 config.json）")
-    s.add_argument("name", choices=["simulation", "grok", "devin", "cursor", "zcode"])
+    s.add_argument("name", help="simulation or configured provider ID / 已配置渠道ID")
     g = s.add_mutually_exclusive_group()
     g.add_argument("--enable", action="store_true")
     g.add_argument("--disable", action="store_true")

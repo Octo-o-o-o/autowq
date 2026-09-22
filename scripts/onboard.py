@@ -10,23 +10,7 @@ import subprocess
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"src"))
 from wq.i18n import default_language, preferred_language
 
-NAMES = ('grok', 'devin', 'cursor', 'zcode')
-CANDIDATES = {
-    'grok': ('grok', '~/.grok/bin/grok'),
-    'devin': ('devin', '~/.local/bin/devin'),
-    'cursor': ('cursor-agent', '~/.local/bin/cursor-agent'),
-    'zcode': ('/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs',),
-}
-
-
-def discover():
-    result = {}
-    for name, paths in CANDIDATES.items():
-        for item in paths:
-            p = shutil.which(item) or os.path.expanduser(item)
-            if Path(p).is_file() and (os.access(p, os.X_OK) or name == 'zcode'):
-                result[name] = str(Path(p).absolute()); break
-    return result
+from wq.providers import NAMES, CLI, LEGACY, PROTOCOLS, discover, models as list_models, api_definition, definition, install_runtime, save_key, inventory
 
 
 def assignments(items, providers):
@@ -39,19 +23,26 @@ def assignments(items, providers):
     return result
 
 
-def configure(root, runtime, selected, models, binaries, roles, efforts, platform=None):
+def configure(root, runtime, selected, models, binaries, roles, efforts, platform=None, apis=None):
     platform = platform or sys.platform
+    apis = apis or {}
+    for name in selected:
+        if name in PROTOCOLS:
+            apis.setdefault(name, api_definition(name, models.get(name,'')))
+            from wq.provider_runtime import validate_api
+            validate_api(apis[name])
     if platform not in ('darwin', 'linux'): raise ValueError('Use macOS, Linux or Windows WSL2.')
     if not selected or len(set(selected)) != len(selected) or any(n not in NAMES for n in selected):
         raise ValueError('Choose supported, non-duplicate providers.')
-    if platform == 'linux' and 'zcode' in selected: raise ValueError('ZCode has no supported Linux launcher.')
+    if platform == 'linux' and any(n not in ('grok','devin','cursor',*PROTOCOLS) for n in selected):
+        raise ValueError('Linux wizard supports grok/devin/cursor Docker and standard APIs; other CLI adapters currently require macOS.')
     if any(n not in selected for n in roles.values()): raise ValueError('Role provider must be selected.')
     if len(selected)>1 and roles['research']==roles['review']:
         raise ValueError('Choose a different provider for review.')
     for name in selected:
         if name != 'zcode' and not models.get(name): raise ValueError('Explicit model ID required: '+name)
         if name=='zcode' and models.get(name): raise ValueError('ZCode uses its app configuration; model override is unsupported.')
-        if platform=='darwin' and name!='zcode':
+        if platform=='darwin' and name in CLI and name!='zcode':
             binary=Path(binaries.get(name,''))
             if not binary.is_absolute() or not binary.is_file() or not os.access(binary,os.X_OK):
                 raise ValueError('Executable not found; install CLI or supply --binary: '+name)
@@ -73,16 +64,21 @@ def configure(root, runtime, selected, models, binaries, roles, efforts, platfor
         'routes':routes,'retries':3,'retry_delays_s':[30,60,120]}}
     profiles['default']='local'
     containers=json.loads((runtime/'containers.json').read_text()) if platform=='linux' else None
+    if platform=='darwin': install_runtime(runtime)
     for name in selected:
-        definition=profiles['providers'][name]
-        if name in models: definition['model']=models[name]
+        if name not in LEGACY:
+            profiles['providers'][name]=definition(name,models[name],binaries.get(name),apis.get(name))
+            cfg['models'][name]={'enabled':False,'timeout_s':profiles['providers'][name]['timeout_s']}
+            cfg['budgets'][name]={'enabled':False,'remaining':None,'unit':'calls'}
+        provider_def=profiles['providers'][name]
+        if name in models: provider_def['model']=models[name]
         if name in ('grok','devin'):
-            argv=containers['providers'][name]['argv'] if containers else definition['argv']
+            argv=containers['providers'][name]['argv'] if containers else provider_def['argv']
             argv.extend(['--model','{model}'])
             if name in efforts: argv.extend(['--reasoning-effort',efforts[name]])
-        definition['label']=name+' / '+models.get(name,'app-configured model')
+        provider_def['label']=name+' / '+models.get(name,'app-configured model')
         cfg['models'][name]['enabled']=False
-        if platform=='darwin' and name in binaries: cfg['models'][name]['bin']=str(runtime/'launchers'/name)
+        if platform=='darwin' and name in LEGACY and name in binaries: cfg['models'][name]['bin']=str(runtime/'launchers'/name)
         if name in ('grok','devin'):
             cfg['models'][name]['extra_args']=['--model',models[name]]
             if name in efforts: cfg['models'][name]['extra_args']+=['--reasoning-effort',efforts[name]]
@@ -101,7 +97,10 @@ def configure(root, runtime, selected, models, binaries, roles, efforts, platfor
 
 BRAIN_REGISTER_URL = 'https://platform.worldquantbrain.com/sign-up'
 PROVIDER_URLS = {'grok':'https://grok.com/', 'devin':'https://app.devin.ai/',
-                 'cursor':'https://cursor.com/', 'zcode':'https://z.ai/'}
+                 'cursor':'https://cursor.com/', 'zcode':'https://z.ai/',
+                 'claude':'https://claude.ai/', 'codex':'https://chatgpt.com/',
+                 'gemini':'https://geminicli.com/', 'copilot':'https://github.com/features/copilot',
+                 'qwen':'https://qwenlm.github.io/qwen-code-docs/', 'opencode':'https://opencode.ai/'}
 
 
 def login_flow(root, lang):
@@ -115,6 +114,8 @@ def login_flow(root, lang):
     say('请在浏览器自行注册、验证邮箱并接受条款；已有账号可直接登录。','Register, verify your email and accept terms yourself in the browser, or sign in with your existing account.')
     status=info.get('login',{})
     for name in providers:
+        if name in PROTOCOLS:
+            say(name+'：使用API Key，非订阅登录；环境变量或私有文件。',name+': API key, separate from subscription login; environment variable or private file.');continue
         print(name+': '+PROVIDER_URLS.get(name,''))
         if ask(f'现在登录 {name}？[y/N]：',f'Sign in to {name} now? [y/N]: ')!='y':
             status.setdefault(name,'pending');continue
@@ -123,10 +124,10 @@ def login_flow(root, lang):
             if not runtime: say('缺少runtime；请查看部署指南。','Missing runtime; see the deployment guide.');continue
             cmd=[sys.executable,str(root/'scripts/provider_login.py'),name,'--config',str(Path(runtime)/'containers.json')]
             say('使用已构建的Docker镜像；缺镜像时先按文档构建。','Uses the configured Docker image; build it first if missing.')
-        elif name in ('grok','devin','cursor'):
+        elif name in CLI and CLI[name]['login'] is not None:
             binary=info.get('binaries',{}).get(name) or discover().get(name)
             if not binary: say('未找到CLI，先安装后用 --login-only 重试。','CLI missing. Install it and retry with --login-only.');status[name]='pending';continue
-            cmd=[binary]+({'grok':['login'],'devin':['auth','login'],'cursor':['login']}[name])
+            cmd=[binary]+CLI[name]['login']
         else:
             say('请在供应商应用中完成登录；此向导不能验证该应用会话。','Sign in inside the vendor app; this wizard cannot verify its session.');status[name]='manual_unverified';continue
         try: code=subprocess.call(cmd,cwd=root)
@@ -159,7 +160,9 @@ def main(argv=None):
     p.add_argument('--skip-login',action='store_true',help='Skip interactive login and leave it pending')
     p.add_argument('--list',action='store_true',help='Detect host executables only; no writes or model calls')
     p.add_argument('--non-interactive',action='store_true')
-    p.add_argument('--providers',help='Comma-separated: grok,devin,cursor,zcode (macOS only)')
+    p.add_argument('--providers',help='Comma-separated: '+','.join(NAMES))
+    p.add_argument('--base-url',action='append',default=[],metavar='PROVIDER=URL')
+    p.add_argument('--key-env',action='append',default=[],metavar='PROVIDER=ENV_VAR')
     p.add_argument('--model',action='append',default=[],metavar='PROVIDER=MODEL_ID')
     p.add_argument('--binary',action='append',default=[],metavar='PROVIDER=/ABS/PATH')
     p.add_argument('--reasoning-effort',action='append',default=[],metavar='grok=xhigh')
@@ -174,7 +177,7 @@ def main(argv=None):
     zh=a.lang=='zh'
     say=lambda cn,en: print(cn if zh else en)
     ask=lambda cn,en: input(cn if zh else en).strip()
-    if a.list: print(json.dumps({'host_executables':found,'model_access_verified':False},ensure_ascii=False,indent=2));return 0
+    if a.list: print(json.dumps({'host_executables':found,'supported_providers':inventory(),'model_access_verified':False},ensure_ascii=False,indent=2));return 0
     try:
         if a.login_only:
             if a.non_interactive or not sys.stdin.isatty(): raise ValueError('Login requires an interactive terminal / 登录需要交互终端')
@@ -186,17 +189,26 @@ def main(argv=None):
         if sys.platform.startswith('linux'):
             say('Linux/WSL使用隔离Docker镜像；宿主CLI不会直接执行。后续需构建镜像并登录。','Linux/WSL uses isolated Docker images, not host CLIs. Build images and sign in afterward.')
         chosen=a.providers
-        if not chosen and not a.non_interactive:chosen=ask('选择渠道，逗号分隔（grok,devin,cursor；Mac另支持zcode）：','Providers, comma separated (grok,devin,cursor; zcode on Mac): ')
+        if not chosen and not a.non_interactive:chosen=ask('选择渠道，逗号分隔（'+','.join(NAMES)+'）：','Providers, comma separated ('+','.join(NAMES)+'): ')
         selected=[n.strip() for n in (chosen or '').split(',') if n.strip()]
         if not selected: raise ValueError('Select at least one provider.')
         models=assignments(a.model,selected);binaries=assignments(a.binary,selected);efforts=assignments(a.reasoning_effort,selected)
         binaries={**found,**binaries}
+        urls=assignments(a.base_url,selected);key_envs=assignments(a.key_env,selected);apis={}
         for name in selected:
             if name not in NAMES:raise ValueError('Unsupported provider: '+name)
             if name!='zcode' and name not in models and not a.non_interactive:
+                if name in CLI:
+                    try: print(json.dumps(list_models(name,binary=binaries.get(name)),ensure_ascii=False))
+                    except ValueError as exc: print(str(exc))
                 models[name]=ask(name+' 模型ID（使用本人CLI列出的可用ID）：',name+' model ID (as listed by your CLI): ')
-            if sys.platform=='darwin' and name!='zcode' and name not in binaries and not a.non_interactive:
+            if sys.platform=='darwin' and name in CLI and name!='zcode' and name not in binaries and not a.non_interactive:
                 binaries[name]=os.path.expanduser(ask(name+' 可执行文件绝对路径：',name+' executable absolute path: '))
+            if name in PROTOCOLS:
+                if not a.non_interactive:
+                    urls[name]=urls.get(name) or ask(name+' Base URL（回车官方默认，包含/v1）：',name+' Base URL (Enter for official default, include /v1): ')
+                    key_envs[name]=key_envs.get(name) or ask(name+' Key环境变量名（回车默认）：',name+' key environment variable (Enter for default): ')
+                apis[name]=api_definition(name,models.get(name,''),urls.get(name),key_envs.get(name))
         if 'grok' in selected and 'grok' not in efforts and not a.non_interactive:
             value=ask('Grok思考强度 low/medium/high/xhigh（回车使用CLI默认）：','Grok effort low/medium/high/xhigh (Enter for CLI default): ')
             if value:efforts['grok']=value
@@ -211,7 +223,15 @@ def main(argv=None):
         print(json.dumps({'providers':selected,'models':models,'roles':roles,'effort':efforts,'runtime':str(a.runtime)},ensure_ascii=False,indent=2))
         if not a.non_interactive and ask('写入？[y/N]：','Write configuration? [y/N]: ').lower()!='y':
             say('已取消，没有写入。','Cancelled; no files written.');return 0
-        cfg=configure(a.root,a.runtime,selected,models,binaries,roles,efforts)
+        cfg=configure(a.root,a.runtime,selected,models,binaries,roles,efforts,apis=apis)
+        if apis and not a.non_interactive:
+            import getpass
+            pp=a.root/'config/profiles.json';profiles=json.loads(pp.read_text())
+            for name in apis:
+                if ask(name+' 现在隐藏输入API Key并存到仓库外？[y/N]：',name+' enter hidden API key and save outside repository? [y/N]: ').lower()=='y':
+                    key_path=save_key(cfg['paths']['private_dir'],name,getpass.getpass('API key: '))
+                    profiles['providers'][name]['transport']['api_key_file']=key_path
+            pp.write_text(json.dumps(profiles,ensure_ascii=False,indent=2)+'\n')
         cfg['ui']={'language':a.lang}
         (a.root/'config/config.json').write_text(json.dumps(cfg,ensure_ascii=False,indent=2)+'\n')
         say('WorldQuant BRAIN 注册：'+BRAIN_REGISTER_URL,'WorldQuant BRAIN registration: '+BRAIN_REGISTER_URL)

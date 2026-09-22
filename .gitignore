@@ -38,3 +38,7 @@ dist/
 
 # Explicit local report exports
 exports/
+
+# Local editable workflows
+config/workflow*.json
+!config/workflow.example.json
