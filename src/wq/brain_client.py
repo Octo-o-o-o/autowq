@@ -8,12 +8,28 @@ import json
 import math
 import os
 from pathlib import Path
+import subprocess
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
 from .errors import AdapterError
 
 ORIGIN = 'https://api.worldquantbrain.com'
+KEYCHAIN_SERVICE = 'com.worldquant.wq.brain'
+
+
+def auto_login_options(cfg):
+    """Return (enabled, email, service) without ever carrying a password."""
+    env_enabled = os.environ.get('WQ_BRAIN_AUTO_LOGIN', '').strip().lower() in ('1', 'true', 'yes')
+    enabled = env_enabled or cfg.get('brain_api', 'auto_login', default=False) is True
+    email = os.environ.get('WQ_BRAIN_EMAIL', '').strip()
+    if not email:
+        email = str(cfg.get('brain_api', 'auto_login_email', default='') or '').strip()
+    service = os.environ.get('WQ_BRAIN_KEYCHAIN_SERVICE', '').strip()
+    if not service:
+        service = str(cfg.get('brain_api', 'keychain_service', default=KEYCHAIN_SERVICE) or KEYCHAIN_SERVICE).strip()
+    return enabled, email, service or KEYCHAIN_SERVICE
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -102,3 +118,58 @@ class BrainClient:
         self.jar.save(str(temp),ignore_discard=True,ignore_expires=False)
         os.replace(temp,self.path)
         return {'authenticated':True,'password_saved':False,'session_file':str(self.path)}
+
+    def login_from_keychain(self, username, service=KEYCHAIN_SERVICE):
+        """Authenticate using a macOS Keychain item; password never enters argv/env/logs."""
+        if sys.platform != 'darwin':
+            raise AdapterError(AdapterError.AUTH, 'Keychain自动登录仅支持macOS；请执行 wq brain login')
+        if not username:
+            raise AdapterError(AdapterError.AUTH, '缺少BRAIN邮箱；设置 WQ_BRAIN_EMAIL 或 brain_api.auto_login_email')
+        try:
+            result = subprocess.run(
+                ['/usr/bin/security', 'find-generic-password', '-a', username,
+                 '-s', service, '-w'],
+                check=False, capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.TimeoutExpired):
+            raise AdapterError(AdapterError.AUTH, '无法读取macOS Keychain；请执行 wq brain keychain-save') from None
+        # `security -w` appends a line ending; preserve any intentional spaces
+        # in the credential itself.
+        password = (result.stdout or '').rstrip('\r\n')
+        if result.returncode != 0 or not password:
+            raise AdapterError(AdapterError.AUTH, 'Keychain中没有BRAIN凭据；请执行 wq brain keychain-save')
+        return self.login(username, password)
+
+    def preflight(self, cfg):
+        """Run read-only OPTIONS, refreshing from Keychain once on AUTH."""
+        enabled, email, service = auto_login_options(cfg)
+        refreshed = False
+        if not list(self.jar):
+            if not enabled:
+                raise AdapterError(AdapterError.AUTH, 'BRAIN认证/权限未通过；需本人完成人机/身份验证')
+            self.login_from_keychain(email, service)
+            refreshed = True
+        try:
+            return self.request('OPTIONS', '/simulations')
+        except AdapterError as exc:
+            if exc.kind != AdapterError.AUTH or not enabled or refreshed:
+                raise
+            self.login_from_keychain(email, service)
+            return self.request('OPTIONS', '/simulations')
+
+    @staticmethod
+    def save_keychain(username, service=KEYCHAIN_SERVICE):
+        """Create/update a Keychain item; security prompts for the password on the TTY."""
+        if sys.platform != 'darwin':
+            raise AdapterError(AdapterError.AUTH, 'Keychain凭据保存仅支持macOS')
+        if not username:
+            raise ValueError('BRAIN邮箱不能为空')
+        try:
+            result = subprocess.run(
+                ['/usr/bin/security', 'add-generic-password', '-U', '-a', username,
+                 '-s', service, '-T', '/usr/bin/security', '-w'],
+                check=False, timeout=60)
+        except (OSError, subprocess.TimeoutExpired):
+            raise AdapterError(AdapterError.AUTH, '无法写入macOS Keychain') from None
+        if result.returncode != 0:
+            raise AdapterError(AdapterError.AUTH, 'macOS Keychain未保存BRAIN凭据')
+        return {'saved': True, 'service': service, 'account': username, 'password_saved': False}

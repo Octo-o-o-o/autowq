@@ -14,12 +14,12 @@ Grok、Devin 和 Cursor 官方文档均提供 Linux 安装途径。项目此版�
 
 ## Linux 初始化
 
-先准备 Python 3.11+、Git、Docker Engine 和可用的 systemd 用户会话；无需桌面环境。仓库是私有的，拉取需你自己的 GitHub 权限。
+先准备 Python 3.11+、Git、Docker Engine 和可用的 systemd 用户会话；无需桌面环境。若仓库仍为私有，拉取需你自己的 GitHub 权限。
 
 ```sh
 git clone https://github.com/Octo-o-o-o/autowq.git
 cd autowq
-python3 scripts/setup_local.py
+./wq onboard --lang zh
 ./wq doctor --fix-private
 PYTHONPATH=src python3 -m unittest discover -s tests
 ```

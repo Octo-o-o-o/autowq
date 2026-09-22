@@ -1,4 +1,5 @@
 import copy
+import datetime as dt
 import json
 import tempfile
 import unittest
@@ -13,6 +14,11 @@ class FakeClient:
     replies=[]
     calls=[]
     def __init__(self,*a):pass
+    @classmethod
+    def preflight(cls,cfg):
+        if not cls.jar:
+            raise AdapterError(AdapterError.AUTH,'BRAIN认证/权限未通过')
+        return 200,{},{}
     def request(self,method,path,body=None):
         self.calls.append((method,path))
         response=self.replies.pop(0)
@@ -22,7 +28,7 @@ class FakeClient:
 class BrainJobTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
-        self.cfg,self.c=make_env(self.temp.name,{'brain_api':{'enabled':True,'authorized_until':'2099-01-01T00:00:00Z'}})
+        self.cfg,self.c=make_env(self.temp.name,{'brain_api':{'enabled':True,'min_post_interval_s':0,'authorized_until':'2099-01-01T00:00:00Z'}})
         self.addCleanup(self.c.close)
         self.doc={'request':{'type':'REGULAR','regular':'volume','settings':{'region':'USA','universe':'TOP3000','delay':1,'decay':0,'truncation':0.08,'neutralization':'INDUSTRY'}},'config':{'region':'USA','universe':'TOP3000','delay':1,'decay':0,'truncation':0.08,'neutralization':'INDUSTRY','catalog_verified':True,'fields':['volume']},'purpose':'tutorial_validation','evidence':{'settings_verified':True,'source':'fixture://official-example'}}
         FakeClient.calls=[];FakeClient.replies=[];FakeClient.jar=[True]
@@ -32,6 +38,54 @@ class BrainJobTests(unittest.TestCase):
         runner.run_once(self.c,self.cfg)
         return self.c.execute('SELECT status FROM tasks WHERE task_id=?',(tid,)).fetchone()[0]
     def enqueue(self):return brain_jobs.enqueue(self.c,self.cfg,self.doc)[0]
+    def test_long_retry_after_on_alpha_ready_and_missing_stats(self):
+        tid=self.enqueue()
+        alpha={'id':'abc','regular':{'code':'volume'},'settings':self.doc['request']['settings'],'is':{}}
+        FakeClient.replies=[(201,{'location':'/simulations/s1'},{}),(200,{'retry-after':'1800'},{'alpha':'abc'}),(200,{'retry-after':'2400'},alpha)]
+        self.tick(tid);self.tick(tid)
+        n=self.c.execute('SELECT not_before FROM tasks WHERE task_id=?',(tid,)).fetchone()[0]
+        self.assertGreater((util.parse_iso(n)-util.now()).total_seconds(),1790)
+        self.tick(tid)
+        n=self.c.execute('SELECT not_before FROM tasks WHERE task_id=?',(tid,)).fetchone()[0]
+        self.assertGreater((util.parse_iso(n)-util.now()).total_seconds(),2390)
+
+    def test_public_dispatch_spacing_and_daily_cap(self):
+        tid=self.enqueue();self.cfg.data['brain_api']['min_post_interval_s']=3600
+        self.c.execute('INSERT INTO brain_runs VALUES(?,?,?,?,?,?,?)',(tid,'rejected',None,None,None,util.now_iso(),util.now_iso()))
+        self.c.execute("UPDATE tasks SET status='blocked' WHERE task_id=?",(tid,))
+        self.doc['request']['regular']='-volume';other=self.enqueue()
+        self.assertEqual(self.tick(other),'queued');self.assertEqual(FakeClient.calls,[])
+        self.cfg.data['brain_api']['max_posts_per_24h']=1
+        self.cfg.data['brain_api']['min_post_interval_s']=0
+        self.assertEqual(self.tick(other),'queued');self.assertEqual(FakeClient.calls,[])
+        n=self.c.execute('SELECT not_before FROM tasks WHERE task_id=?',(other,)).fetchone()[0]
+        self.assertGreater((util.parse_iso(n)-util.now()).total_seconds(),86300)
+
+    def test_slow_simulation_reports_progress_without_reposting(self):
+        tid=self.enqueue()
+        FakeClient.replies=[(201,{'location':'/simulations/s1'},{}),(200,{'retry-after':'5'},{'progress':0.1})]
+        self.tick(tid)
+        self.c.execute('UPDATE brain_runs SET started_at=? WHERE task_id=?',
+                       ((util.now()-dt.timedelta(hours=2)).isoformat(),tid))
+        self.assertEqual(self.tick(tid),'queued')
+        row=self.c.execute('SELECT not_before,last_error FROM tasks WHERE task_id=?',(tid,)).fetchone()
+        self.assertIn('10%',row['last_error'])
+        self.assertGreater((util.parse_iso(row['not_before'])-util.now()).total_seconds(),295)
+        self.assertEqual([c[0] for c in FakeClient.calls],['POST','GET'])
+
+    def test_day_old_simulation_retains_receipt_and_blocks_new_post(self):
+        tid=self.enqueue()
+        FakeClient.replies=[(201,{'location':'/simulations/s1'},{}),(200,{}, {'progress':0.1})]
+        self.tick(tid)
+        self.c.execute('UPDATE brain_runs SET started_at=? WHERE task_id=?',
+                       ((util.now()-dt.timedelta(hours=25)).isoformat(),tid))
+        self.assertEqual(self.tick(tid),'blocked')
+        self.assertEqual(self.c.execute('SELECT state FROM brain_runs WHERE task_id=?',(tid,)).fetchone()[0],'polling')
+        self.doc['request']['regular']='-volume'
+        other=self.enqueue()
+        self.assertEqual(self.tick(other),'queued')
+        self.assertEqual([c[0] for c in FakeClient.calls],['POST','GET'])
+
     def test_post_poll_import_and_dedup(self):
         tid=self.enqueue()
         alpha={'id':'abc123','regular':{'code':'volume'},'settings':self.doc['request']['settings'],'is':{'sharpe':0.2,'checks':[{'name':'LOW_FITNESS','result':'FAIL'}]}}

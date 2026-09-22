@@ -219,6 +219,7 @@ def cmd_status(args) -> int:
 def cmd_pause(args) -> int:
     cfg, conn = _ctx(args)
     store.set_flag(conn, "paused", "1")
+    store.set_flag(conn, "pause_origin", "manual")
     store.set_flag(conn, "pause_reason", args.reason or "manual pause")
     # 在途任务清理：本地活调用整组 SIGTERM，2s 宽限后 SIGKILL；远端未知项留 UNKNOWN 待对账。
     live = [r for r in store.live_agent_calls(conn) if r["pid"] and store.pid_alive(r["pid"])]
@@ -255,6 +256,7 @@ def cmd_resume(args) -> int:
                         "确认后用 --force 恢复（不盲目重放）"})
         return BLOCKED
     store.set_flag(conn, "paused", "0")
+    store.set_flag(conn, "pause_origin", "")
     store.set_flag(conn, "pause_reason", "")
     conn.commit()
     _out({"resumed": True, "unknown_pending": n})
@@ -403,17 +405,44 @@ def cmd_brain(args):
             password = getpass.getpass('BRAIN Password（不保存）: ')
             result = BrainClient(cfg.private_dir).login(username, password)
             from .autopilot import after_login
+            store.set_flag(conn, 'brain_auto_auth_not_before', '')
             result['resumed_get_tasks'] = after_login(conn)
             _out(result)
             return OK
+        if args.action == 'keychain-save':
+            if not sys.stdin.isatty():
+                raise ValueError('Keychain保存需本人在交互终端执行')
+            username = input('BRAIN Email: ').strip()
+            service = (os.environ.get('WQ_BRAIN_KEYCHAIN_SERVICE', '').strip() or
+                       cfg.get('brain_api', 'keychain_service', default='com.worldquant.wq.brain'))
+            print('将由 macOS Keychain 安全提示输入密码；密码不会写入环境变量、文件或日志。')
+            _out(BrainClient.save_keychain(username, service))
+            return OK
         if args.action == 'check':
             client=BrainClient(cfg.private_dir)
-            if not list(client.jar):
-                _out({'authenticated':False,'next':'./wq brain login'});return BLOCKED
-            code, headers, data=client.request('OPTIONS','/simulations')
+            code, headers, data=client.preflight(cfg)
             util.write_json(os.path.join(cfg.private_dir,'brain-simulation-options.json'),data)
             _out({'http_status':code,'allow':headers.get('allow'),'metadata_saved_locally':True})
             return OK
+        if args.action in ('submit-check', 'submit', 'reconcile-submit'):
+            from . import brain_submission
+            if args.action == 'submit-check':
+                result = brain_submission.readiness(conn, args.alpha_id)
+                _out(result)
+                return OK if result['ready'] else BLOCKED
+            if args.action == 'reconcile-submit':
+                lock = agent_runner._acquire_lock(cfg.run_dir, 'runner')
+                if lock is None:
+                    _out({'blocked': '调度器正在处理任务，请稍后对账'})
+                    return BLOCKED
+                try:
+                    _out(brain_submission.reconcile(conn, cfg, args.alpha_id))
+                finally:
+                    os.close(lock)
+                return OK
+            tid, created = brain_submission.enqueue(conn, cfg, args.alpha_id, util.read_json(args.review))
+            _out({'task_id': tid, 'created': created, 'note': '先重新检查，全部合格才POST；由run-once执行'})
+            return OK if created else DUPLICATE
         if args.action == 'enqueue':
             tid,created=brain_jobs.enqueue(conn,cfg,util.read_json(args.file))
             _out({'task_id':tid,'created':created,'note':'仅模拟，不提交Alpha'})
@@ -426,6 +455,43 @@ def cmd_autopilot(args):
     from . import autopilot
     cfg, conn = _ctx(args)
     autopilot.setup(conn)
+    if args.action in ('feedback','collect-feedback'):
+        from . import feedback
+        if args.action=='collect-feedback':
+            queued=[]
+            for row in conn.execute("SELECT remote_id FROM simulations WHERE synthetic=0 AND source='api'").fetchall():
+                try:
+                    tid,created=feedback.enqueue(conn,cfg,row[0])
+                    if created:queued.append(tid)
+                except ValueError:continue
+            conn.commit();_out({'queued':queued,'note':'仅收集真实研究Alpha的只读记录集；由现有本地队列执行'})
+        else:
+            result=feedback.report(conn)
+            if args.json: _out(result)
+            else:
+                print('真实结果反馈：'+result['note'])
+                for item in result['candidates']:
+                    stage='资料齐全' if item.get('collection_status')=='complete' else '等待只读资料回填'
+                    retained='保留互补性研究' if item['retain_for_complementarity'] else '不列入组合候选'
+                    print(item['alpha_id']+'：'+('已提交且官方接收；本轮资料复核：' if item.get('platform_submission')=='accepted' else '')+'、'.join(item['diagnosis'])+'；'+retained+'；'+stage)
+                    if item['validation_gaps']: print(('  资料回填缺口：' if item.get('platform_submission')=='accepted' else '  提交前缺口：')+'；'.join(item['validation_gaps']))
+                for pair in result['pairs']:
+                    if pair['worth_combination_review']:
+                        print('互补候选 '+ ' + '.join(pair['parents'])+f"：日PnL相关性 {pair['value']:.3f}，共同观测 {pair['observations']}；仍须预登记与模型审查")
+        return OK
+    if args.action == 'refine-check':
+        from .refinement import report
+        result=report(conn)
+        if args.json:
+            _out(result)
+        else:
+            print('调优分诊：Sharpe/Fitness 均至少达到各自门槛的85%，其余检查通过（自相关待核验单列）。')
+            print(result['note'])
+            for item in result['candidates']:
+                decision='值得进一步复核，尚未获准调优' if item['worth_reviewing'] else '暂不调优'
+                print(f"Alpha {item['alpha_id']}（轮次 {item['cycle_id'] or '直接实验'}）：{decision}；"+'；'.join(item['blockers']+item['pending']))
+            if not result['candidates']: print('暂无真实自动研究回测。')
+        return OK
     if args.action in ('start','stop'):
         if args.action == 'start':
             autopilot.policy(cfg)
@@ -437,8 +503,13 @@ def cmd_autopilot(args):
     else:
         print('持续研究：'+('已启用' if result['enabled'] else '已停用'))
         print('当前：'+result['message'])
+        if result.get('max_cycles_total') is not None:
+            print(f"累计轮次：{result['total_cycles']}/{result['max_cycles_total']}（包括拒绝、重复和失败轮次）")
         local=lambda value: util.parse_iso(value).astimezone().strftime('%Y-%m-%d %H:%M:%S %Z') if value else '由下一次本地调度检查'
-        print('下一轮：'+local(result['next_cycle_at']))
+        if result.get('paused'):
+            print('下一步：先恢复BRAIN会话并执行 `./wq resume`；恢复后由本地调度继续')
+        else:
+            print('下一轮：'+local(result['next_cycle_at']))
         print('最近调度：'+local(result['last_tick_at']))
         cycle=result['latest_cycle']
         if cycle:
@@ -458,20 +529,41 @@ def cmd_evidence(args):
 
 # ---------- parser ----------
 
+def cmd_onboard(args):
+    import subprocess, sys
+    from pathlib import Path
+    script=Path(__file__).resolve().parents[2]/'scripts/onboard.py'
+    if not script.exists():
+        print('Onboarding requires a source checkout; run python3 scripts/onboard.py there.')
+        return 2
+    return subprocess.call([sys.executable,str(script),*args.onboard_args])
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="wq", description="WorldQuant 研究试点本地工具（离线优先）")
     p.add_argument("--config", help="config.json 路径，默认 ./config/config.json")
     p.add_argument("--db", help="覆盖 SQLite 路径（测试用）")
     sub = p.add_subparsers(dest="cmd", required=True)
 
+    s = sub.add_parser('onboard', help='首次使用：选择本地CLI、模型和角色 / first-run wizard', add_help=False)
+    s.add_argument('onboard_args', nargs=argparse.REMAINDER)
+    s.set_defaults(fn=cmd_onboard)
+
     s = sub.add_parser('brain', help='BRAIN本地会话、接口核验与单次模拟队列')
     bs=s.add_subparsers(dest='action',required=True)
     ap = sub.add_parser('autopilot', help='持续研究：状态/启动/停止补充任务')
-    ap.add_argument('action',choices=['status','start','stop'],nargs='?',default='status')
+    ap.add_argument('action',choices=['status','start','stop','refine-check','feedback','collect-feedback'],nargs='?',default='status')
     ap.add_argument('--json',action='store_true')
     ap.set_defaults(fn=cmd_autopilot)
     bs.add_parser('login').set_defaults(fn=cmd_brain)
+    bs.add_parser('keychain-save').set_defaults(fn=cmd_brain)
     bs.add_parser('check').set_defaults(fn=cmd_brain)
+    for action in ('submit-check', 'submit', 'reconcile-submit'):
+        b = bs.add_parser(action)
+        b.add_argument('alpha_id')
+        if action == 'submit':
+            b.add_argument('--review', required=True, help='已完成的提交研究验收JSON；不可使用模板占位')
+        b.set_defaults(fn=cmd_brain)
     b=bs.add_parser('enqueue');b.add_argument('file');b.set_defaults(fn=cmd_brain)
 
     s = sub.add_parser('evidence-check', help='核验证据声明；不把声明完整视为平台就绪')
@@ -604,6 +696,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv=None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0]=='onboard':
+        return cmd_onboard(argparse.Namespace(onboard_args=argv[1:]))
     args = build_parser().parse_args(argv)
     try:
         return args.fn(args)

@@ -1,45 +1,66 @@
 # autowq
 
-本地运行的量化研究工作流：模型提出假设 → 不同渠道审查 → 本地证据门禁 → BRAIN 单次回测 → 查询结果 → 入账归档 → 下一轮。
+[English](README.en.md) | 简体中文
 
-Python 3.11+，运行时只依赖标准库。模型 CLI、账号及平台权限由部署者自行配置。当前是私有研究项目，无自动 Alpha 提交功能，不承诺策略有效或收入。
+本地运行的 WorldQuant BRAIN 研究工作流：模型提出假设 → 不同渠道审查 → 有限回测 → 真实结果诊断 → 互补信号研究 → 提交前验收。模型、预算、证据和队列由你控制，不依赖聊天窗口持续在线。
 
-## 开始使用
+**研究工具，不是收益承诺。** 平台筛选通过、正式提交接收、顾问资格和实际到账是不同状态。自动研究不自动授予正式提交权限。
+
+## 第一次使用
+
+需要 Python 3.11+、Git，以及你自己安装和登录的模型 CLI。运行时只使用 Python 标准库。支持 macOS；Linux/Windows WSL2 使用 Docker 隔离模型进程。原生 Windows 暂不支持。
 
 ```sh
-python3 scripts/setup_local.py
+git clone https://github.com/Octo-o-o-o/autowq.git
+cd autowq
+./wq onboard --lang zh
 ./wq doctor --fix-private
-PYTHONPATH=src python3 -m unittest discover -s tests
+./wq validate result fixtures/synthetic-result-pass.json
+./wq import-results fixtures/synthetic-result-pass.json
 ./wq tasks
 ```
 
-`setup_local.py` 只生成**全部关闭**的本机配置、对应平台的隔离入口与调度文件（macOS launchd，Linux/WSL2 systemd + Docker），拒绝覆盖已有部署，不登录、不调用模型、不安装定时器。已有运行实例无需执行此初始化。
+向导检测宿主 CLI，让你选择渠道、模型 ID、研究/审查/工程角色及可选思考强度。它生成本机配置与隔离运行入口，**不覆盖已有部署、不登录、不调用模型、不安装调度器**。模型是否能用取决于你自己的账号；发现可执行文件不等于验证了模型权限。
 
-- [Linux 服务器与 Windows WSL2 部署](docs/linux-windows.md)
-- [运行、配置、重试与恢复](docs/operations.md)
-- [架构、数据边界和验收层次](docs/architecture.md)
-- [本次检查与交付记录](docs/release-review.md)
-- [第三方与许可说明](NOTICE.md)
+支持的内置适配器：Grok Build、Devin、Cursor CLI，另有 macOS ZCode 应用入口。可以只选一个渠道做离线或单模型工作；持续自动研究必须有两个不同渠道，不能把同一模型自审当成独立检查。其他 CLI 需要实现适配器，而非任意填一个名称。
 
-## 常用命令
+接下来请按 **[完整 onboarding 操作单（中英双语）](docs/onboarding.md)** 完成：本人登录 → 本地预算/期限 → BRAIN 登录与权限 → 字段证据 → 单轮真实核验 → 安装调度。初始模型、API、自动研究和提交全部关闭，数据证据模板故意保持未验证。
+
+## 能做什么
+
+- 显式选择本地模型和角色；任务冻结自己的路由快照。
+- 真实模拟、GET 轮询和结果入账；POST 结果未知时停止重发。
+- 失败原因反馈、时间分段资料、日 PnL 相关性与有限组合实验。
+- 逐候选正式提交：研究验收、最新平台检查、单次 POST、真实接收状态核验。
+- 中文任务进度、token 及费用来源；未知费用不记作零。
+- 单并发、预算、授权期限、平台限流、崩溃恢复与去重。
+
+## 查看与停止
 
 ```sh
+./wq onboard --list                 # 仅检测宿主CLI，不修改配置
+./wq preset show
 ./wq autopilot status
+./wq autopilot feedback             # 中文诊断；--json供程序读取
 ./wq tasks
-./wq preset list
-./wq preset use core-only
-./wq provider disable cursor
-./wq provider enable cursor
-./wq autopilot stop
-./wq pause --reason "暂停所有任务"
+./wq autopilot stop                 # 停止补充新轮次
+./wq pause --reason "manual pause" # 暂停队列及本地模型调用
 ```
 
-预设在下一项任务首次领取时冻结；在途任务及重试保留原预设。每个渠道首次失败后最多重试三次；只有明确额度或服务容量故障才切换备用渠道。UNKNOWN 请求需核实，禁止自动重发。
+模型登录失效、人机校验、UNKNOWN 请求和授权到期可能需要本人处理。Mac 休眠或服务器停机期间不会运行。当前没有全自动研究验收、现金交易、签约或长期盈利保证。
 
-默认持续研究节奏为轮次结束后间隔一小时、UTC 每日最多四轮、每周最多二十四次模拟，并始终单并发。实际部署可调整，但授权期限、Provider 额度和平台 Retry-After 仍然生效。
+## 开发与文档
 
-## 仓库内容与本地状态
+```sh
+PYTHONPATH=src python3 -m unittest discover -s tests
+```
 
-本仓库包含完整程序、测试、合成 fixtures、关闭的配置模板与部署生成器。账号、cookie、实际模型输出、真实 Alpha、运行数据库、授权文件和个人研究档案只保留在部署机器上，不进入 Git。新 clone 不继承旧机器的任何授权。
+- [首次使用与模型选择](docs/onboarding.md)
+- [运行、配置、提交与恢复](docs/operations.md)
+- [Linux / Windows WSL2 部署](docs/linux-windows.md)
+- [架构与数据边界](docs/architecture.md)
+- [第三方与许可](NOTICE.md)
 
-只有现金账本中的实际到账记录才表示收入；平台检查通过、提交接受、最终有效和报酬资格分别记录。离线测试不证明真实服务权限，短期闭环不证明长期无人值守或盈利。
+配置、Cookie、真实 Alpha、数据库、模型输出、运行日志和个人研究档案不进入 Git。`fixtures/` 仅含合成数据，不能作为真实研究成绩。源码备份不等于运行状态备份。
+
+本项目非 WorldQuant 官方产品。目前尚未选择开源 LICENSE；上传 GitHub 不等于已经授予开源许可。仓库可见性和正式开源由维护者另行决定。

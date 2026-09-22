@@ -1,0 +1,11 @@
+{
+  "schema": "wq.submission-review/v1",
+  "alpha_id": "REPLACE_WITH_VERIFIED_ALPHA_ID",
+  "request_hash": "REPLACE_WITH_SUBMIT_CHECK_HASH",
+  "decision": "not_reviewed",
+  "reviewer": "",
+  "reviewed_at": "",
+  "originality": {"accepted": false, "evidence": ""},
+  "robustness": {"accepted": false, "evidence": ""},
+  "data_timing": {"accepted": false, "evidence": ""}
+}

@@ -74,6 +74,26 @@ class UsageParsing(unittest.TestCase):
             })
             self.assertEqual(found["total_tokens"], 50)
 
+    def test_devin_export_in_configured_workdir_is_used(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "private" / "logs" / "devin-20260921T000001.log"
+            export = Path(tmp) / "devin-work" / ".usage" / "devin-20260921T000001.json"
+            export.parent.mkdir(parents=True)
+            export.write_text(json.dumps({
+                "agent": {"model_name": "SWE-2 Max"},
+                "final_metrics": {
+                    "total_prompt_tokens": 70,
+                    "total_completion_tokens": 30,
+                    "total_cached_tokens": 10,
+                },
+            }))
+            found = usage.for_call({
+                "agent": "devin", "log_path": str(log),
+                "prompt_file": str(Path(tmp) / "jobs" / "p.md"),
+                "started_at": "2026-09-21T00:00:00+00:00",
+            }, [str(export.parent.parent)])
+            self.assertEqual(found["total_tokens"], 100)
+
     def test_devin_spec_requests_metrics_export(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg, conn = make_env(tmp, {"models": {"devin": {"enabled": True}}})

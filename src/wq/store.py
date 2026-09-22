@@ -177,6 +177,14 @@ def recover_stale(conn, lease_s: int = 300) -> list[dict]:
         " WHERE status IN ('claimed','running') AND lease_until<?", (now,)).fetchall()
     out = []
     for r in rows:
+        if r['kind'] == 'brain_submission':
+            from . import brain_submission
+            brain_submission.setup(conn)
+            sub = conn.execute('SELECT state FROM brain_submissions WHERE task_id=?', (r['task_id'],)).fetchone()
+            if sub and sub['state'] == 'post_started':
+                mark_task_unknown(conn, r['task_id'], {'reason': 'interrupted submission POST; read-only reconciliation required'})
+                out.append({'task_id': r['task_id'], 'action': 'unknown'})
+                continue
         if r['kind'] == 'brain_simulation':
             from . import brain_jobs
             brain_jobs.setup(conn)

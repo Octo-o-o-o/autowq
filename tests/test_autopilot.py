@@ -8,6 +8,7 @@ from unittest.mock import patch
 from helpers import make_env
 from wq import autopilot, brain_jobs, research_dsl, runner, store, util
 from wq.db import connect
+from wq.errors import AdapterError
 
 
 def proposal(op='mean'):
@@ -17,7 +18,7 @@ def proposal(op='mean'):
 class AutopilotTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
-        self.cfg,self.c=make_env(self.temp.name,{'brain_api':{'enabled':True,'authorized_until':'2099-01-01T00:00:00Z'},'routing':{'authorized_until':'2099-01-01T00:00:00Z'},'autopilot':{'enabled':True,'policy_file':'config/policy.json','interval_s':60,'max_cycles_per_day':4,'max_simulations_per_week':3}})
+        self.cfg,self.c=make_env(self.temp.name,{'brain_api':{'enabled':True,'min_post_interval_s':0,'authorized_until':'2099-01-01T00:00:00Z'},'routing':{'authorized_until':'2099-01-01T00:00:00Z'},'autopilot':{'enabled':True,'policy_file':'config/policy.json','interval_s':60,'max_cycles_per_day':4,'max_simulations_per_week':3}})
         self.addCleanup(lambda:self.c.close())
         self.root=Path(self.temp.name);proof=self.root/'evidence.json';util.write_json(str(proof),{'fixture':True})
         settings={'region':'USA','universe':'TOP3000','delay':1,'decay':0,'truncation':0.08,'neutralization':'INDUSTRY'}
@@ -27,10 +28,101 @@ class AutopilotTests(unittest.TestCase):
         self.add_patch('wq.routing.catalog',return_value={'default':'steady','presets':{'steady':{'routes':{'research':['a'],'review':['b']}}}})
         self.add_patch('wq.routing._unavailable',return_value=None)
         self.add_patch('wq.routing.enqueue_job',side_effect=self.job)
-        self.add_patch('wq.brain_client.BrainClient').return_value.jar=[True]
-        client=self.add_patch('wq.brain_jobs.BrainClient').return_value;client.jar=[True];client.request.side_effect=self.api
+        preflight=self.add_patch('wq.brain_client.BrainClient').return_value
+        preflight.jar=[True]
+        preflight.preflight.return_value=(200,{}, {})
+        client=self.add_patch('wq.brain_jobs.BrainClient').return_value;client.jar=[True];client.preflight.return_value=(200,{},{});client.request.side_effect=self.api
         self.real_dispatch=runner.dispatch_task
         self.add_patch('wq.runner.dispatch_task',side_effect=self.dispatch)
+
+    def test_total_cap_finishes_active_cycle_and_survives_restart(self):
+        self.cfg.data['autopilot']['max_cycles_total']=1
+        self.full_cycle()
+        self.assertEqual(self.cycle()['state'],'closed')
+        self.assertEqual(self.posts,1)
+        self.c.close();self.c=connect(self.cfg.db_path)
+        store.set_flag(self.c,'autopilot_next_at','2000-01-01T00:00:00Z')
+        self.c.execute("UPDATE research_cycles SET created_at='2000-01-01T00:00:00Z'")
+        self.tick()
+        self.assertEqual(self.c.execute('SELECT COUNT(*) FROM research_cycles').fetchone()[0],1)
+        result=autopilot.status(self.c,self.cfg)
+        self.assertIsNone(result['next_cycle_at'])
+        self.assertIn('累计研究轮数上限',result['message'])
+        self.assertEqual(result['total_cycles'],1)
+        self.assertEqual(self.counter,2)
+
+    def test_measurement_rejection_blocks_even_with_other_checks_passed(self):
+        checks={k:True for k in autopilot.REVIEW_CHECKS}
+        obj={'review':{'candidate_hash':'digest','accept':True,'checks':checks,
+                       'reason':'成交股数排名不足以证明换手率机制成立。'}}
+        self.assertTrue(autopilot.validate_review(obj,'digest'))
+        checks['measurement_valid']=False
+        self.assertFalse(autopilot.validate_review(obj,'digest'))
+        del checks['measurement_valid']
+        with self.assertRaises(ValueError):autopilot.validate_review(obj,'digest')
+
+    def test_quality_first_history_keeps_all_counterexamples(self):
+        history=[]
+        for op in ('mean','std','delta'):
+            item=proposal(op);item['hypothesis']='机制解释'*200
+            item['counterexample']='反例清单'*200
+            history.append(item)
+        context=json.loads(autopilot.history_context(history,proposal('std')))
+        self.assertEqual(context['full_candidates'],history)
+        prompt=autopilot.review_prompt(proposal(),history)
+        self.assertIn(history[2]['counterexample'],prompt)
+        self.assertNotIn('reason建议120',prompt)
+        self.assertIn('measurement_valid',prompt)
+
+    def test_quality_text_limit_matches_prompt_and_keeps_hard_bound(self):
+        candidate = proposal()
+        candidate['hypothesis'] = '机' * research_dsl.TEXT_LIMITS['hypothesis']
+        candidate['counterexample'] = '反' * research_dsl.TEXT_LIMITS['counterexample']
+        research_dsl.validate_candidate(candidate, self.p['bindings'])
+        candidate['hypothesis'] += '超'
+        with self.assertRaisesRegex(ValueError, 'hypothesis需为有内容的有限长度文字'):
+            research_dsl.validate_candidate(candidate, self.p['bindings'])
+        self.assertIn('hypothesis和counterexample各不超过2000字符', autopilot.generate_prompt(self.c))
+
+
+    def test_invalid_candidate_survives_rollback_for_future_history(self):
+        self.tick()
+        row=self.cycle()
+        task_row=self.c.execute('SELECT payload_json FROM tasks WHERE task_id=?',(row['research_task'],)).fetchone()
+        payload=json.loads(task_row['payload_json'])
+        candidate=proposal()
+        candidate['ast']={'op':'neg','arg':{'op':'field','name':'daily_return'}}
+        util.write_json(str(Path(payload['job_dir'])/'result.json'),{'status':'completed','candidate':candidate})
+        self.tick()
+        closed=self.cycle()
+        self.assertEqual(closed['state'],'closed')
+        self.assertIsNone(closed['simulation_task'])
+        self.assertIsNone(closed['family_hash'])
+        self.assertEqual(json.loads(closed['candidate_json']),candidate)
+        self.assertIn(candidate['title'],autopilot.generate_prompt(self.c))
+        self.assertEqual(self.posts,0)
+
+    def test_research_model_can_abstain_without_platform_call(self):
+        self.tick()
+        row=self.cycle()
+        payload=json.loads(self.c.execute('SELECT payload_json FROM tasks WHERE task_id=?',
+                                          (row['research_task'],)).fetchone()[0])
+        util.write_json(str(Path(payload['job_dir'])/'result.json'),
+                        {'status':'blocked','summary':'没有新的可核验机制，主动停止'})
+        self.tick()
+        closed=self.cycle()
+        self.assertEqual(closed['state'],'closed')
+        self.assertIn('主动放弃',closed['outcome'])
+        self.assertIsNone(closed['simulation_task'])
+        self.assertEqual(self.posts,0)
+
+    def test_status_daily_cap_does_not_show_past_next_cycle(self):
+        for _ in range(4):
+            self.c.execute("INSERT INTO research_cycles(state,policy_json,policy_hash,created_at,updated_at) VALUES('closed','{}','x',?,?)",(util.now_iso(),util.now_iso()))
+        store.set_flag(self.c,'autopilot_next_at','2000-01-01T00:00:00Z')
+        result=autopilot.status(self.c,self.cfg)
+        self.assertGreater(util.parse_iso(result['next_cycle_at']),util.now())
+        self.assertIn('日研究轮数上限',result['message'])
 
     def add_patch(self,*a,**k):
         p=patch(*a,**k);obj=p.start();self.addCleanup(p.stop);return obj
@@ -45,7 +137,7 @@ class AutopilotTests(unittest.TestCase):
         payload=json.loads(t['payload_json']);role=payload['role']
         row=conn.execute("SELECT * FROM research_cycles WHERE state!='closed'").fetchone()
         if role=='research':obj={'status':'completed','candidate':proposal('mean' if row['cycle_id']==1 else 'std')}
-        else:obj={'status':'completed','review':{'candidate_hash':row['candidate_hash'],'accept':not self.reject_review,'checks':{k:True for k in ['past_only','economic_rationale','falsifiable','not_parameter_search','within_scope','simple']},'reason':'这是明确受限的探索，不能当作经济机制已获证明。'}}
+        else:obj={'status':'completed','review':{'candidate_hash':row['candidate_hash'],'accept':not self.reject_review,'checks':{k:True for k in autopilot.REVIEW_CHECKS},'reason':'这是明确受限的探索，不能当作经济机制已获证明。'}}
         util.write_json(str(Path(payload['job_dir'])/'result.json'),obj)
         name='a' if role=='research' or self.same_provider else 'b'
         conn.execute('INSERT INTO task_routes(task_id,snapshot_json,phase,updated_at) VALUES(?,?,?,?)',(t['task_id'],json.dumps({'chain':[name],'preset':'steady'}),'complete',util.now_iso()))
@@ -97,9 +189,30 @@ class AutopilotTests(unittest.TestCase):
         self.p['valid_until']='2000-01-01T00:00:00Z';self.save_policy()
         self.tick();self.assertEqual(self.counter,0)
 
+    def test_expired_brain_session_is_rejected_before_model_call(self):
+        client = self.add_patch('wq.brain_client.BrainClient')
+        client.return_value.jar = [True]
+        client.return_value.preflight.side_effect = AdapterError(
+            AdapterError.AUTH, 'BRAIN认证/权限未通过')
+        self.tick()
+        self.assertEqual(self.counter, 0)
+        self.assertTrue(store.is_paused(self.c))
+        self.assertIn('auth:', store.get_flag(self.c, 'pause_reason'))
+        self.assertEqual(store.get_flag(self.c, 'brain_preflight_status'), 'auth')
+
+    def test_brain_preflight_is_cached_without_repeating_options(self):
+        client = self.add_patch('wq.brain_client.BrainClient')
+        client.return_value.jar = [True]
+        client.return_value.preflight.return_value = (200, {}, {})
+        self.assertEqual(autopilot.brain_preflight(self.c, self.cfg), (True, ''))
+        self.assertEqual(autopilot.brain_preflight(self.c, self.cfg), (True, ''))
+        self.assertEqual(client.return_value.preflight.call_count, 1)
+
     def test_disabled_and_paused_no_new_calls(self):
         store.set_flag(self.c,'autopilot_enabled','0');self.tick();self.assertEqual(self.counter,0)
         store.set_flag(self.c,'autopilot_enabled','1');store.set_flag(self.c,'paused','1');self.tick();self.assertEqual(self.counter,0)
+        result=autopilot.status(self.c,self.cfg)
+        self.assertIsNone(result['next_cycle_at'])
 
     def test_week_cap_auto_resumes_next_week(self):
         self.cfg.data['autopilot']['max_simulations_per_week']=1
@@ -170,6 +283,12 @@ class AutopilotTests(unittest.TestCase):
         store.set_flag(self.c,'paused','1');store.set_flag(self.c,'pause_reason','用户暂停')
         self.assertEqual(autopilot.after_login(self.c),[]);self.assertTrue(store.is_paused(self.c))
 
+    def test_manual_pause_is_never_auto_cleared_even_with_auth_wording(self):
+        store.set_flag(self.c,'paused','1');store.set_flag(self.c,'pause_origin','manual')
+        store.set_flag(self.c,'pause_reason','auth: pause requested by owner')
+        self.assertIsNone(autopilot.auto_resume_after_auth(self.c,self.cfg))
+        self.assertTrue(store.is_paused(self.c))
+
     def test_login_only_requeues_authenticated_get_not_post(self):
         tid,_=store.enqueue_task(self.c,'brain_simulation',{})
         self.c.execute("UPDATE tasks SET status='blocked',last_error='BRAIN认证/权限未通过' WHERE task_id=?",(tid,))
@@ -177,3 +296,62 @@ class AutopilotTests(unittest.TestCase):
         store.set_flag(self.c,'paused','1');store.set_flag(self.c,'pause_reason','auth: expired')
         self.assertEqual(autopilot.after_login(self.c),[tid]);self.assertFalse(store.is_paused(self.c))
         self.assertEqual(autopilot.task(self.c,tid)['status'],'queued')
+
+    def test_login_requeues_preflight_block_without_post(self):
+        tid,_=store.enqueue_task(self.c,'brain_simulation',{})
+        self.c.execute("UPDATE tasks SET status='blocked',last_error='BRAIN认证/权限未通过；未发送POST' WHERE task_id=?",(tid,))
+        store.set_flag(self.c,'paused','1');store.set_flag(self.c,'pause_reason','auth: expired')
+        self.assertEqual(autopilot.after_login(self.c),[tid]);self.assertFalse(store.is_paused(self.c))
+        self.assertEqual(autopilot.task(self.c,tid)['status'],'queued')
+
+    def test_keychain_auth_pause_auto_recovers_only_when_preflight_succeeds(self):
+        self.cfg.data['brain_api']['auto_login'] = True
+        self.cfg.data['brain_api']['auto_login_email'] = 'user@example.com'
+        store.set_flag(self.c,'paused','1');store.set_flag(self.c,'pause_reason','auth: expired')
+        client = self.add_patch('wq.brain_client.BrainClient')
+        client.return_value.preflight.return_value = (200, {}, {})
+        recovered = autopilot.auto_resume_after_auth(self.c, self.cfg)
+        self.assertEqual(recovered, [])
+        self.assertFalse(store.is_paused(self.c))
+        client.return_value.preflight.assert_called_once()
+
+    def test_keychain_failure_keeps_auth_pause(self):
+        self.cfg.data['brain_api']['auto_login'] = True
+        self.cfg.data['brain_api']['auto_login_email'] = 'user@example.com'
+        store.set_flag(self.c,'paused','1');store.set_flag(self.c,'pause_reason','auth: expired')
+        client = self.add_patch('wq.brain_client.BrainClient')
+        client.return_value.preflight.side_effect = AdapterError(AdapterError.AUTH, '仍未通过')
+        self.assertIsNone(autopilot.auto_resume_after_auth(self.c, self.cfg))
+        self.assertTrue(store.is_paused(self.c))
+        self.assertTrue(store.get_flag(self.c,'pause_reason').startswith('auth:'))
+
+    def test_unknown_prevents_auth_recovery_and_network_calls(self):
+        self.cfg.data['brain_api'].update(auto_login=True, auto_login_email='user@example.com')
+        tid, _ = store.enqueue_task(self.c, 'brain_simulation', {})
+        self.c.execute("UPDATE tasks SET status='unknown' WHERE task_id=?", (tid,))
+        store.set_flag(self.c, 'paused', '1')
+        store.set_flag(self.c, 'pause_reason', 'auth: expired')
+        with patch('wq.brain_client.BrainClient') as client:
+            self.assertIsNone(autopilot.auto_resume_after_auth(self.c, self.cfg))
+            client.assert_not_called()
+        self.assertTrue(store.is_paused(self.c))
+
+    def test_keychain_failure_backs_off_for_five_minutes(self):
+        self.cfg.data['brain_api']['auto_login'] = True
+        self.cfg.data['brain_api']['auto_login_email'] = 'user@example.com'
+        store.set_flag(self.c,'paused','1');store.set_flag(self.c,'pause_reason','auth: expired')
+        client = self.add_patch('wq.brain_client.BrainClient')
+        client.return_value.preflight.side_effect = AdapterError(AdapterError.AUTH, '仍未通过')
+        self.assertIsNone(autopilot.auto_resume_after_auth(self.c,self.cfg))
+        self.assertIsNotNone(store.get_flag(self.c,'brain_auto_auth_not_before'))
+        self.assertIsNone(autopilot.auto_resume_after_auth(self.c,self.cfg))
+        self.assertEqual(client.return_value.preflight.call_count,1)
+
+    def test_login_invalidates_cached_brain_preflight(self):
+        store.set_flag(self.c,'paused','1');store.set_flag(self.c,'pause_reason','auth: expired')
+        store.set_flag(self.c,'brain_preflight_at',util.now_iso())
+        store.set_flag(self.c,'brain_preflight_status','auth')
+        store.set_flag(self.c,'brain_preflight_message','cached auth failure')
+        autopilot.after_login(self.c)
+        self.assertEqual(store.get_flag(self.c,'brain_preflight_status'),'')
+        self.assertEqual(store.get_flag(self.c,'brain_preflight_at'),'')

@@ -134,6 +134,27 @@ class TestRunOnce(unittest.TestCase):
                 os.killpg(proc.pid, signal.SIGKILL)
             proc.wait()
 
+    def test_auth_pause_attempts_keychain_recovery_before_returning_paused(self):
+        from unittest.mock import patch
+        store.set_flag(self.conn, "paused", "1")
+        store.set_flag(self.conn, "pause_reason", "auth: expired")
+        def recover(conn, cfg):
+            store.set_flag(conn, "paused", "0")
+            return []
+        with patch("wq.autopilot.auto_resume_after_auth", side_effect=recover):
+            code, lines = runner.run_once(self.conn, self.cfg)
+        self.assertEqual(code, 0)
+        self.assertTrue(any("automatically recovered" in line for line in lines))
+
+    def test_recovery_that_leaves_pause_set_cannot_tick(self):
+        from unittest.mock import patch
+        store.set_flag(self.conn, "paused", "1")
+        store.set_flag(self.conn, "pause_reason", "auth: expired")
+        with patch("wq.autopilot.auto_resume_after_auth", return_value=[]), patch("wq.autopilot.tick") as tick:
+            code, _ = runner.run_once(self.conn, self.cfg)
+        self.assertEqual(code, 6)
+        tick.assert_not_called()
+
     def test_pause_cmd_aborts_inflight(self):
         from wq.cli import cmd_pause
         import argparse

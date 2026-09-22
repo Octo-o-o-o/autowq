@@ -118,8 +118,12 @@ def _epoch_seconds(value: str) -> float:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
 
 
-def for_call(call: dict) -> dict | None:
-    """按 agent_calls 的 log_path 或 Devin 会话时间寻找计量摘要。"""
+def for_call(call: dict, usage_dirs: list[str] | None = None) -> dict | None:
+    """按账本日志或已配置的 Devin workdir 寻找最小计量摘要。
+
+    Devin 的 `--export` 文件写在其 workdir；该目录通常与本地日志目录
+    不同，所以调用方可传入当前配置中的 workdir 作为额外候选路径。
+    """
     if call.get("agent") == "grok":
         return grok_log(call.get("log_path"))
     if call.get("agent") != "devin":
@@ -127,10 +131,14 @@ def for_call(call: dict) -> dict | None:
     log_path = call.get("log_path")
     if log_path:
         log = Path(log_path)
-        export = log.parent.parent / ".usage" / f"{log.stem}.json"
-        result = devin_transcript(str(export))
-        if result:
-            return result
+        candidates = [log.parent.parent / ".usage" / f"{log.stem}.json"]
+        for directory in usage_dirs or []:
+            if directory:
+                candidates.append(Path(directory) / ".usage" / f"{log.stem}.json")
+        for export in candidates:
+            result = devin_transcript(str(export))
+            if result:
+                return result
     cli_dir = Path(os.environ.get("DEVIN_CLI_DIR", str(Path.home() / ".local/share/devin/cli")))
     for session_id in _call_session_ids(call, cli_dir):
         result = devin_transcript(str(cli_dir / "transcripts" / f"{session_id}.json"))

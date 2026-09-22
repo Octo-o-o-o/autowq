@@ -19,6 +19,16 @@
       "expression": "",
       "fields": [],
       "source": ""
+    },
+    "market_cap_rank": {
+      "expression": "",
+      "fields": [],
+      "source": ""
+    },
+    "price_vwap_gap": {
+      "expression": "",
+      "fields": [],
+      "source": ""
     }
   },
   "evidence_files": [],

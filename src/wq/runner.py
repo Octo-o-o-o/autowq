@@ -29,6 +29,12 @@ def dispatch_task(conn, cfg, task: dict) -> tuple[str, dict, str | None]:
     payload = json.loads(task["payload_json"])
     adapter = build_adapter(cfg)
     try:
+        if kind == "brain_feedback":
+            from .feedback import step
+            return step(conn, cfg, task, payload)
+        if kind == "brain_submission":
+            from .brain_submission import step
+            return step(conn, cfg, task, payload)
         if kind == "brain_simulation":
             from .brain_jobs import step
             return step(conn, cfg, task, payload)
@@ -60,6 +66,7 @@ def dispatch_task(conn, cfg, task: dict) -> tuple[str, dict, str | None]:
     except AdapterError as e:
         if e.kind == AdapterError.AUTH:
             store.set_flag(conn, "paused", "1")
+            store.set_flag(conn, "pause_origin", "auth")
             store.set_flag(conn, "pause_reason", f"auth: {e}")
             return "blocked", {"auth": str(e), "action": "已自动暂停，需本人处理身份/权限"}, str(e)
         if e.kind == AdapterError.RATE_LIMIT:
@@ -74,6 +81,10 @@ def dispatch_task(conn, cfg, task: dict) -> tuple[str, dict, str | None]:
     except WqExit as e:
         return "failed", {"error": str(e)}, str(e)
     except (KeyError, ValueError, TypeError, OSError) as e:
+        if kind == 'brain_submission':
+            row = conn.execute('SELECT state FROM brain_submissions WHERE task_id=?', (task['task_id'],)).fetchone()
+            if row and row[0] in ('post_started', 'polling', 'verifying'):
+                return 'unknown', {'error': str(e)}, '提交后证据异常，需只读对账'
         return "failed", {"error": str(e)}, str(e)
 
 
@@ -126,11 +137,17 @@ def _run_once(conn, cfg, lease_s: int) -> tuple[int, list[str]]:
     for r in recovered_calls + recovered_tasks:
         lines.append(f"recover: {r}")
 
-    if store.is_paused(conn):
-        lines.append(f"paused: {store.get_flag(conn, 'pause_reason', '')}；恢复用 `wq resume`")
-        return PAUSED, lines
-
     from . import autopilot
+    if store.is_paused(conn):
+        recovered = autopilot.auto_resume_after_auth(conn, cfg)
+        conn.commit()
+        if recovered is None or store.is_paused(conn):
+            lines.append(f"paused: {store.get_flag(conn, 'pause_reason', '')}；恢复用 `wq resume`")
+            return PAUSED, lines
+        conn.commit()
+        lines.append('auth pause automatically recovered from macOS Keychain; resumed safe reads: '
+                     + (', '.join(recovered) if recovered else 'none'))
+
     autopilot.tick(conn, cfg)
 
     task = store.claim_task(conn, owner=f"wq-{os.getpid()}", lease_s=lease_s)

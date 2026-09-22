@@ -34,6 +34,8 @@ def resolve(conn, task_id: str, outcome: str, note: str, alpha_id: str | None = 
         raise WqExit(INVALID, f"无此任务 {task_id}")
     if row["status"] != "unknown":
         raise WqExit(INVALID, f"任务 {task_id} 状态 {row['status']}，仅 unknown 可对账")
+    if row['kind'] == 'brain_submission':
+        raise WqExit(INVALID, '正式提交只能用 wq brain reconcile-submit ALPHA_ID 读取官方证据，不能手填accepted')
     if row['kind'] == 'brain_simulation':
         return _resolve_brain(conn, task_id, outcome, note, alpha_id)
     if alpha_id:

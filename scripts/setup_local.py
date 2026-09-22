@@ -10,7 +10,7 @@ import shutil
 import sys
 
 
-def render(root, runtime):
+def render(root, runtime, binaries=None):
     root, runtime = Path(root).resolve(), Path(runtime).expanduser().resolve()
     if runtime.is_relative_to(root):
         raise ValueError('runtime must be outside the project (sandbox boundary)')
@@ -39,10 +39,12 @@ def render(root, runtime):
     sb += ' (literal "/dev/null") (literal "/dev/tty"))\n'
     sb += '(deny file-read* file-write* '+' '.join('(subpath '+quote(p)+')' for p in denied)+')\n'
     sandbox = runtime/'agents.sb';sandbox.write_text(sb)
-    binaries = {'grok':home/'.grok/bin/grok', 'devin':home/'.local/bin/devin'}
+    binaries = {**{'grok':home/'.grok/bin/grok', 'devin':home/'.local/bin/devin'}, **(binaries or {})}
     for name in ('grok','devin','cursor','zcode'):
         argv = ['/usr/bin/sandbox-exec','-f',str(sandbox)]
-        argv += [str(binaries[name])] if name in binaries else [sys.executable,str(entry),name]
+        argv += [str(binaries[name])] if name in ('grok','devin') else [sys.executable,str(entry),name]
+        if name=='cursor' and binaries.get('cursor'):
+            argv=['/usr/bin/env','WQ_CURSOR_BIN='+str(binaries['cursor'])]+argv
         f = launchers/name
         f.write_text('#!/bin/sh\nexec '+shlex.join(argv)+' "$@"\n');f.chmod(0o700)
     cfg = json.loads((root/'config/config.example.json').read_text())

@@ -83,7 +83,12 @@
   },
   "brain_api": {
     "enabled": false,
-    "authorized_until": null
+    "authorized_until": null,
+    "max_posts_per_24h": 4,
+    "min_post_interval_s": 60,
+    "auto_login": false,
+    "auto_login_email": null,
+    "keychain_service": "com.worldquant.wq.brain"
   },
   "routing": {
     "profiles_file": "config/profiles.json",
@@ -96,6 +101,15 @@
     "interval_s": 3600,
     "error_cooldown_s": 3600,
     "max_cycles_per_day": 4,
-    "max_simulations_per_week": 24
+    "max_simulations_per_week": 24,
+    "max_cycles_total": null
+  },
+  "brain_submission": {
+    "enabled": false,
+    "authorized_until": null
+  },
+  "research_feedback": {
+    "enabled": false,
+    "max_combination_plans": 2
   }
 }

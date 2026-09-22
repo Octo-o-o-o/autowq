@@ -2,6 +2,7 @@
 import copy
 import datetime as dt
 import json
+import math
 from pathlib import Path
 from . import util, store, importer, contracts
 from .brain_client import BrainClient, safe_url, retry_delay
@@ -19,6 +20,20 @@ def later(conn, tid, delay, reason):
     conn.execute("UPDATE tasks SET status='queued',not_before=?,last_error=? WHERE task_id=?",(when,reason,tid))
     store.add_attempt(conn,tid,'brain_wait','scheduled',{'not_before':when,'reason':reason})
     return 'retry_scheduled',{},reason
+
+
+def get_with_reauth(client, cfg, path):
+    """GET may be retried once after a successful read-only reauthentication."""
+    try:
+        return client.request('GET', path)
+    except AdapterError as exc:
+        if exc.kind != AdapterError.AUTH:
+            raise
+        # GET is idempotent; unlike POST, retrying it after Keychain login does
+        # not duplicate a remote simulation.  A second AUTH is returned to the
+        # caller and pauses the queue.
+        client.preflight(cfg)
+        return client.request('GET', path)
 
 def validate_request(payload):
     if not isinstance(payload,dict) or payload.get('type')!='REGULAR':
@@ -54,9 +69,10 @@ def step(conn,cfg,task,payload):
     if cfg.get('brain_api','enabled') is not True:return 'blocked',{},'BRAIN API 尚未启用'
     if row and row['state']=='post_started':return 'unknown',{},'上次POST结果未知，禁止自动重发'
     if row and row['state']=='complete':return 'succeeded',{'evidence':row['evidence_path']},None
+    cooldown=store.get_flag(conn,'brain_not_before')
+    if cooldown and util.now()<util.parse_iso(cooldown):
+        return later(conn,tid,(util.parse_iso(cooldown)-util.now()).total_seconds(),'遵守平台全局Retry-After')
     client=BrainClient(cfg.private_dir)
-    if not list(client.jar):
-        raise AdapterError(AdapterError.AUTH, 'BRAIN认证/权限未通过：本地会话已过期；先执行 wq brain login')
     root=Path(cfg.private_dir)/'brain-runs'/tid;root.mkdir(parents=True,exist_ok=True,mode=0o700)
     if not row:
         if payload.get('purpose')=='research_validation':
@@ -70,10 +86,32 @@ def step(conn,cfg,task,payload):
             return later(conn,tid,(util.parse_iso(cooldown)-util.now()).total_seconds(),'遵守平台全局Retry-After')
         active=conn.execute("SELECT task_id FROM brain_runs WHERE state IN ('post_started','polling','fetching') LIMIT 1").fetchone()
         if active:return later(conn,tid,60,'已有在途模拟，保持单并发')
+        starts=[util.parse_iso(r[0]) for r in conn.execute('SELECT started_at FROM brain_runs')]
+        now=util.now()
+        daily=cfg.get('brain_api','max_posts_per_24h',default=4)
+        if int(daily)<=0:return 'blocked',{},'本地模拟日派发额度为0'
+        recent=sorted(t for t in starts if now-t<dt.timedelta(hours=24))
+        if recent and len(recent)>=int(daily):
+            return later(conn,tid,(recent[-int(daily)]+dt.timedelta(hours=24)-now).total_seconds(),'滚动24小时模拟派发上限，包含拒绝和未知尝试')
+        spacing=int(cfg.get('brain_api','min_post_interval_s',default=60))
+        if starts and (now-max(starts)).total_seconds()<spacing:
+            return later(conn,tid,spacing-(now-max(starts)).total_seconds(),'公共入口最短派发间隔')
         week=util.iso_week()
         used=sum(util.iso_week(util.parse_iso(r[0]))==week for r in conn.execute('SELECT started_at FROM brain_runs'))
         if used>=int(cfg.get('limits','sims_per_week',default=24)):return 'blocked',{},'本地模拟派发上限已到，含结果未知的尝试'
         validate_request(payload['request'])
+        # 在唯一允许POST的临界点再次做只读预检；Keychain自动登录只恢复
+        # 认证，不重放任何不确定的POST。
+        try:
+            code, _, _ = client.preflight(cfg)
+        except AdapterError as exc:
+            if exc.kind == AdapterError.AUTH:
+                store.set_flag(conn,'paused','1')
+                store.set_flag(conn,'pause_origin','auth')
+                store.set_flag(conn,'pause_reason','auth: '+str(exc))
+            return 'blocked', {}, str(exc) + '；未发送POST'
+        if not 200 <= int(code) < 300:
+            return 'blocked', {}, f'BRAIN预检返回HTTP {code}；未发送POST'
         conn.execute('INSERT INTO brain_runs(task_id,state,started_at,updated_at) VALUES(?,?,?,?)',(tid,'post_started',util.now_iso(),util.now_iso()))
         conn.commit()
         try:
@@ -83,6 +121,7 @@ def step(conn,cfg,task,payload):
                 conn.execute("UPDATE brain_runs SET state='rejected',updated_at=? WHERE task_id=?",(util.now_iso(),tid))
                 if e.kind==AdapterError.AUTH:
                     store.set_flag(conn,'paused','1')
+                    store.set_flag(conn,'pause_origin','auth')
                     store.set_flag(conn,'pause_reason','auth: '+str(e))
                 elif e.kind==AdapterError.RATE_LIMIT:
                     store.set_flag(conn,'brain_not_before',(util.now()+dt.timedelta(seconds=max(60,e.retry_after or 60))).isoformat())
@@ -99,30 +138,58 @@ def step(conn,cfg,task,payload):
         util.write_json(str(root/'receipt.json'),{'http_status':status,'location':loc,'body':data})
         return later(conn,tid,retry_delay(headers.get('retry-after')),'已接受模拟，等待结果；不会再次POST')
     if row['state']=='rejected':return 'blocked',{},'已被拒绝的请求不自动重发'
+    if row['state'] in ('polling','fetching') and not list(client.jar):
+        try:
+            code, _, _ = client.preflight(cfg)
+        except AdapterError as e:
+            if e.kind == AdapterError.AUTH:
+                store.set_flag(conn,'paused','1')
+                store.set_flag(conn,'pause_origin','auth')
+                store.set_flag(conn,'pause_reason','auth: '+str(e))
+            return 'blocked',{},str(e)+'；未重放POST'
+        if not 200 <= int(code) < 300:
+            return 'blocked',{},f'BRAIN预检返回HTTP {code}；未重放POST'
     try:
         if row['state']=='polling':
-            _,headers,data=client.request('GET',row['location'])
+            _,headers,data=get_with_reauth(client,cfg,row['location'])
             util.write_json(str(root/'poll.json'),data)
             if data.get('status') in ('ERROR','FAIL','FAILED','CANCELLED'):
                 conn.execute("UPDATE brain_runs SET state='failed' WHERE task_id=?",(tid,))
                 return 'failed',{'evidence':str(root/'poll.json')},'平台模拟失败'
             if not data.get('alpha'):
-                return later(conn,tid,retry_delay(headers.get('retry-after')),'模拟仍未完成')
+                elapsed = max(0, (util.now()-util.parse_iso(row['started_at'])).total_seconds())
+                progress = data.get('progress')
+                label = (f'平台报告进度 {progress:.0%}'
+                         if type(progress) in (int, float) and math.isfinite(progress) and 0 <= progress <= 1
+                         else '平台未提供有效进度')
+                reason = f'模拟仍未完成：{label}，已等待 {elapsed/60:.0f} 分钟'
+                if elapsed >= 86400:
+                    return 'blocked', {'evidence': str(root/'poll.json')}, reason+'；超过24小时，保留回执待核对，不重发POST'
+                delay = retry_delay(headers.get('retry-after'), default=300 if elapsed >= 3600 else 60)
+                return later(conn,tid,delay,reason)
             aid=data['alpha']
             if not isinstance(aid,str) or not aid.isalnum():return 'unknown',{},'异常alpha标识，需核对'
             conn.execute("UPDATE brain_runs SET state='fetching',alpha_id=?,updated_at=? WHERE task_id=?",(aid,util.now_iso(),tid))
-            return later(conn,tid,60,'模拟生成Alpha，下一轮读取真实结果')
+            return later(conn,tid,retry_delay(headers.get('retry-after')),'模拟生成Alpha，下一轮读取真实结果')
         if row['state']!='fetching':return 'blocked',{},'模拟状态需人工核对'
-        _,_,alpha=client.request('GET','/alphas/'+row['alpha_id'])
+        _,headers,alpha=get_with_reauth(client,cfg,'/alphas/'+row['alpha_id'])
     except AdapterError as e:
-        if e.kind in (AdapterError.NETWORK,AdapterError.RATE_LIMIT):return later(conn,tid,e.retry_after or 60,str(e))
+        if e.kind==AdapterError.AUTH:
+            store.set_flag(conn,'paused','1')
+            store.set_flag(conn,'pause_origin','auth')
+            store.set_flag(conn,'pause_reason','auth: '+str(e))
+            return 'blocked',{},str(e)+'；未重放POST'
+        if e.kind in (AdapterError.NETWORK,AdapterError.RATE_LIMIT):
+            if e.kind==AdapterError.RATE_LIMIT:
+                store.set_flag(conn,'brain_not_before',(util.now()+dt.timedelta(seconds=max(60,e.retry_after or 60))).isoformat())
+            return later(conn,tid,e.retry_after or 60,str(e))
         raise
     regular=alpha.get('regular',{})
     if alpha.get('id')!=row['alpha_id'] or regular.get('code','').strip()!=payload['request']['regular'].strip():
         return 'unknown',{},'Alpha ID或表达式与任务不符，拒绝入账'
     for key,value in payload['request']['settings'].items():
         if alpha.get('settings',{}).get(key)!=value:return 'unknown',{},'返回的模拟设置不符: '+key
-    if not isinstance(alpha.get('is'),dict) or 'sharpe' not in alpha['is']:return later(conn,tid,60,'Alpha统计结果尚未就绪')
+    if not isinstance(alpha.get('is'),dict) or 'sharpe' not in alpha['is']:return later(conn,tid,retry_delay(headers.get('retry-after')),'Alpha统计结果尚未就绪')
     evidence=root/'alpha.json';util.write_json(str(evidence),alpha)
     checks=alpha['is'].get('checks',[])
     labels=[x.get('result') for x in checks if isinstance(x,dict)]
@@ -138,6 +205,9 @@ def step(conn,cfg,task,payload):
     try:
         result=importer.import_result_obj(conn,cfg,document,True)
         conn.execute("UPDATE brain_runs SET state='complete',evidence_path=?,updated_at=? WHERE task_id=?",(str(evidence),util.now_iso(),tid))
+        if cfg.get('research_feedback','enabled') and payload['purpose']=='research_validation':
+            from .feedback import enqueue
+            enqueue(conn,cfg,row['alpha_id'])
         conn.commit()
     except Exception:
         conn.rollback();raise
