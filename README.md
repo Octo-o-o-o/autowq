@@ -13,14 +13,14 @@
 ```sh
 git clone https://github.com/Octo-o-o-o/autowq.git
 cd autowq
-./wq onboard --lang zh
+./wq onboard
 ./wq doctor --fix-private
 ./wq validate result fixtures/synthetic-result-pass.json
 ./wq import-results fixtures/synthetic-result-pass.json
 ./wq tasks
 ```
 
-向导检测宿主 CLI，让你选择渠道、模型 ID、研究/审查/工程角色及可选思考强度。它生成本机配置与隔离运行入口，**不覆盖已有部署、不登录、不调用模型、不安装调度器**。模型是否能用取决于你自己的账号；发现可执行文件不等于验证了模型权限。
+向导检测宿主 CLI，让你选择渠道、模型 ID、研究/审查/工程角色及可选思考强度。它生成本机配置与隔离运行入口，**不覆盖已有部署、不启动付费推理、不安装调度器**。默认语言按环境判断：中文环境用中文，其余用英文；第一步可以切换，也可用 `--lang zh/en` 显式指定。向导包含供应商CLI与BRAIN登录，并提供[官方注册链接](https://platform.worldquantbrain.com/sign-up)。可以跳过登录，随后用 `./wq onboard --login-only` 继续。模型是否能用取决于你自己的账号；登录命令成功不等于验证了模型权限。
 
 支持的内置适配器：Grok Build、Devin、Cursor CLI，另有 macOS ZCode 应用入口。可以只选一个渠道做离线或单模型工作；持续自动研究必须有两个不同渠道，不能把同一模型自审当成独立检查。其他 CLI 需要实现适配器，而非任意填一个名称。
 
@@ -34,6 +34,20 @@ cd autowq
 - 逐候选正式提交：研究验收、最新平台检查、单次 POST、真实接收状态核验。
 - 中文任务进度、token 及费用来源；未知费用不记作零。
 - 单并发、预算、授权期限、平台限流、崩溃恢复与去重。
+
+## 常用命令
+
+```sh
+./wq help
+./wq help export
+./wq --version
+./wq login                         # BRAIN登录，显示注册链接
+./wq onboard --login-only          # 继续初始化登录
+./wq export --kind summary --output exports/summary.json
+./wq export --kind results --format csv --output exports/results.csv
+```
+
+导出支持summary/tasks/results和JSON/CSV；结果默认排除合成数据，任务导出仅含允许的状态字段。不会导出Cookie、密码、任务输入或证据文件路径，不覆盖同名文件。导出包含你的研究状态/指标，仅保存在本地；`exports/`被Git忽略。
 
 ## 查看与停止
 

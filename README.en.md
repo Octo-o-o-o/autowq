@@ -13,14 +13,14 @@ Requirements: Python 3.11+, Git, and model CLIs installed and authenticated usin
 ```sh
 git clone https://github.com/Octo-o-o-o/autowq.git
 cd autowq
-./wq onboard --lang en
+./wq onboard
 ./wq doctor --fix-private
 ./wq validate result fixtures/synthetic-result-pass.json
 ./wq import-results fixtures/synthetic-result-pass.json
 ./wq tasks
 ```
 
-The wizard detects host executables and lets you select providers, model IDs, research/review/engineering roles and optional reasoning effort. It generates local configuration and isolated launchers. **It never overwrites an existing deployment, logs in, calls a model or installs a scheduler.** Finding an executable does not verify authentication or model entitlement.
+The wizard detects host executables and lets you select providers, model IDs, research/review/engineering roles and optional reasoning effort. It generates local configuration and isolated launchers. **It never overwrites an existing deployment, starts paid inference or installs a scheduler.** The default language is Chinese for Chinese locales and English otherwise. Choose another language at the first prompt or pass `--lang zh/en`. The wizard includes vendor CLI and BRAIN login, with the [official registration URL](https://platform.worldquantbrain.com/sign-up). You can skip and resume with `./wq onboard --login-only`. A successful login command does not verify model entitlement.
 
 Built-in adapters cover Grok Build, Devin and Cursor CLI, plus the ZCode app on macOS. One provider supports offline or single-provider work; continuous research requires two distinct providers. Another CLI requires an adapter, not just an arbitrary provider name. Most operational CLI output is currently Chinese; structured output is available for supported commands.
 
@@ -34,6 +34,20 @@ Follow the **[complete bilingual onboarding checklist](docs/onboarding.md)**: si
 - Per-candidate submission: research review, fresh platform checks, one POST and verified acceptance.
 - Task progress and token/cost provenance; unknown costs never become zero.
 - Single concurrency, budgets, authorization expiration, rate-limit handling, recovery and deduplication.
+
+## Common commands
+
+```sh
+./wq help
+./wq help export --lang en
+./wq --version
+./wq login                         # BRAIN login, with registration URL
+./wq onboard --login-only          # Resume account setup
+./wq export --kind summary --output exports/summary.json
+./wq export --kind results --format csv --output exports/results.csv
+```
+
+Exports support summary/tasks/results in JSON or CSV. Results exclude synthetic data by default. Task exports contain only explicitly selected status fields; cookies, passwords, task inputs and evidence paths are excluded. Existing files are never overwritten. Exports contain your local research information and stay local; `exports/` is ignored by Git.
 
 ## Inspect and stop
 

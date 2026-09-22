@@ -10,6 +10,7 @@ import time
 
 from . import contracts, dedup, importer, reconcile, report, runner, store, util
 from .config import Config, validate_stage
+from .i18n import default_language, text, localize_help, preferred_language
 from .errors import (AdapterError, BLOCKED, ContractError, DUPLICATE, ERR, INVALID,
                      NOT_IMPLEMENTED, OK, PAUSED, WqExit)
 from .wrappers import agent as agent_runner
@@ -400,13 +401,15 @@ def cmd_brain(args):
         if args.action == 'login':
             import getpass
             if not sys.stdin.isatty():
-                raise ValueError('登录需本人在交互终端输入；不接受聊天或命令行明文密码')
+                raise ValueError(text(getattr(args,'lang',default_language()),'登录需本人在交互终端输入；不接受命令行明文密码','Login requires your interactive terminal; plaintext passwords in arguments are not accepted'))
+            print(text(getattr(args,'lang',default_language()),'没有账号？注册：','Need an account? Register: ')+'https://platform.worldquantbrain.com/sign-up')
             username = input('BRAIN Email: ').strip()
-            password = getpass.getpass('BRAIN Password（不保存）: ')
+            password = getpass.getpass(text(getattr(args,'lang',default_language()),'BRAIN 密码（不保存）: ','BRAIN password (not saved): '))
             result = BrainClient(cfg.private_dir).login(username, password)
             from .autopilot import after_login
             store.set_flag(conn, 'brain_auto_auth_not_before', '')
             result['resumed_get_tasks'] = after_login(conn)
+            conn.commit()
             _out(result)
             return OK
         if args.action == 'keychain-save':
@@ -539,11 +542,35 @@ def cmd_onboard(args):
     return subprocess.call([sys.executable,str(script),*args.onboard_args])
 
 
-def build_parser() -> argparse.ArgumentParser:
+def cmd_export(args):
+    from .exporter import write
+    cfg,conn=_ctx(args)
+    try:
+        _out(write(conn,args.output,args.kind,args.format,args.include_synthetic))
+    except FileExistsError:
+        raise WqExit(INVALID,text(args.lang,"导出文件已存在；请选择新路径，不覆盖现有数据。","Export file already exists; choose a new path. Existing data was not overwritten."))
+    finally: conn.close()
+    return OK
+
+
+def build_parser(lang=None) -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="wq", description="WorldQuant 研究试点本地工具（离线优先）")
+    lang=lang or default_language()
+    p.add_argument("--lang",choices=["zh","en"],default=lang,help="界面语言 / Interface language")
+    p.add_argument("--version",action="version",version="wq 0.1.0")
     p.add_argument("--config", help="config.json 路径，默认 ./config/config.json")
     p.add_argument("--db", help="覆盖 SQLite 路径（测试用）")
     sub = p.add_subparsers(dest="cmd", required=True)
+
+    sub.add_parser('help',help=text(lang,'显示命令帮助：wq help [命令]','Show command help: wq help [command]'))
+    s=sub.add_parser('login',help=text(lang,'登录BRAIN（含注册链接）','Sign in to BRAIN (includes registration URL)'))
+    s.set_defaults(fn=cmd_brain,action='login')
+    s=sub.add_parser('export',help=text(lang,'导出摘要/任务/结果为JSON或CSV，不含凭据','Export summary/tasks/results as JSON or CSV, without credentials'))
+    s.add_argument('--kind',choices=['summary','tasks','results'],default='summary')
+    s.add_argument('--format',choices=['json','csv'],default='json')
+    s.add_argument('--output',required=True,help=text(lang,'目标文件（不覆盖）','Destination file (never overwritten)'))
+    s.add_argument('--include-synthetic',action='store_true')
+    s.set_defaults(fn=cmd_export)
 
     s = sub.add_parser('onboard', help='首次使用：选择本地CLI、模型和角色 / first-run wizard', add_help=False)
     s.add_argument('onboard_args', nargs=argparse.REMAINDER)
@@ -670,7 +697,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_account_stage)
 
     s = sub.add_parser("budget", help="设置预算闸门（写回 config.json）")
-    s.add_argument("name", choices=["simulation", "grok", "devin"])
+    s.add_argument("name", choices=["simulation", "grok", "devin", "cursor", "zcode"])
     g = s.add_mutually_exclusive_group()
     g.add_argument("--enable", action="store_true")
     g.add_argument("--disable", action="store_true")
@@ -692,14 +719,25 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--json", action="store_true", help="保留机器可读 JSON 格式")
     s.set_defaults(fn=cmd_tasks)
 
-    return p
+    return localize_help(p,lang)
 
 
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    argv = [part for item in argv for part in (item.split('=',1) if item.startswith('--lang=') else [item])]
     if argv and argv[0]=='onboard':
         return cmd_onboard(argparse.Namespace(onboard_args=argv[1:]))
-    args = build_parser().parse_args(argv)
+    config_path=argv[argv.index('--config')+1] if '--config' in argv and argv.index('--config')+1<len(argv) else 'config/config.json'
+    lang=preferred_language(config_path)
+    if '--lang' in argv:
+        i=argv.index('--lang')
+        if i+1>=len(argv) or argv[i+1] not in ('zh','en'): build_parser().error('--lang: choose zh or en')
+        lang=argv[i+1];del argv[i:i+2]
+    if argv and argv[0]=='help':
+        argv=argv[1:]+['--help']
+    if argv and argv[0]=='onboard':
+        return cmd_onboard(argparse.Namespace(onboard_args=['--lang',lang,*argv[1:]]))
+    args = build_parser(lang).parse_args(argv)
     try:
         return args.fn(args)
     except WqExit as e:

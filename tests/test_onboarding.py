@@ -71,7 +71,9 @@ class OnboardingTests(unittest.TestCase):
               '--binary','grok='+sys.executable,'--binary','devin='+sys.executable]
         r=subprocess.run(args,stdin=subprocess.DEVNULL,capture_output=True,text=True,timeout=10)
         self.assertEqual(r.returncode,0,r.stderr)
-        self.assertIn('No login, paid requests',r.stdout)
+        self.assertIn('No paid inference',r.stdout)
+        self.assertIn('https://platform.worldquantbrain.com/sign-up',r.stdout)
+        self.assertIn('Login pending',r.stdout)
         before=(self.root/'config/config.json').read_bytes()
         r=subprocess.run(args,stdin=subprocess.DEVNULL,capture_output=True,text=True,timeout=10)
         self.assertNotEqual(r.returncode,0)
@@ -80,3 +82,30 @@ class OnboardingTests(unittest.TestCase):
     def test_cli_help_forwards_options(self):
         r=subprocess.run([sys.executable,'-m','wq','onboard','--help'],capture_output=True,text=True,timeout=10)
         self.assertEqual(r.returncode,0,r.stderr);self.assertIn('--reasoning-effort',r.stdout)
+
+    def test_login_flow_records_pending_and_resume_without_overwrite(self):
+        from unittest.mock import patch
+        self.configure()
+        with patch('builtins.input',side_effect=['n','n','n']),patch('subprocess.call') as call:
+            code=onboard.login_flow(self.root,'en')
+        self.assertEqual(code,3);call.assert_not_called()
+        saved=json.loads((self.root/'config/config.json').read_text())
+        self.assertFalse(saved['onboarding']['authentication_verified'])
+        with patch('builtins.input',side_effect=['n','n','y']),patch('subprocess.call',return_value=0) as call:
+            code=onboard.login_flow(self.root,'en')
+        self.assertEqual(code,0)
+        self.assertEqual(call.call_args.args[0][-2:],['brain','login'])
+        saved=json.loads((self.root/'config/config.json').read_text())
+        self.assertEqual(saved['onboarding']['login']['brain'],'authenticated')
+        self.assertNotIn('password',json.dumps(saved).lower())
+        self.assertFalse(saved['brain_api']['enabled'])
+
+    def test_interactive_language_defaults_and_skip_login(self):
+        from unittest.mock import patch
+        args=['--root',str(self.root),'--runtime',str(self.runtime),'--providers','grok,devin',
+              '--model','grok=chosen','--model','devin=review','--binary','grok='+sys.executable,
+              '--binary','devin='+sys.executable,'--research','grok','--review','devin',
+              '--engineering','devin','--reasoning-effort','grok=high','--skip-login']
+        with patch.dict('os.environ',{'LC_ALL':'zh_CN.UTF-8'}),patch('sys.stdin.isatty',return_value=True),patch('builtins.input',side_effect=['en','y']):
+            self.assertEqual(onboard.main(args),0)
+        self.assertEqual(json.loads((self.root/'config/config.json').read_text())['ui']['language'],'en')

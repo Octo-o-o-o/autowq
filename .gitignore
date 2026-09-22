@@ -35,3 +35,6 @@ docs/manual-import.md
 build/
 dist/
 *.egg-info/
+
+# Explicit local report exports
+exports/
