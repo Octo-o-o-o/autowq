@@ -66,3 +66,7 @@
 - Focused integration: 15 tests passed, including local HTTP wire requests for all three APIs, actual subprocess CLI fixtures, actual macOS sandbox execution with denied project reads, no-secret HTTP error output, budget enforcement, usage rendering and workflow application. No production API inference or newly supported CLI inference was executed. Existing live account/configuration was not edited.
 
 - Final clean-source full suite: 289 discovered, 287 passed, 2 optional Docker tests skipped. Wheel build passed using isolated build dependencies. The first no-build-isolation attempt failed because the host Python lacks setuptools; no global dependency was installed. macOS sandbox integration passed; Linux CI skips that one host-specific test.
+
+## All-cycle research review (2026-09-23)
+
+Added all-closed-cycle diagnostic snapshots, manual/idle periodic review, research plus distinct-provider verification, hash/citation validation and fixed guidance injection into future prompts. Eight focused tests passed; full suite 297 discovered, 295 passed, two optional Docker tests skipped. This verifies software behavior, not improved Alpha quality. Raw platform data is not copied to model packets.

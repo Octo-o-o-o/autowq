@@ -191,7 +191,8 @@ def provider(conn,tid):
 
 def make_job(conn,cfg,cid,role,text,exclude=None):
     from . import workflow
-    text=workflow.customize(cfg,role,text)
+    from . import history_research
+    text=workflow.customize(cfg,role,text)+history_research.context(conn,cfg)
     root=Path(cfg.private_dir)/'autopilot'/str(cid);root.mkdir(parents=True,exist_ok=True,mode=0o700)
     prompt=root/(role+'.md');prompt.write_text(text);prompt.chmod(0o600)
     # 仅这份公开概念提示进入受沙箱限制的副本。

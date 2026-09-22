@@ -87,3 +87,5 @@ PYTHONPATH=src python3 -m unittest discover -s tests
 配置、Cookie、真实 Alpha、数据库、模型输出、运行日志和个人研究档案不进入 Git。`fixtures/` 仅含合成数据，不能作为真实研究成绩。源码备份不等于运行状态备份。
 
 本项目非 WorldQuant 官方产品。目前尚未选择开源 LICENSE；上传 GitHub 不等于已经授予开源许可。仓库可见性和正式开源由维护者另行决定。
+
+全历史复盘支持手动与自动触发：`./wq auto-research report`、`./wq auto-research run`；设置周期见[Auto Research说明](docs/auto-research.md)。不同渠道复核后，固定指导语进入后续研究与审查Prompt，预算和质量门槛不变。

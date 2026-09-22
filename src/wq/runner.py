@@ -148,6 +148,9 @@ def _run_once(conn, cfg, lease_s: int) -> tuple[int, list[str]]:
         lines.append('auth pause automatically recovered from macOS Keychain; resumed safe reads: '
                      + (', '.join(recovered) if recovered else 'none'))
 
+    from . import history_research
+    autopilot.setup(conn)
+    history_research.tick(conn, cfg)
     autopilot.tick(conn, cfg)
 
     task = store.claim_task(conn, owner=f"wq-{os.getpid()}", lease_s=lease_s)

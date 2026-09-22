@@ -581,6 +581,8 @@ def build_parser(lang=None) -> argparse.ArgumentParser:
     from . import providers, workflow
     providers.add_parser(sub)
     workflow.add_parser(sub)
+    from . import history_research
+    history_research.add_parser(sub)
 
     sub.add_parser('help',help=text(lang,'显示命令帮助：wq help [命令]','Show command help: wq help [command]'))
     s=sub.add_parser('login',help=text(lang,'登录BRAIN（含注册链接）','Sign in to BRAIN (includes registration URL)'))

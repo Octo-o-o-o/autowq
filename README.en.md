@@ -87,3 +87,5 @@ PYTHONPATH=src python3 -m unittest discover -s tests
 Configuration, cookies, real Alphas, databases, model outputs, logs and personal research stay outside Git. Fixtures are synthetic and do not establish real research performance. A source backup is not a runtime-state backup.
 
 This is not an official WorldQuant product. No open-source LICENSE has been selected yet; publishing source on GitHub does not itself grant an open-source license. Repository visibility and an eventual open-source release are separate maintainer decisions.
+
+All-cycle review supports manual and automatic runs: `./wq auto-research report` and `./wq auto-research run`. See [Auto Research](docs/auto-research.md) for cadence and independent review. Accepted fixed guidance enters future prompts without changing budgets or quality gates.
