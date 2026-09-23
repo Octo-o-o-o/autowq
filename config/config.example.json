@@ -102,7 +102,8 @@
     "error_cooldown_s": 3600,
     "max_cycles_per_day": 4,
     "max_simulations_per_week": 24,
-    "max_cycles_total": null
+    "max_cycles_total": null,
+    "sign_flip_rescue_sharpe": -0.8
   },
   "brain_submission": {
     "enabled": false,
@@ -110,6 +111,12 @@
   },
   "research_feedback": {
     "enabled": false,
-    "max_combination_plans": 2
+    "max_combination_plans": 2,
+    "segment_rules": {
+      "min_sharpe": 1.25,
+      "min_fitness": 1.0,
+      "min_years": 3,
+      "max_negative_years": 0
+    }
   }
 }

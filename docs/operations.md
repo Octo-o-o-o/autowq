@@ -128,3 +128,23 @@ UNKNOWN 对账先查官方历史，并保留核实依据。以下命令中的 ID
 提交节奏与研究节奏分开：代码保留滚动24小时最多一次正式提交POST的本地策略，不是平台规定。官方IQC FAQ说明的是每天最多2000资格分；社区关于非顾问提交次数存在不一致说法，不能据此保证账号额度。收到HTTP429时尊重Retry-After全局冷却，不把冷却到期等同于平台一定解除限流。
 
 来源：[官方积分FAQ](https://support.worldquantbrain.com/hc/en-us/articles/12805645726359-Is-there-a-limit-to-number-of-daily-submissions-or-number-of-daily-points-in-IQC-2026)、[社区讨论（经验非保证）](https://support.worldquantbrain.com/hc/en-us/community/posts/29114870005143-Limit-to-daily-score-of-alphas)、[官方提交门槛](https://platform.worldquantbrain.com/learn/documentation/interpret-results/alpha-submission)。
+
+## 研究范围扩展：字段目录、角色登记与预登记变体（2026-09-23）
+
+模型仍然只看到抽象角色，不看到平台字段名；扩展范围的方法是把已核验字段登记为新角色。
+
+```sh
+./wq brain fields --datasets                      # 当前设置下按数据集汇总（只读，私有目录缓存）
+./wq brain fields --dataset fundamental6 --min-coverage 0.5 --search margin
+./wq brain field-evidence sales enterprise_value  # 生成与既有格式一致的证据快照
+./wq policy add-role sales_to_ev --expression '(sales / if_else(enterprise_value > 0, enterprise_value, NaN))' \
+  --fields sales,enterprise_value --cluster fundamental --description '过去已知的季度销售额/正企业价值，估值代理；不是增长率或首次披露事件'
+./wq policy roles
+```
+
+- `add-role` 要求每个字段都有与策略 region/universe/delay 一致的证据快照，写入 `bindings` 与 `evidence_files` 哈希并刷新 `verified_at`；`description` 是模型看到的全部说明，必须写明它不代表什么，且不要写平台字段名。分组字段用 `--group-field`，名字必须是 market/sector/industry/subindustry 之一。
+- 策略 `setting_variants`（最多 2 个，只允许 decay/neutralization/truncation）在每轮准入时与基础请求一起预登记；变体同轮派发、全部入账，`autopilot feedback` 与模型上下文都能看到。基础结果 Sharpe 低于 `autopilot.sign_flip_rescue_sharpe`（默认 -0.8，设 null 关闭）时再派发一次预登记的符号翻转复核。每轮最多 4 次平台请求，请相应放大 `limits.sims_per_week`、`autopilot.max_simulations_per_week` 与 `brain_api.max_posts_per_24h`。
+- 模型上下文新增粗档位（收益风险比/收益效率/换手各 5 档）和角色/数据簇使用统计；精确数值、字段名与序列仍不外发。
+- `research_feedback.segment_rules` 可覆盖本地分段门槛（`min_sharpe`、`min_fitness`、`min_years`、`max_negative_years`）；改动后执行 `./wq autopilot collect-feedback` 用已有资料本地重算，不发网络请求。放宽是研究裁决，不改变平台检查与逐候选提交验收。
+- 修改策略或角色会改变策略 hash：活动轮次结束，新轮次才使用新范围。复盘与缺口清单见 [2026-09-23 流程复盘](plan/2026-09-23-gap-review.md)。
+

@@ -467,8 +467,55 @@ def cmd_brain(args):
             tid,created=brain_jobs.enqueue(conn,cfg,util.read_json(args.file))
             _out({'task_id':tid,'created':created,'note':'仅模拟，不提交Alpha'})
             return OK if created else DUPLICATE
+        if args.action in ('fields', 'field-evidence'):
+            from . import catalog, autopilot
+            query = catalog.query_from_settings(autopilot.policy(cfg)['settings'])
+            if args.action == 'field-evidence':
+                client = BrainClient(cfg.private_dir); client.preflight(cfg)
+                written = []
+                for fid in args.field_id:
+                    path = catalog.evidence_path(cfg.private_dir, fid, query)
+                    util.write_json(path, catalog.field_snapshot(client, fid, query)); os.chmod(path, 0o600)
+                    written.append({'field': fid, 'path': path, 'sha256': util.sha256_json(util.read_json(path))})
+                _out({'query': query, 'evidence': written, 'note': '证据只在私有目录；用 wq policy add-role 登记角色'})
+                return OK
+            path = catalog.catalog_path(cfg.private_dir, query)
+            if args.refresh or not os.path.exists(path):
+                client = BrainClient(cfg.private_dir); client.preflight(cfg)
+                doc = catalog.fetch_catalog(client, query)
+                util.write_json(path, doc); os.chmod(path, 0o600)
+            doc = catalog.load_catalog(cfg.private_dir, query)
+            if args.datasets:
+                _out({'query': query, 'count': doc['count'], 'complete': doc['complete'], 'datasets': catalog.datasets(doc)})
+                return OK
+            rows = catalog.search(doc, args.search, args.dataset, args.type, args.min_coverage, args.limit)
+            _out({'query': query, 'count': doc['count'], 'queried_at': doc['queried_at'], 'shown': len(rows), 'fields': rows})
+            return OK
     except AdapterError as exc:
         _out({'kind':exc.kind,'error':str(exc)});return BLOCKED
+
+
+def cmd_policy(args):
+    from . import catalog, autopilot, research_dsl
+    cfg, conn = _ctx(args)
+    path = cfg.resolve(cfg.get('autopilot', 'policy_file', default='config/autopilot-policy.json'))
+    if args.action == 'roles':
+        p = autopilot.policy(cfg)
+        _out({'roles': {k: {'fields': v['fields'], 'cluster': v.get('cluster'), 'description': v.get('description', research_dsl.public_contract()['roles'].get(k))} for k, v in p['bindings'].items()},
+              'setting_variants': p.get('setting_variants', []), 'verified_at': p['verified_at'], 'valid_until': p['valid_until']})
+        return OK
+    if args.action == 'add-role':
+        fields = [x.strip() for x in args.fields.split(',') if x.strip()]
+        query = catalog.query_from_settings(autopilot.policy(cfg)['settings'])
+        evidence = args.evidence or [catalog.evidence_path(cfg.private_dir, f, query) for f in fields]
+        binding = catalog.add_role(path, args.name, args.expression, fields, args.description, evidence, args.cluster, args.group_field)
+        try:
+            autopilot.policy(cfg)
+        except ValueError as exc:
+            _out({'error': '策略登记后未通过校验：' + str(exc)}); return INVALID
+        _out({'role': args.name, 'binding': binding, 'note': '新角色只影响之后创建的研究轮次；活动轮次会因策略hash变化而结束'})
+        return OK
+    return INVALID
 
 
 def cmd_autopilot(args):
@@ -484,7 +531,8 @@ def cmd_autopilot(args):
                     tid,created=feedback.enqueue(conn,cfg,row[0])
                     if created:queued.append(tid)
                 except ValueError:continue
-            conn.commit();_out({'queued':queued,'note':'仅收集真实研究Alpha的只读记录集；由现有本地队列执行'})
+            refreshed=feedback.refresh_local(conn,cfg)
+            conn.commit();_out({'queued':queued,'refreshed_local':refreshed,'note':'仅收集真实研究Alpha的只读记录集；由现有本地队列执行。已有资料按当前规则重算诊断，不发网络请求'})
         else:
             result=feedback.report(conn)
             if args.json: _out(result)
@@ -614,6 +662,20 @@ def build_parser(lang=None) -> argparse.ArgumentParser:
             b.add_argument('--review', required=True, help='已完成的提交研究验收JSON；不可使用模板占位')
         b.set_defaults(fn=cmd_brain)
     b=bs.add_parser('enqueue');b.add_argument('file');b.set_defaults(fn=cmd_brain)
+    b=bs.add_parser('fields',help='只读字段目录快照与检索（私有目录缓存）')
+    b.add_argument('--refresh',action='store_true');b.add_argument('--search');b.add_argument('--dataset')
+    b.add_argument('--datasets',action='store_true',help='按数据集汇总数量');b.add_argument('--type',default='MATRIX')
+    b.add_argument('--min-coverage',type=float,default=0.0);b.add_argument('--limit',type=int,default=50);b.set_defaults(fn=cmd_brain)
+    b=bs.add_parser('field-evidence',help='为字段生成当前设置下的证据快照');b.add_argument('field_id',nargs='+');b.set_defaults(fn=cmd_brain)
+
+    s = sub.add_parser('policy', help='研究策略：查看角色、用已核验字段登记新角色')
+    pl = s.add_subparsers(dest='action', required=True)
+    pl.add_parser('roles').set_defaults(fn=cmd_policy)
+    a = pl.add_parser('add-role')
+    a.add_argument('name'); a.add_argument('--expression', required=True); a.add_argument('--fields', required=True, help='逗号分隔的平台字段ID')
+    a.add_argument('--description', required=True, help='给模型看的角色说明，写明它不代表什么'); a.add_argument('--cluster', help='数据簇标签，如 pv/fundamental/analyst')
+    a.add_argument('--evidence', nargs='*', help='证据快照路径；默认按字段ID在私有目录查找'); a.add_argument('--group-field', action='store_true')
+    a.set_defaults(fn=cmd_policy)
 
     s = sub.add_parser('evidence-check', help='核验证据声明；不把声明完整视为平台就绪')
     s.add_argument('--preregister', required=True)

@@ -54,7 +54,11 @@ Follow the **[complete bilingual onboarding checklist](docs/onboarding.md)**: si
 ./wq onboard --login-only          # Resume account setup
 ./wq export --kind summary --output exports/summary.json
 ./wq export --kind results --format csv --output exports/results.csv
+./wq brain fields --datasets           # read-only data-field catalog snapshot, grouped by dataset
+./wq policy roles                      # abstract roles visible to models and preregistered setting variants
 ```
+
+Widening the research scope needs no code change: `wq brain field-evidence` snapshots field evidence and `wq policy add-role` registers verified fields as abstract roles; `setting_variants` in the policy runs a few preregistered decay/neutralization variants per cycle with every result recorded. See the operations guide.
 
 Exports support summary/tasks/results in JSON or CSV. Results exclude synthetic data by default. Task exports contain only explicitly selected status fields; cookies, passwords, task inputs and evidence paths are excluded. Existing files are never overwritten. Exports contain your local research information and stay local; `exports/` is ignored by Git.
 

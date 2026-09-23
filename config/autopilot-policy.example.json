@@ -8,7 +8,9 @@
     "daily_return": {
       "expression": "",
       "fields": [],
-      "source": ""
+      "source": "",
+      "description": "Model-visible description: what the role measures and what it does NOT mean. Never put platform field IDs here.",
+      "cluster": "pv"
     },
     "activity_rank": {
       "expression": "",
@@ -33,5 +35,15 @@
   },
   "evidence_files": [],
   "settings": {},
-  "limits": "Only exploratory screens. No automatic submission."
+  "limits": "Only exploratory screens. No automatic submission. Register more roles with `wq policy add-role`; setting_variants are preregistered per cycle (max 2, decay/neutralization/truncation only).",
+  "setting_variants": [
+    {
+      "label": "decay8",
+      "decay": 8
+    },
+    {
+      "label": "subindustry",
+      "neutralization": "SUBINDUSTRY"
+    }
+  ]
 }

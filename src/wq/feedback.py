@@ -57,7 +57,41 @@ def correlation(left, right, minimum=252):
             'note': '探索期累计PnL差分相关性；不是官方SELF_CORRELATION，也不是独立样本外证据'}
 
 
-def diagnose(alpha, yearly=None):
+SEGMENT_RULES = {'min_sharpe': 1.25, 'min_fitness': 1.0, 'min_years': 3, 'max_negative_years': 0}
+BAND_CUTS = {'收益风险比档': (0, 0.5, 1.0, 1.25), '收益效率档': (0, 0.5, 0.75, 1.0),
+             '换手档': (0.01, 0.2, 0.4, 0.7)}
+
+
+def segment_rules(cfg=None):
+    rules = dict(SEGMENT_RULES)
+    custom = cfg.get('research_feedback', 'segment_rules', default=None) if cfg else None
+    if isinstance(custom, dict):
+        for k in rules:
+            if k in custom:
+                v = custom[k]
+                if isinstance(v, bool) or not isinstance(v, (int, float)) or v < 0:
+                    raise ValueError('segment_rules.' + k + ' 必须是非负数')
+                rules[k] = v
+    return rules
+
+
+def band(value, cuts):
+    if not number(value): return '缺失'
+    labels = ['<' + str(cuts[0])] + [f'{cuts[i]}–{cuts[i+1]}' for i in range(len(cuts)-1)] + ['≥' + str(cuts[-1])]
+    for i, c in enumerate(cuts):
+        if value < c: return labels[i]
+    return labels[-1]
+
+
+def bands(stats):
+    """粗粒度档位：给模型方向感，不外发精确平台数值。"""
+    return {'收益风险比档': band(stats.get('sharpe'), BAND_CUTS['收益风险比档']),
+            '收益效率档': band(stats.get('fitness'), BAND_CUTS['收益效率档']),
+            '换手档': band(stats.get('turnover'), BAND_CUTS['换手档'])}
+
+
+def diagnose(alpha, yearly=None, rules=None):
+    rules = rules or SEGMENT_RULES
     checks = alpha.get('is', {}).get('checks', [])
     blockers = problems(checks)
     failed = [c.get('name') for c in checks if c.get('result') == 'FAIL']
@@ -80,19 +114,23 @@ def diagnose(alpha, yearly=None):
             gaps.append(split+'指标缺失')
         else:
             temporal.append({'segment':split,'sharpe':s['sharpe'],'fitness':s['fitness']})
-            if s['sharpe'] < 1.25 or s['fitness'] < 1.0: gaps.append(split+'未达本地分段要求：Sharpe>=1.25且Fitness>=1')
+            if s['sharpe'] < rules['min_sharpe'] or s['fitness'] < rules['min_fitness']:
+                gaps.append(split+f"未达本地分段要求：Sharpe>={rules['min_sharpe']}且Fitness>={rules['min_fitness']}")
     if yearly is None: gaps.append('年度记录缺失')
     else:
         years = records(yearly)
-        if len({str(x.get('year')) for x in years}) < 3: gaps.append('年度覆盖不足3年（本地要求）')
+        if len({str(x.get('year')) for x in years}) < rules['min_years']: gaps.append(f"年度覆盖不足{rules['min_years']}年（本地要求）")
+        negative = []
         for y in years:
             if not all(number(y.get(k)) for k in ('sharpe','fitness','pnl')):
                 gaps.append('年度指标缺失'); continue
             temporal.append({k:y.get(k) for k in ('year','sharpe','fitness','pnl','stage')})
-            if y['pnl'] <= 0 or y['sharpe'] <= 0: gaps.append('年度收益非正：'+str(y.get('year')))
+            if y['pnl'] <= 0 or y['sharpe'] <= 0: negative.append(str(y.get('year')))
+        if len(negative) > rules['max_negative_years']:
+            gaps.extend('年度收益非正：'+y for y in negative)
     return {'alpha_id':alpha['id'], 'identity':identity(alpha), 'diagnosis':categories,
             'platform_blockers':blockers, 'retain_for_complementarity':bool(retain),
-            'temporal':temporal, 'validation_gaps':gaps,
+            'bands':bands(stats), 'temporal':temporal, 'validation_gaps':gaps,
             'submission_candidate':not blockers and not gaps,
             'note':'保留不等于达标；年度正收益是本地筛选，非平台门槛。反馈选出的候选属于适应性研究，不能声称未污染样本外。'}
 
@@ -144,7 +182,7 @@ def step(conn, cfg, task, payload):
         if (root/'check.json').exists():
             alpha=dict(alpha)
             alpha['is']={**alpha['is'],'checks':util.read_json(str(root/'check.json'))['is']['checks']}
-        result = diagnose(alpha, util.read_json(str(root/'yearly-stats.json')))
+        result = diagnose(alpha, util.read_json(str(root/'yearly-stats.json')), segment_rules(cfg))
         result['collection_status']='complete'
         result['pnl_path'] = str(root/'pnl.json')
         result['updated_at'] = util.now_iso()
@@ -159,6 +197,28 @@ def step(conn, cfg, task, payload):
                 store.set_flag(conn,'brain_not_before',(util.now()+dt.timedelta(seconds=exc.retry_after or 300)).isoformat())
             return later(conn,task['task_id'],exc.retry_after or 300,str(exc))
         raise
+
+
+def refresh_local(conn, cfg):
+    """用私有目录已有的只读资料重算诊断（含新档位与配置的分段规则），不发网络请求。"""
+    setup(conn)
+    updated = []
+    rules = segment_rules(cfg)
+    for row in conn.execute('SELECT alpha_id, identity, report_json FROM research_feedback').fetchall():
+        root = Path(cfg.private_dir)/'research-feedback'/row['alpha_id']
+        if not (root/'alpha.json').exists() or not (root/'yearly-stats.json').exists() or not (root/'pnl.json').exists():
+            continue
+        alpha = util.read_json(str(root/'alpha.json'))
+        if identity(alpha) != row['identity']: continue
+        if (root/'check.json').exists():
+            alpha = dict(alpha); alpha['is'] = {**alpha['is'], 'checks': util.read_json(str(root/'check.json'))['is']['checks']}
+        old = json.loads(row['report_json'])
+        result = diagnose(alpha, util.read_json(str(root/'yearly-stats.json')), rules)
+        result.update(collection_status='complete', pnl_path=str(root/'pnl.json'), updated_at=old.get('updated_at') or util.now_iso())
+        if result != old:
+            conn.execute('UPDATE research_feedback SET report_json=? WHERE alpha_id=?', (json.dumps(result, ensure_ascii=False), row['alpha_id']))
+            util.write_json(str(root/'report.json'), result); updated.append(row['alpha_id'])
+    return updated
 
 
 def report(conn):
@@ -180,13 +240,39 @@ def report(conn):
 
 
 def model_context(conn):
-    """只给固定枚举的诊断标签及模型自己已有提案的轮次，不外发数值/字段/序列。"""
+    """只给固定枚举的诊断标签、粗档位及模型自己已有提案的轮次，不外发精确数值/字段/序列。"""
     setup(conn)
-    return [{'cycle':r['cycle_id'], 'diagnosis':json.loads(r['report_json'])['diagnosis'],
-             'retain_for_complementarity':json.loads(r['report_json'])['retain_for_complementarity']}
-            for r in conn.execute('''SELECT c.cycle_id,f.report_json FROM research_cycles c
+    from .autopilot import setup as autopilot_setup
+    autopilot_setup(conn)
+    out = {}
+    rows = conn.execute('''SELECT c.cycle_id,'base' AS label,f.report_json FROM research_cycles c
                 JOIN brain_runs b ON b.task_id=c.simulation_task
-                JOIN research_feedback f ON f.alpha_id=b.alpha_id ORDER BY c.cycle_id DESC LIMIT 40''')]
+                JOIN research_feedback f ON f.alpha_id=b.alpha_id
+            UNION ALL
+            SELECT s.cycle_id,s.label,f.report_json FROM cycle_simulations s
+                JOIN brain_runs b ON b.task_id=s.task_id
+                JOIN research_feedback f ON f.alpha_id=b.alpha_id
+            ORDER BY 1 DESC''').fetchall()
+    for r in rows:
+        report = json.loads(r['report_json'])
+        entry = out.setdefault(r['cycle_id'], {'cycle': r['cycle_id'], 'diagnosis': None,
+                                               'retain_for_complementarity': None, 'bands': None, 'variants': []})
+        item = {'diagnosis': report['diagnosis'], 'bands': report.get('bands')}
+        if r['label'] == 'base':
+            entry.update(diagnosis=report['diagnosis'], retain_for_complementarity=report['retain_for_complementarity'],
+                         bands=report.get('bands'))
+        else:
+            entry['variants'].append({'label': r['label'], **item})
+    result = []
+    for cid in sorted(out, reverse=True)[:40]:
+        entry = out[cid]
+        if entry['diagnosis'] is None and entry['variants']:
+            first = entry['variants'][0]
+            entry.update(diagnosis=first['diagnosis'], retain_for_complementarity=False, bands=first['bands'])
+        if not entry['variants']: entry.pop('variants')
+        if entry['bands'] is None: entry.pop('bands')
+        result.append(entry)
+    return result
 
 
 def next_combination(conn, max_plans=2):
@@ -209,8 +295,6 @@ def next_combination(conn, max_plans=2):
         from . import research_dsl
         try:
             research_dsl.compile_ast(ast,json.loads(a['policy_json'])['bindings'])
-            nodes=json.dumps(ast)
-            if sum(nodes.count('"'+op+'"') for op in research_dsl.TIMESERIES)>2 or sum(nodes.count('"'+op+'"') for op in research_dsl.BINARY)>2: continue
         except ValueError: continue
         return {'pair_key':key,'parents':ids,'parent_cycles':[a['cycle_id'],b['cycle_id']],
                 'ast':ast,'correlation':pair,'experiment':'一次固定等权rank组合；不优化权重、窗口、符号；失败终止该父对'}

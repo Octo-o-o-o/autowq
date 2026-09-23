@@ -54,7 +54,11 @@ cd autowq
 ./wq onboard --login-only          # 继续初始化登录
 ./wq export --kind summary --output exports/summary.json
 ./wq export --kind results --format csv --output exports/results.csv
+./wq brain fields --datasets           # 只读字段目录快照，按数据集汇总
+./wq policy roles                      # 查看模型可用的抽象角色与预登记变体
 ```
+
+扩展研究范围不需要改代码：`wq brain field-evidence` 生成字段证据，`wq policy add-role` 把已核验字段登记为模型可见的抽象角色；策略里的 `setting_variants` 让每轮同时回测少量预登记的 decay/中性化变体，全部结果入账。见[运行手册](docs/operations.md)。
 
 导出支持summary/tasks/results和JSON/CSV；结果默认排除合成数据，任务导出仅含允许的状态字段。不会导出Cookie、密码、任务输入或证据文件路径，不覆盖同名文件。导出包含你的研究状态/指标，仅保存在本地；`exports/`被Git忽略。
 
