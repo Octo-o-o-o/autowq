@@ -294,9 +294,17 @@ def next_combination(conn, max_plans=2):
             JOIN brain_runs b ON b.task_id=c.simulation_task
             WHERE c.state='closed' AND c.cycle_id NOT IN (SELECT cycle_id FROM combination_plans)'''):
         if r['candidate_json']: parents[r['alpha_id']]=dict(r)
-    for pair in sorted(report(conn)['pairs'],key=lambda x: abs(x['value']) if x['value'] is not None else 2):
+    # 低相关只是准入条件；在准入的配对里优先父信号更强的组合（唯一一次全过门槛的
+    # 提交 vRrlJZpQ 就是强父信号的等权组合，弱+弱组合的第 30 轮未能救活）。
+    def strength(aid):
+        row = conn.execute('SELECT stats_json FROM simulations WHERE remote_id=? AND synthetic=0', (aid,)).fetchone()
+        try: value = json.loads(row['stats_json']).get('sharpe') if row else None
+        except (ValueError, TypeError): value = None
+        return value if number(value) else 0.0
+    pairs = [x for x in report(conn)['pairs'] if x['worth_combination_review']]
+    for pair in sorted(pairs, key=lambda x: (-(strength(x['parents'][0])+strength(x['parents'][1])), abs(x['value']))):
         ids = pair['parents']; key = ':'.join(ids)
-        if not pair['worth_combination_review'] or not all(x in parents for x in ids): continue
+        if not all(x in parents for x in ids): continue
         if conn.execute('SELECT 1 FROM combination_plans WHERE pair_key=?',(key,)).fetchone(): continue
         a,b = [parents[x] for x in ids]
         if json.loads(a['policy_json'])['settings'] != json.loads(b['policy_json'])['settings']: continue
