@@ -301,7 +301,10 @@ def next_combination(conn, max_plans=2):
         try: value = json.loads(row['stats_json']).get('sharpe') if row else None
         except (ValueError, TypeError): value = None
         return value if number(value) else 0.0
-    pairs = [x for x in report(conn)['pairs'] if x['worth_combination_review']]
+    # 已正式提交的信号不再作父信号：其组合会与已提交 alpha 高度自相关，无法通过官方 SELF_CORRELATION。
+    tables={x[0] for x in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    submitted={x[0] for x in conn.execute("SELECT alpha_id FROM brain_submissions WHERE state='accepted'")} if 'brain_submissions' in tables else set()
+    pairs = [x for x in report(conn)['pairs'] if x['worth_combination_review'] and not (set(x['parents']) & submitted)]
     for pair in sorted(pairs, key=lambda x: (-(strength(x['parents'][0])+strength(x['parents'][1])), abs(x['value']))):
         ids = pair['parents']; key = ':'.join(ids)
         if not all(x in parents for x in ids): continue

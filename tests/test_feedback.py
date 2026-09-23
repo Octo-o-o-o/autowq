@@ -118,4 +118,11 @@ class CombinationRankingTests(unittest.TestCase):
             with patch('wq.feedback.report',return_value={'pairs':pairs}):
                 plan=feedback.next_combination(c,max_plans=4)
             self.assertEqual(plan['parents'],['strongA','strongB'])
+            # 已提交的父信号被排除，退到下一对
+            from wq import brain_submission; brain_submission.setup(c)
+            tsub=store.enqueue_task(c,'brain_submission',{},'ksub')[0]
+            c.execute("INSERT INTO brain_submissions(task_id,alpha_id,sim_id,state,started_at,updated_at) VALUES(?,?,?,?,?,?)",(tsub,'strongA','simstrongA','accepted',util.now_iso(),util.now_iso()))
+            with patch('wq.feedback.report',return_value={'pairs':pairs}):
+                plan=feedback.next_combination(c,max_plans=4)
+            self.assertEqual(plan['parents'],['weakA','weakB'])
             c.close()
