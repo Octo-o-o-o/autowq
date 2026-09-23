@@ -473,10 +473,12 @@ def cmd_brain(args):
             if args.action == 'field-evidence':
                 client = BrainClient(cfg.private_dir); client.preflight(cfg)
                 written = []
+                policy_path = cfg.resolve(cfg.get('autopilot', 'policy_file', default='config/autopilot-policy.json'))
                 for fid in args.field_id:
                     path = catalog.evidence_path(cfg.private_dir, fid, query)
                     util.write_json(path, catalog.field_snapshot(client, fid, query)); os.chmod(path, 0o600)
-                    written.append({'field': fid, 'path': path, 'sha256': util.sha256_json(util.read_json(path))})
+                    rehashed = catalog.refresh_evidence_hash(policy_path, path)
+                    written.append({'field': fid, 'path': path, 'sha256': util.sha256_json(util.read_json(path)), 'policy_hash_refreshed': rehashed})
                 _out({'query': query, 'evidence': written, 'note': '证据只在私有目录；用 wq policy add-role 登记角色'})
                 return OK
             path = catalog.catalog_path(cfg.private_dir, query)
@@ -508,11 +510,11 @@ def cmd_policy(args):
         fields = [x.strip() for x in args.fields.split(',') if x.strip()]
         query = catalog.query_from_settings(autopilot.policy(cfg)['settings'])
         evidence = args.evidence or [catalog.evidence_path(cfg.private_dir, f, query) for f in fields]
-        binding = catalog.add_role(path, args.name, args.expression, fields, args.description, evidence, args.cluster, args.group_field)
         try:
-            autopilot.policy(cfg)
+            binding = catalog.add_role(path, args.name, args.expression, fields, args.description, evidence, args.cluster, args.group_field,
+                                       check=autopilot.check_policy)
         except ValueError as exc:
-            _out({'error': '策略登记后未通过校验：' + str(exc)}); return INVALID
+            _out({'error': '未登记：' + str(exc)}); return INVALID
         _out({'role': args.name, 'binding': binding, 'note': '新角色只影响之后创建的研究轮次；活动轮次会因策略hash变化而结束'})
         return OK
     return INVALID
@@ -526,13 +528,15 @@ def cmd_autopilot(args):
         from . import feedback
         if args.action=='collect-feedback':
             queued=[]
-            for row in conn.execute("SELECT remote_id FROM simulations WHERE synthetic=0 AND source='api'").fetchall():
-                try:
-                    tid,created=feedback.enqueue(conn,cfg,row[0])
-                    if created:queued.append(tid)
-                except ValueError:continue
+            if not args.local_only:
+                for row in conn.execute("SELECT remote_id FROM simulations WHERE synthetic=0 AND source='api'").fetchall():
+                    try:
+                        tid,created=feedback.enqueue(conn,cfg,row[0])
+                        if created:queued.append(tid)
+                    except ValueError:continue
             refreshed=feedback.refresh_local(conn,cfg)
-            conn.commit();_out({'queued':queued,'refreshed_local':refreshed,'note':'仅收集真实研究Alpha的只读记录集；由现有本地队列执行。已有资料按当前规则重算诊断，不发网络请求'})
+            conn.commit();_out({'queued':queued,'refreshed_local':refreshed,
+                'note':('仅本地重算已有资料，不入队、不联网' if args.local_only else '缺资料的Alpha已入队只读收集，由本地队列执行（会联网）；已有资料按当前规则本地重算')})
         else:
             result=feedback.report(conn)
             if args.json: _out(result)
@@ -651,6 +655,7 @@ def build_parser(lang=None) -> argparse.ArgumentParser:
     ap = sub.add_parser('autopilot', help='持续研究：状态/启动/停止补充任务')
     ap.add_argument('action',choices=['status','start','stop','refine-check','feedback','collect-feedback'],nargs='?',default='status')
     ap.add_argument('--json',action='store_true')
+    ap.add_argument('--local-only',action='store_true',help='collect-feedback：只用已有资料本地重算，不入队')
     ap.set_defaults(fn=cmd_autopilot)
     bs.add_parser('login').set_defaults(fn=cmd_brain)
     bs.add_parser('keychain-save').set_defaults(fn=cmd_brain)

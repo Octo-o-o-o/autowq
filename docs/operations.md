@@ -143,8 +143,9 @@ UNKNOWN 对账先查官方历史，并保留核实依据。以下命令中的 ID
 ```
 
 - `add-role` 要求每个字段都有与策略 region/universe/delay 一致的证据快照，写入 `bindings` 与 `evidence_files` 哈希并刷新 `verified_at`；`description` 是模型看到的全部说明，必须写明它不代表什么，且不要写平台字段名。分组字段用 `--group-field`，名字必须是 market/sector/industry/subindustry 之一。
-- 策略 `setting_variants`（最多 2 个，只允许 decay/neutralization/truncation）在每轮准入时与基础请求一起预登记；变体同轮派发、全部入账，`autopilot feedback` 与模型上下文都能看到。基础结果 Sharpe 低于 `autopilot.sign_flip_rescue_sharpe`（默认 -0.8，设 null 关闭）时再派发一次预登记的符号翻转复核。每轮最多 4 次平台请求，请相应放大 `limits.sims_per_week`、`autopilot.max_simulations_per_week` 与 `brain_api.max_posts_per_24h`。
+- 策略 `setting_variants`（最多 2 个，只允许 decay/neutralization/truncation）在每轮准入时与基础请求一起预登记进 `allowed_request_hashes`。不带 `when` 的变体与基础同时派发；带 `when`（如 `{"min_turnover":0.2}`，键为 min/max_turnover|sharpe|fitness）的变体在基础结果入账后按条件派发。条件、翻转阈值在准入时冻结进当轮 `protocol.json`，之后改配置不影响已开轮次。基础结果 Sharpe 低于 `autopilot.sign_flip_rescue_sharpe`（默认 -0.8，设 null 关闭）时派发一次预登记的符号翻转复核。基础与全部变体统一判定终态：任一在途、UNKNOWN 或带远端回执的阻断都会让整轮等待或冻结。`autopilot.max_simulations_per_week` 现在按已登记请求数（基础+变体+翻转）计，余额不足时变体记为跳过。每轮最多 `2+变体数` 次平台请求，请相应设置 `limits.sims_per_week` 与 `brain_api.max_posts_per_24h`。
 - 模型上下文新增粗档位（收益风险比/收益效率/换手各 5 档）和角色/数据簇使用统计；精确数值、字段名与序列仍不外发。
-- `research_feedback.segment_rules` 可覆盖本地分段门槛（`min_sharpe`、`min_fitness`、`min_years`、`max_negative_years`）；改动后执行 `./wq autopilot collect-feedback` 用已有资料本地重算，不发网络请求。放宽是研究裁决，不改变平台检查与逐候选提交验收。
+- `research_feedback.segment_rules` 可覆盖本地分段门槛（`min_sharpe`、`min_fitness`、`min_years`、`max_negative_years`，须为非负有限数，年份为整数）；改动后执行 `./wq autopilot collect-feedback --local-only` 用已有资料本地重算（不入队、不联网；不带该参数会为缺资料的 Alpha 入队只读收集）。报告里 `platform_blockers` 是平台合格状态，`validation_gaps` 是本地稳健性状态，两者分开记账；重算结果带 `recomputed_at`，属于事后裁决。放宽是研究裁决，不改变平台检查与逐候选提交验收。
+- `wq policy add-role` 会解析表达式：只允许声明字段与已知算子、不允许负数参数、证据快照类型须为 MATRIX（分组为 GROUP）且含当前设置的覆盖记录；完整策略校验通过后才落盘。角色名、说明、数据簇与变体标签不得含任何已绑定字段 ID，否则策略拒绝加载。`wq brain field-evidence` 重生成已被引用的快照时会同步刷新策略里的摘要。
 - 修改策略或角色会改变策略 hash：活动轮次结束，新轮次才使用新范围。复盘与缺口清单见 [2026-09-23 流程复盘](plan/2026-09-23-gap-review.md)。
 

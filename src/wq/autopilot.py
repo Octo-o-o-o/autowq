@@ -1,6 +1,7 @@
 """由已有runner唤起的持久研究状态机；不会唤醒Codex，也不会自动提交。"""
 import datetime as dt
 import json
+import math
 from pathlib import Path
 from . import util, store, routing, brain_jobs, research_gate, research_dsl, evidence_gate
 from .errors import AdapterError
@@ -21,6 +22,7 @@ DDL = '''CREATE TABLE IF NOT EXISTS research_cycles(
  request_path TEXT NOT NULL, created_at TEXT NOT NULL,
  PRIMARY KEY(cycle_id,label));'''
 NEUTRALIZATIONS = ('NONE','MARKET','SECTOR','INDUSTRY','SUBINDUSTRY')
+CONDITION_KEYS = ('min_turnover','max_turnover','min_sharpe','max_sharpe','min_fitness','max_fitness')
 MAX_SETTING_VARIANTS = 2
 RESCUE_LABEL = 'sign_flip'
 ACTIVE_TASKS = ('queued','claimed','running')
@@ -45,19 +47,39 @@ def message(conn, text):
 
 def policy(cfg):
     p = util.read_json(cfg.resolve(cfg.get('autopilot','policy_file',default='config/autopilot-policy.json')))
+    return check_policy(p)
+
+
+def check_policy(p):
+    """纯校验：策略结构、全部绑定、模型可见文本的字段名白名单、证据摘要。"""
     if p.get('version') != 1 or p.get('scope') != 'exploratory_only_no_submission':
         raise ValueError('自动研究策略未核准')
     deadline = evidence_gate.parse_timestamp(p.get('valid_until'))
     if deadline is None: raise ValueError('自动研究策略缺有效期')
+    bindings = p.get('bindings')
+    if not isinstance(bindings, dict): raise ValueError('策略缺 bindings')
     for name in research_dsl.ROLES:
-        b = p['bindings'][name]
-        if not isinstance(b.get('expression'),str) or not b.get('fields') or not b.get('source'):
-            raise ValueError('字段绑定缺核验依据')
-    research_dsl.role_catalog(p['bindings'])
-    for name in research_dsl.GROUPS:
-        g = p['bindings'].get(name)
-        if g is not None and (not g.get('group_field') or not g.get('fields') or not g.get('source')):
-            raise ValueError('分组字段绑定缺核验依据：'+name)
+        if name not in bindings: raise ValueError('缺核心角色绑定：'+name)
+    from . import catalog
+    all_fields = set()
+    for name, b in bindings.items():
+        if not isinstance(b, dict) or not isinstance(b.get('expression'),str) or not b.get('fields') or not b.get('source'):
+            raise ValueError('字段绑定缺核验依据：'+name)
+        catalog.check_expression(b['expression'], b['fields'], bool(b.get('group_field')))
+        all_fields.update(b['fields'])
+        if b.get('group_field'):
+            if name not in research_dsl.GROUPS: raise ValueError('分组绑定名只允许 '+'/'.join(research_dsl.GROUPS)+'：'+name)
+        elif name in research_dsl.GROUPS:
+            raise ValueError('观测角色不能使用分组保留名：'+name)
+    research_dsl.role_catalog(bindings)
+    # 模型可见文本（角色名、说明、数据簇、变体标签）不得含任何已绑定的平台字段ID。
+    visible = {name: [name, b.get('description') or '', b.get('cluster') or ''] for name, b in bindings.items() if not b.get('group_field')}
+    for v in p.get('setting_variants') or []:
+        if isinstance(v, dict): visible.setdefault('setting_variants', []).append(str(v.get('label', '')))
+    for where, texts in visible.items():
+        for text in texts:
+            if catalog.mentions_field(text, all_fields - set(research_dsl.GROUPS)):
+                raise ValueError('模型可见文本含平台字段ID：'+where)
     validate_setting_variants(p)
     if not isinstance(p.get('evidence_files'),list) or not p['evidence_files']:
         raise ValueError('缺少真实目录证据文件')
@@ -80,9 +102,16 @@ def validate_setting_variants(p):
             raise ValueError('变体需有标识符label')
         if v['label'] in labels or v['label'] in ('base', RESCUE_LABEL): raise ValueError('变体label重复或保留')
         labels.add(v['label'])
-        overrides = {k: x for k, x in v.items() if k != 'label'}
+        overrides = {k: x for k, x in v.items() if k not in ('label', 'when')}
         if not overrides or set(overrides) - {'decay','neutralization','truncation'}:
             raise ValueError('变体只能覆盖 decay/neutralization/truncation')
+        when = v.get('when')
+        if when is not None:
+            if not isinstance(when, dict) or not when or set(when) - set(CONDITION_KEYS):
+                raise ValueError('变体触发条件只允许 '+'/'.join(CONDITION_KEYS))
+            for k, x in when.items():
+                if isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x):
+                    raise ValueError('变体触发条件须为有限数：'+k)
         if 'decay' in overrides and (type(overrides['decay']) is not int or not 0 <= overrides['decay'] <= 512):
             raise ValueError('decay 须为0–512整数')
         if 'neutralization' in overrides and overrides['neutralization'] not in NEUTRALIZATIONS:
@@ -97,9 +126,39 @@ def validate_setting_variants(p):
 def variant_settings(p):
     out = []
     for v in validate_setting_variants(p):
-        settings = dict(p['settings']); settings.update({k: x for k, x in v.items() if k != 'label'})
-        out.append((v['label'], settings))
+        settings = dict(p['settings']); settings.update({k: x for k, x in v.items() if k not in ('label', 'when')})
+        out.append((v['label'], settings, v.get('when')))
     return out
+
+
+def condition_met(when, stats):
+    """用基础结果判断预登记条件；缺数值或非有限数一律不触发。"""
+    if not when: return True
+    for key, bound in when.items():
+        metric = key.split('_', 1)[1]
+        value = stats.get(metric)
+        if type(value) not in (int, float) or not math.isfinite(value): return False
+        if key.startswith('min_') and value < bound: return False
+        if key.startswith('max_') and value > bound: return False
+    return True
+
+
+def planned_requests(p):
+    """一轮最多的平台 POST 数：基础 + 全部变体 + 一次翻转。"""
+    return 2 + len(p.get('setting_variants') or [])
+
+
+def week_requests(conn, now=None):
+    """本 ISO 周自动研究已登记的平台请求数（基础+变体+翻转），按任务创建时间计。"""
+    now = now or util.now()
+    rows = conn.execute('''SELECT t.created_at FROM tasks t WHERE t.task_id IN
+        (SELECT simulation_task FROM research_cycles WHERE simulation_task IS NOT NULL
+         UNION SELECT task_id FROM cycle_simulations)''')
+    return sum(util.iso_week(util.parse_iso(r[0])) == util.iso_week(now) for r in rows)
+
+
+def week_budget_left(conn, cfg):
+    return int(cfg.get('autopilot','max_simulations_per_week',default=3)) - week_requests(conn)
 
 
 def enabled(conn, cfg):
@@ -365,10 +424,20 @@ def admit(conn,cfg,row,p):
         doc['config'].update(fields=fields,catalog_verified=True,extra={'brain_settings':settings,'purpose':'research_validation'})
         return doc
     docs=[('base',make_doc('base',p['settings'],expression))]
-    docs+=[(label,make_doc(label,settings,expression)) for label,settings in variant_settings(p)]
-    # 符号翻转复核预登记：只有基础结果显著为负时才派发，且只派发一次。
-    docs.append((RESCUE_LABEL,make_doc(RESCUE_LABEL,p['settings'],'reverse('+expression+')')))
+    conditions={}
+    for label,settings,when in variant_settings(p):
+        docs.append((label,make_doc(label,settings,expression)))
+        if when: conditions[label]=when
+    # 符号翻转复核预登记：触发条件与阈值在此冻结，之后改配置不影响本轮。
+    threshold=cfg.get('autopilot','sign_flip_rescue_sharpe',default=-0.8)
+    if threshold is not None:
+        if isinstance(threshold,bool) or not isinstance(threshold,(int,float)) or not math.isfinite(threshold):
+            raise ValueError('sign_flip_rescue_sharpe 须为有限数或 null')
+        docs.append((RESCUE_LABEL,make_doc(RESCUE_LABEL,p['settings'],'reverse('+expression+')')))
+        conditions[RESCUE_LABEL]={'max_sharpe':float(threshold)}
     protocol['preregistered_variants']=[label for label,_ in docs[1:]]
+    protocol['variant_conditions']=conditions
+    protocol['conditions_version']=1
     acceptance={'status':'accepted_for_simulation','synthetic':False,'reviewer':'local policy gate plus distinct routed reviewer; not independent scientific acceptance',
         'reviewed_at':util.now_iso(),'protocol':{'path':str(pp),'sha256':util.sha256_json(protocol)},
         'declarations':{'path':str(dp),'sha256':util.sha256_json(declarations)},
@@ -382,22 +451,26 @@ def admit(conn,cfg,row,p):
     conn.execute("UPDATE research_cycles SET state='simulating',simulation_task=?,updated_at=? WHERE cycle_id=?",(tid,util.now_iso(),row['cycle_id']))
     event(conn,row['cycle_id'],'simulation_enqueued',tid+(' new' if created else ' deduplicated'))
     for label,doc in docs[1:]:
-        if label==RESCUE_LABEL: continue
+        if label in conditions: continue
+        if week_budget_left(conn,cfg)<=0:
+            event(conn,row['cycle_id'],'variant_skipped',label+' 周预算不足');continue
         vt,vcreated=brain_jobs.enqueue(conn,cfg,doc)
         conn.execute('INSERT INTO cycle_simulations VALUES(?,?,?,?,?)',(row['cycle_id'],label,vt,str(root/f'request-{label}.json'),util.now_iso()))
         event(conn,row['cycle_id'],'variant_enqueued',label+' '+vt+(' new' if vcreated else ' deduplicated'))
 
 
-def rescue_due(conn,cfg,row,sim,variants):
-    """基础结果收益风险比显著为负且尚未复核时，允许一次预登记的符号翻转。"""
-    threshold=cfg.get('autopilot','sign_flip_rescue_sharpe',default=-0.8)
-    if threshold is None or any(v['label']==RESCUE_LABEL for v in variants): return False
-    try:
-        sharpe=json.loads(sim['stats_json'] or '{}').get('sharpe')
-    except (ValueError,TypeError): return False
-    if type(sharpe) not in (int,float) or sharpe>float(threshold): return False
+def due_conditional(cfg,row,sim,variants):
+    """按当轮冻结的协议条件，返回尚未派发且条件成立的变体标签列表。"""
     root=Path(cfg.private_dir)/'research-approvals'/('auto-'+str(row['cycle_id']))
-    return (root/f'request-{RESCUE_LABEL}.json').exists()
+    try:
+        protocol=util.read_json(str(root/'protocol.json'))
+    except (OSError,ValueError): return []
+    conditions=protocol.get('variant_conditions') or {}
+    try: stats=json.loads(sim['stats_json'] or '{}')
+    except (ValueError,TypeError): stats={}
+    done={v['label'] for v in variants}
+    return [label for label,when in conditions.items()
+            if label not in done and condition_met(when,stats) and (root/f'request-{label}.json').exists()]
 
 
 def advance(conn,cfg,row,p):
@@ -414,35 +487,46 @@ def advance(conn,cfg,row,p):
     if t['status']=='unknown':
         message(conn,'需要对账：'+t['task_id']+'结果不明；本轮冻结，不重发、不新开轮次')
         return
-    if t['status']!='succeeded':
-        if row['state']=='simulating':
-            r=conn.execute('SELECT state FROM brain_runs WHERE task_id=?',(t['task_id'],)).fetchone()
-            if r and r['state'] in ('post_started','polling','fetching'):
-                message(conn,'需要恢复已有平台请求：'+t['task_id']+'；不会新发模拟');return
+    if t['status']!='succeeded' and row['state']!='simulating':
         finish(conn,cfg,row,'任务未完成：'+t['status'],problem=True);return
     if row['state']=='simulating':
+        # 基础与全部变体统一判定终态：任一在途/UNKNOWN/远端占位未解决，整轮等待或冻结。
+        variants=[dict(r) for r in conn.execute('SELECT label,task_id FROM cycle_simulations WHERE cycle_id=? ORDER BY created_at',(row['cycle_id'],))]
+        entries=[{'label':'base','task':t}]+[{'label':v['label'],'task':task(conn,v['task_id'])} for v in variants if not v['task_id'].startswith('skipped:')]
+        for e in entries:
+            st=e['task']['status']
+            if st in ACTIVE_TASKS:
+                message(conn,f"第{row['cycle_id']}轮：等待 {e['label']} 的平台结果；不会重复派发");return
+            if st=='unknown':
+                message(conn,'需要对账：'+e['task']['task_id']+'结果不明；本轮冻结，不重发、不新开轮次');return
+            if st!='succeeded':
+                r=conn.execute('SELECT state FROM brain_runs WHERE task_id=?',(e['task']['task_id'],)).fetchone()
+                if r and r['state'] in ('post_started','polling','fetching'):
+                    message(conn,'需要恢复已有平台请求：'+e['task']['task_id']+'；不会新发模拟');return
+        if t['status']!='succeeded':
+            finish(conn,cfg,row,'任务未完成：'+t['status'],problem=True);return
         run=conn.execute('SELECT alpha_id FROM brain_runs WHERE task_id=?',(t['task_id'],)).fetchone()
         sim=conn.execute('SELECT status,stats_json FROM simulations WHERE remote_id=? AND synthetic=0',(run[0],)).fetchone() if run else None
         if not sim:raise ValueError('缺真实入账结果')
-        # 预登记变体：全部结束后再诊断；变体失败不阻断基础结果归档。
-        variants=[dict(r) for r in conn.execute('SELECT label,task_id FROM cycle_simulations WHERE cycle_id=? ORDER BY created_at',(row['cycle_id'],))]
         alphas=[('base',run[0])];notes=[]
-        for v in variants:
-            vt=task(conn,v['task_id'])
-            if vt['status'] in ACTIVE_TASKS:
-                message(conn,f"第{row['cycle_id']}轮：等待预登记变体 {v['label']} 的平台结果");return
-            if vt['status']=='unknown':
-                message(conn,'需要对账：'+vt['task_id']+'结果不明；本轮冻结，不重发');return
-            vrun=conn.execute('SELECT alpha_id FROM brain_runs WHERE task_id=?',(vt['task_id'],)).fetchone()
-            if vt['status']!='succeeded' or not vrun or not vrun[0]:
-                notes.append(f"{v['label']}=未完成({vt['status']})");continue
-            alphas.append((v['label'],vrun[0]))
-        if rescue_due(conn,cfg,row,sim,variants):
+        for e in entries[1:]:
+            vrun=conn.execute('SELECT alpha_id FROM brain_runs WHERE task_id=?',(e['task']['task_id'],)).fetchone()
+            if e['task']['status']!='succeeded' or not vrun or not vrun[0]:
+                notes.append(f"{e['label']}=未完成({e['task']['status']})");continue
+            alphas.append((e['label'],vrun[0]))
+        due=due_conditional(cfg,row,sim,variants)
+        if due:
             root=Path(cfg.private_dir)/'research-approvals'/('auto-'+str(row['cycle_id']))
-            rt,rcreated=brain_jobs.enqueue(conn,cfg,util.read_json(str(root/f'request-{RESCUE_LABEL}.json')))
-            conn.execute('INSERT INTO cycle_simulations VALUES(?,?,?,?,?)',(row['cycle_id'],RESCUE_LABEL,rt,str(root/f'request-{RESCUE_LABEL}.json'),util.now_iso()))
-            event(conn,row['cycle_id'],'variant_enqueued',RESCUE_LABEL+' '+rt+(' new' if rcreated else ' deduplicated'))
-            message(conn,f"第{row['cycle_id']}轮：基础结果显著为负，派发预登记的一次符号翻转复核");return
+            for label in due:
+                if week_budget_left(conn,cfg)<=0:
+                    event(conn,row['cycle_id'],'variant_skipped',label+' 周预算不足')
+                    # 记录为已处理，避免每个 tick 重复判断；不占用请求。
+                    conn.execute('INSERT INTO cycle_simulations VALUES(?,?,?,?,?)',(row['cycle_id'],label,'skipped:'+label,str(root/f'request-{label}.json'),util.now_iso()))
+                    continue
+                rt,rcreated=brain_jobs.enqueue(conn,cfg,util.read_json(str(root/f'request-{label}.json')))
+                conn.execute('INSERT INTO cycle_simulations VALUES(?,?,?,?,?)',(row['cycle_id'],label,rt,str(root/f'request-{label}.json'),util.now_iso()))
+                event(conn,row['cycle_id'],'variant_enqueued',label+' '+rt+(' new' if rcreated else ' deduplicated'))
+            message(conn,f"第{row['cycle_id']}轮：基础结果满足预登记条件，派发 "+'、'.join(due));return
         from . import workflow
         if cfg.get('research_feedback','enabled') and workflow.stage_enabled(cfg,'feedback'):
             reports={}
@@ -530,9 +614,9 @@ def tick(conn,cfg):
         count=conn.execute('SELECT COUNT(*) FROM research_cycles WHERE created_at>=?',(today,)).fetchone()[0]
         if count>=int(cfg.get('autopilot','max_cycles_per_day',default=4)):
             message(conn,'达到UTC日研究轮数上限；次日自动继续');return
-        week=[r for r in conn.execute('SELECT created_at FROM research_cycles WHERE simulation_task IS NOT NULL') if util.iso_week(util.parse_iso(r[0]))==util.iso_week(now)]
-        if len(week)>=int(cfg.get('autopilot','max_simulations_per_week',default=3)):
-            message(conn,'达到自动研究周模拟上限；下周预算有效时自动继续');return
+        # 自动研究周预算按已登记的平台请求（基础+变体+翻转）计数；变体在派发时各自再检查余额。
+        if week_budget_left(conn,cfg)<=0:
+            message(conn,'达到自动研究周模拟上限（含变体）；下周预算有效时自动继续');return
         used=sum(util.iso_week(util.parse_iso(r[0]))==util.iso_week(now) for r in conn.execute('SELECT started_at FROM brain_runs'))
         if used>=int(cfg.get('limits','sims_per_week',default=24)):
             message(conn,'达到平台本地周派发上限；下周自动检查');return

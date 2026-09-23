@@ -65,13 +65,17 @@ BAND_CUTS = {'收益风险比档': (0, 0.5, 1.0, 1.25), '收益效率档': (0, 0
 def segment_rules(cfg=None):
     rules = dict(SEGMENT_RULES)
     custom = cfg.get('research_feedback', 'segment_rules', default=None) if cfg else None
+    if custom is not None and not isinstance(custom, dict):
+        raise ValueError('research_feedback.segment_rules 必须是对象')
     if isinstance(custom, dict):
-        for k in rules:
-            if k in custom:
-                v = custom[k]
-                if isinstance(v, bool) or not isinstance(v, (int, float)) or v < 0:
-                    raise ValueError('segment_rules.' + k + ' 必须是非负数')
-                rules[k] = v
+        if set(custom) - set(rules):
+            raise ValueError('segment_rules 含未知键：' + ', '.join(sorted(set(custom) - set(rules))))
+        for k, v in custom.items():
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v < 0:
+                raise ValueError('segment_rules.' + k + ' 必须是非负有限数')
+            if k in ('min_years', 'max_negative_years') and int(v) != v:
+                raise ValueError('segment_rules.' + k + ' 必须是整数')
+            rules[k] = int(v) if k in ('min_years', 'max_negative_years') else v
     return rules
 
 
@@ -130,7 +134,7 @@ def diagnose(alpha, yearly=None, rules=None):
             gaps.extend('年度收益非正：'+y for y in negative)
     return {'alpha_id':alpha['id'], 'identity':identity(alpha), 'diagnosis':categories,
             'platform_blockers':blockers, 'retain_for_complementarity':bool(retain),
-            'bands':bands(stats), 'temporal':temporal, 'validation_gaps':gaps,
+            'bands':bands(stats), 'temporal':temporal, 'validation_gaps':gaps, 'segment_rules':dict(rules),
             'submission_candidate':not blockers and not gaps,
             'note':'保留不等于达标；年度正收益是本地筛选，非平台门槛。反馈选出的候选属于适应性研究，不能声称未污染样本外。'}
 
@@ -210,12 +214,17 @@ def refresh_local(conn, cfg):
             continue
         alpha = util.read_json(str(root/'alpha.json'))
         if identity(alpha) != row['identity']: continue
+        try: daily_pnl(util.read_json(str(root/'pnl.json')))
+        except (ValueError, KeyError, TypeError): continue
         if (root/'check.json').exists():
             alpha = dict(alpha); alpha['is'] = {**alpha['is'], 'checks': util.read_json(str(root/'check.json'))['is']['checks']}
         old = json.loads(row['report_json'])
         result = diagnose(alpha, util.read_json(str(root/'yearly-stats.json')), rules)
-        result.update(collection_status='complete', pnl_path=str(root/'pnl.json'), updated_at=old.get('updated_at') or util.now_iso())
-        if result != old:
+        result.update(collection_status='complete', pnl_path=str(root/'pnl.json'), updated_at=old.get('updated_at') or util.now_iso(),
+                      recomputed_at=util.now_iso(), recomputed_note='按当前 segment_rules 事后重算；不是新的平台资料')
+        old_cmp = {k: v for k, v in old.items() if k not in ('recomputed_at', 'recomputed_note')}
+        new_cmp = {k: v for k, v in result.items() if k not in ('recomputed_at', 'recomputed_note')}
+        if new_cmp != old_cmp:
             conn.execute('UPDATE research_feedback SET report_json=? WHERE alpha_id=?', (json.dumps(result, ensure_ascii=False), row['alpha_id']))
             util.write_json(str(root/'report.json'), result); updated.append(row['alpha_id'])
     return updated
@@ -266,9 +275,10 @@ def model_context(conn):
     result = []
     for cid in sorted(out, reverse=True)[:40]:
         entry = out[cid]
-        if entry['diagnosis'] is None and entry['variants']:
-            first = entry['variants'][0]
-            entry.update(diagnosis=first['diagnosis'], retain_for_complementarity=False, bands=first['bands'])
+        if entry['diagnosis'] is None:
+            # 基础结果缺资料时明确标出，不借变体成绩填充。
+            entry.update(diagnosis=['基础结果资料缺失'], retain_for_complementarity=False)
+        entry['variants'].sort(key=lambda v: v['label'])
         if not entry['variants']: entry.pop('variants')
         if entry['bands'] is None: entry.pop('bands')
         result.append(entry)

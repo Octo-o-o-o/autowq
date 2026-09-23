@@ -13,6 +13,7 @@ class VariantTests(AutopilotTests):
         self.p['setting_variants'] = [{'label': 'decay8', 'decay': 8}, {'label': 'subindustry', 'neutralization': 'SUBINDUSTRY'}]
         self.save_policy()
         self.cfg.data['research_feedback'] = {'enabled': True}
+        self.cfg.data['autopilot']['max_simulations_per_week'] = 10
         fb = self.add_patch('wq.feedback.BrainClient').return_value
         fb.jar = [True]; fb.preflight.return_value = (200, {}, {}); fb.request.side_effect = self.api
         self.sharpe = 0.1

@@ -10,8 +10,8 @@ TIMESERIES = {'mean': 'ts_mean', 'delta': 'ts_delta', 'std': 'ts_std_dev', 'time
               'backfill': 'ts_backfill', 'delay': 'ts_delay', 'av_diff': 'ts_av_diff'}
 # 双序列时间操作：过去窗口内两个序列的相关/协方差。
 TIMESERIES_PAIR = {'corr': 'ts_corr'}
-GROUP = {'group_rank': 'group_rank', 'group_zscore': 'group_zscore', 'group_neutralize': 'group_neutralize',
-         'group_mean': 'group_mean'}
+# group_mean 的平台签名含 weight 参数，暂不开放。
+GROUP = {'group_rank': 'group_rank', 'group_zscore': 'group_zscore', 'group_neutralize': 'group_neutralize'}
 GROUPS = ('market', 'sector', 'industry', 'subindustry')
 WINDOWS = (5, 10, 20, 60, 120, 252)
 # 每个候选的复杂度上限：与提示词、advance() 一致。
@@ -145,7 +145,7 @@ def public_contract(bindings=None):
     roles = role_catalog(bindings) if bindings else dict(CORE_DESCRIPTIONS)
     groups = [g for g in GROUPS if bindings and bindings.get(g, {}).get('group_field')] if bindings else []
     return {'roles': roles,
-        'available_validation':'当前运行固定配置的样本内平台筛选，另加程序预登记的少量设置变体（decay/中性化），全部结果都会记录。没有自动执行规模/beta/行业残差控制、事件窗、交易成本或样本外验证；不能把列出这些检验写成已经验收。',
+        'available_validation':'当前运行固定配置的样本内平台筛选，另加程序按预登记条件派发的少量设置变体，全部结果都会记录。单角色基线实验是允许的：先说明观测量的更新频率（日频/季度），再选与之匹配的时序变换；不要为通过准入机械包一层均值。没有自动执行规模/beta/行业残差控制、事件窗、交易成本或样本外验证；不能把列出这些检验写成已经验收。',
         'family_dedup':'本地保守结构去重忽略窗口、neg、rank，并比较其余操作与字段角色的多重集合；即使叙述不同也可能被拒绝，不要靠这些变体重开。',
         'platform_thresholds': PLATFORM_THRESHOLDS,
         'ast': {'field':{'op':'field','name':'daily_return'},
@@ -153,5 +153,5 @@ def public_contract(bindings=None):
                 'binary':'op=add/sub/mul/div, left=AST, right=AST（div为受保护除法：分母<=0给NaN）',
                 'past_only':'op=mean/delta/std/time_rank/time_zscore/decay/sum/backfill/delay/av_diff, arg=AST, window=5/10/20/60/120/252（decay=线性衰减加权均值，用于降低换手；backfill=用过去窗口内最近有效值填充缺失，适合季度基本面；delay=取window日前的值；av_diff=当前值减过去窗口均值）',
                 'pair':'op=corr, left=AST, right=AST, window=…（过去窗口内两个序列的相关系数）',
-                'group':'op=group_rank/group_zscore/group_neutralize/group_mean, arg=AST, group=' + ('/'.join(groups) if groups else '（本策略未核验分组字段）')},
+                'group':'op=group_rank/group_zscore/group_neutralize, arg=AST, group=' + ('/'.join(groups) if groups else '（本策略未核验分组字段）')},
         'limits':f'最多24节点、深度6，最多{MAX_TIMESERIES}个时间操作、{MAX_BINARY}个组合操作、{MAX_GROUP}个分组操作、{MAX_ROLES}个字段角色。文字字段上限为title 100、hypothesis 2000、counterexample 2000字符；禁止单字段及仅用rank/neg包裹的单字段（例如neg(rank(daily_return))）；不得为绕过此规则机械添加算子。单个提案；不得通过改窗口、改符号、加rank救活旧候选。禁止原始代码、API、平台字段名。'}
