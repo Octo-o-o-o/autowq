@@ -399,7 +399,10 @@ def validate_review(obj,digest):
 
 def admit(conn,cfg,row,p):
     candidate=json.loads(row['candidate_json'])
-    expression,fields,family=research_dsl.validate_candidate(candidate,p['bindings'])
+    from . import feedback as _fb
+    _fb.setup(conn)
+    is_plan=conn.execute('SELECT 1 FROM combination_plans WHERE cycle_id=?',(row['cycle_id'],)).fetchone() is not None
+    expression,fields,family=research_dsl.validate_candidate(candidate,p['bindings'],'combination' if is_plan else 'proposal')
     root=Path(cfg.private_dir)/'research-approvals'/('auto-'+str(row['cycle_id']));root.mkdir(parents=True,exist_ok=True,mode=0o700)
     protocol={'protocol_id':'auto-'+str(row['cycle_id']),'status':'accepted_for_simulation','platform_ready':True,
               'scope':'one automated exploratory screen; not scientific validation or income',
@@ -564,7 +567,7 @@ def advance(conn,cfg,row,p):
         candidate=proposal.get('candidate')
         if plan and (not isinstance(candidate,dict) or candidate.get('ast')!=plan['ast']):
             raise ValueError('有限组合不得改变预登记AST')
-        _,_,family=research_dsl.validate_candidate(candidate,p['bindings'])
+        _,_,family=research_dsl.validate_candidate(candidate,p['bindings'],'combination' if plan else 'proposal')
         duplicate=conn.execute('SELECT cycle_id FROM research_cycles WHERE family_hash=? AND cycle_id!=?',(family,row['cycle_id'])).fetchone()
         conn.execute('UPDATE research_cycles SET candidate_json=?,candidate_hash=?,family_hash=?,updated_at=? WHERE cycle_id=?',
                      (json.dumps(candidate,ensure_ascii=False),util.sha256_json(candidate),family,util.now_iso(),row['cycle_id']))

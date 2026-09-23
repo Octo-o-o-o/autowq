@@ -288,11 +288,12 @@ def model_context(conn):
 def next_combination(conn, max_plans=2):
     setup(conn)
     if conn.execute('SELECT COUNT(*) FROM combination_plans').fetchone()[0] >= max_plans: return None
-    # 只组合经过模型审查的独立父提案；直接诊断实验会显示在报告中，但不伪造其模型审查来源。
+    # 只组合经过模型审查的父提案（含已审查的组合轮本身，允许一层再组合；复杂度上限
+    # 由 compile_ast 把关）；直接诊断实验没有模型审查来源，不作父信号。每个父对只登记一次。
     parents = {}
     for r in conn.execute('''SELECT c.cycle_id,c.candidate_json,c.policy_json,b.alpha_id FROM research_cycles c
             JOIN brain_runs b ON b.task_id=c.simulation_task
-            WHERE c.state='closed' AND c.cycle_id NOT IN (SELECT cycle_id FROM combination_plans)'''):
+            WHERE c.state='closed' '''):
         if r['candidate_json']: parents[r['alpha_id']]=dict(r)
     # 低相关只是准入条件；在准入的配对里优先父信号更强的组合（唯一一次全过门槛的
     # 提交 vRrlJZpQ 就是强父信号的等权组合，弱+弱组合的第 30 轮未能救活）。
@@ -304,7 +305,15 @@ def next_combination(conn, max_plans=2):
     # 已正式提交的信号不再作父信号：其组合会与已提交 alpha 高度自相关，无法通过官方 SELF_CORRELATION。
     tables={x[0] for x in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     submitted={x[0] for x in conn.execute("SELECT alpha_id FROM brain_submissions WHERE state='accepted'")} if 'brain_submissions' in tables else set()
-    pairs = [x for x in report(conn)['pairs'] if x['worth_combination_review'] and not (set(x['parents']) & submitted)]
+    # 谱系：组合轮的 alpha → 其父 alpha；祖先里含已提交信号的也排除。
+    lineage={}
+    for r in conn.execute('''SELECT p.pair_key,b.alpha_id FROM combination_plans p
+            JOIN research_cycles c ON c.cycle_id=p.cycle_id JOIN brain_runs b ON b.task_id=c.simulation_task'''):
+        lineage[r['alpha_id']]=r['pair_key'].split(':')
+    def tainted(aid,seen=()):
+        if aid in submitted: return True
+        return any(tainted(x,seen+(aid,)) for x in lineage.get(aid,[]) if x not in seen)
+    pairs = [x for x in report(conn)['pairs'] if x['worth_combination_review'] and not any(tainted(i) for i in x['parents'])]
     for pair in sorted(pairs, key=lambda x: (-(strength(x['parents'][0])+strength(x['parents'][1])), abs(x['value']))):
         ids = pair['parents']; key = ':'.join(ids)
         if not all(x in parents for x in ids): continue
@@ -315,7 +324,7 @@ def next_combination(conn, max_plans=2):
                'right':{'op':'rank','arg':json.loads(b['candidate_json'])['ast']}}
         from . import research_dsl
         try:
-            research_dsl.compile_ast(ast,json.loads(a['policy_json'])['bindings'])
+            research_dsl.compile_ast(ast,json.loads(a['policy_json'])['bindings'],'combination')
         except ValueError: continue
         return {'pair_key':key,'parents':ids,'parent_cycles':[a['cycle_id'],b['cycle_id']],
                 'ast':ast,'correlation':pair,'experiment':'一次固定等权rank组合；不优化权重、窗口、符号；失败终止该父对'}

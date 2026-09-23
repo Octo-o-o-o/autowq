@@ -73,5 +73,20 @@ class WideDslTests(unittest.TestCase):
             research_dsl.role_catalog(b)
 
 
+class CombinationProfileTests(unittest.TestCase):
+    def test_combination_profile_allows_blend_of_blends_but_not_proposals(self):
+        b = bindings()
+        leaf = lambda n: {'op': 'rank', 'arg': {'op': 'mean', 'arg': F(n), 'window': 20}}
+        blend = lambda x, y: {'op': 'add', 'left': {'op': 'rank', 'arg': x}, 'right': {'op': 'rank', 'arg': y}}
+        roles = list(research_dsl.ROLES)
+        four = blend(blend(leaf(roles[0]), leaf(roles[1])), blend(leaf(roles[2]), leaf(roles[3])))
+        with self.assertRaises(ValueError):
+            research_dsl.compile_ast(four, b)
+        expr, fields, _ = research_dsl.compile_ast(four, b, 'combination')
+        self.assertEqual(expr.count('ts_mean'), 4)
+        with self.assertRaises(KeyError):
+            research_dsl.compile_ast(four, b, 'bogus')
+
+
 if __name__ == '__main__':
     unittest.main()

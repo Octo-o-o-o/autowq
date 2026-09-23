@@ -125,4 +125,11 @@ class CombinationRankingTests(unittest.TestCase):
             with patch('wq.feedback.report',return_value={'pairs':pairs}):
                 plan=feedback.next_combination(c,max_plans=4)
             self.assertEqual(plan['parents'],['weakA','weakB'])
+            # 祖先含已提交信号的组合轮 alpha 也不能再作父信号
+            add(5,'blendA',1.5,roles[4])
+            c.execute("INSERT INTO combination_plans VALUES(?,?,?,?)",('strongA:strongB',5,'{}',util.now_iso()))
+            pairs.append({'parents':['blendA','weakA'],'value':0.02,'worth_combination_review':True})
+            with patch('wq.feedback.report',return_value={'pairs':pairs}):
+                plan=feedback.next_combination(c,max_plans=6)
+            self.assertEqual(plan['parents'],['weakA','weakB'])
             c.close()

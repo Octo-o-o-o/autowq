@@ -19,6 +19,9 @@ MAX_TIMESERIES = 3
 MAX_BINARY = 3
 MAX_GROUP = 2
 MAX_ROLES = 3
+# 程序预登记的等权组合（父信号都已各自审查与回测）允许更大的树；模型提案仍用 proposal。
+LIMITS = {'proposal': {'nodes': 24, 'depth': 6, 'timeseries': MAX_TIMESERIES, 'binary': MAX_BINARY, 'group': MAX_GROUP, 'roles': MAX_ROLES},
+          'combination': {'nodes': 48, 'depth': 9, 'timeseries': 6, 'binary': 6, 'group': 4, 'roles': 5}}
 # 抽象角色由私有只读 BRAIN 字段快照支撑。核心角色必须存在于策略；
 # 其他角色由 `wq policy add-role` 登记，并带模型可读的说明。平台字段名
 # 留在本地策略里，不进入模型提示词。
@@ -60,13 +63,14 @@ def role_catalog(bindings):
     return roles
 
 
-def compile_ast(ast, bindings):
+def compile_ast(ast, bindings, profile='proposal'):
+    limits = LIMITS[profile]
     nodes, fields, signature, roles = [], set(), [], set()
     counts = {'timeseries': 0, 'binary': 0, 'group': 0}
 
     def visit(node, depth=0):
-        if depth > 6 or len(nodes) >= 24 or not isinstance(node, dict):
-            raise ValueError('AST最多24节点、深度6，只接受对象')
+        if depth > limits['depth'] or len(nodes) >= limits['nodes'] or not isinstance(node, dict):
+            raise ValueError(f"AST最多{limits['nodes']}节点、深度{limits['depth']}，只接受对象")
         nodes.append(node)
         op = node.get('op')
         if op == 'field':
@@ -114,21 +118,21 @@ def compile_ast(ast, bindings):
     expression = visit(ast)
     if all(x.startswith('field:') for x in signature):
         raise ValueError('拒绝单字段或单字段排名的已知教学/旧基线')
-    if counts['timeseries'] > MAX_TIMESERIES or counts['binary'] > MAX_BINARY or counts['group'] > MAX_GROUP:
-        raise ValueError(f'候选过于复杂，最多{MAX_TIMESERIES}个时间操作、{MAX_BINARY}个组合操作、{MAX_GROUP}个分组操作')
-    if len(roles) > MAX_ROLES:
-        raise ValueError(f'最多使用{MAX_ROLES}个字段角色')
+    if counts['timeseries'] > limits['timeseries'] or counts['binary'] > limits['binary'] or counts['group'] > limits['group']:
+        raise ValueError(f"候选过于复杂，最多{limits['timeseries']}个时间操作、{limits['binary']}个组合操作、{limits['group']}个分组操作")
+    if len(roles) > limits['roles']:
+        raise ValueError(f"最多使用{limits['roles']}个字段角色")
     family = util.sha256_json(sorted(signature))
     return expression, sorted(fields), family
 
 
-def validate_candidate(candidate, bindings):
+def validate_candidate(candidate, bindings, profile='proposal'):
     if not isinstance(candidate, dict) or set(candidate) != {'title','hypothesis','counterexample','ast'}:
         raise ValueError('candidate须含title/hypothesis/counterexample/ast且无额外字段')
     for k, maximum in TEXT_LIMITS.items():
         if not isinstance(candidate[k], str) or not 8 <= len(candidate[k].strip()) <= maximum:
             raise ValueError(k + '需为有内容的有限长度文字')
-    return compile_ast(candidate['ast'], bindings)
+    return compile_ast(candidate['ast'], bindings, profile)
 
 
 def roles_used(ast):
