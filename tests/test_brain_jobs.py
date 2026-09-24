@@ -143,3 +143,28 @@ class BrainJobTests(unittest.TestCase):
         for u in ['https://evil.example/simulations/x','http://api.worldquantbrain.com/x','https://api.worldquantbrain.com@evil.example/x']:
             with self.assertRaises(ValueError):safe_url(u)
         self.assertEqual(retry_delay('120'),120)
+
+
+class PreflightTransientTests(BrainJobTests):
+    def test_transient_preflight_network_error_retries_without_post(self):
+        tid=self.enqueue()
+        def flaky(cfg): raise AdapterError(AdapterError.NETWORK,'网络结果不明')
+        with patch.object(FakeClient,'preflight',classmethod(lambda cls,cfg: flaky(cfg))):
+            self.assertEqual(self.tick(tid),'queued')
+        self.assertEqual(FakeClient.calls,[])   # 没有任何 POST
+        self.assertIsNone(self.c.execute('SELECT 1 FROM brain_runs WHERE task_id=?',(tid,)).fetchone())
+        self.assertIn('稍后重试',self.c.execute('SELECT last_error FROM tasks WHERE task_id=?',(tid,)).fetchone()[0])
+        FakeClient.replies=[(201,{'location':'/simulations/x'},{})]
+        self.assertEqual(self.tick(tid),'queued')
+        self.assertEqual(FakeClient.calls[0][0],'POST')
+
+    def test_auth_preflight_still_pauses(self):
+        tid=self.enqueue(); FakeClient.jar=[]
+        self.assertEqual(self.tick(tid),'blocked')
+        from wq import store
+        self.assertTrue(store.is_paused(self.c))
+
+
+for _name in list(vars(BrainJobTests)):
+    if _name.startswith('test_'):
+        setattr(PreflightTransientTests, _name, None)

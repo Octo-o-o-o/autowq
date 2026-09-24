@@ -109,6 +109,12 @@ def step(conn,cfg,task,payload):
                 store.set_flag(conn,'paused','1')
                 store.set_flag(conn,'pause_origin','auth')
                 store.set_flag(conn,'pause_reason','auth: '+str(exc))
+                return 'blocked', {}, str(exc) + '；未发送POST'
+            if exc.kind in (AdapterError.NETWORK, AdapterError.RATE_LIMIT):
+                # 只读预检遇到瞬时网络/限流：稍后重试，不作废本轮研究；尚未发送任何POST。
+                if exc.kind == AdapterError.RATE_LIMIT:
+                    store.set_flag(conn,'brain_not_before',(util.now()+dt.timedelta(seconds=max(60,exc.retry_after or 60))).isoformat())
+                return later(conn, tid, exc.retry_after or 300, '预检'+str(exc)+'；未发送POST，稍后重试')
             return 'blocked', {}, str(exc) + '；未发送POST'
         if not 200 <= int(code) < 300:
             return 'blocked', {}, f'BRAIN预检返回HTTP {code}；未发送POST'
@@ -146,6 +152,9 @@ def step(conn,cfg,task,payload):
                 store.set_flag(conn,'paused','1')
                 store.set_flag(conn,'pause_origin','auth')
                 store.set_flag(conn,'pause_reason','auth: '+str(e))
+                return 'blocked',{},str(e)+'；未重放POST'
+            if e.kind in (AdapterError.NETWORK, AdapterError.RATE_LIMIT):
+                return later(conn, tid, e.retry_after or 300, '预检'+str(e)+'；已有回执只GET，稍后重试')
             return 'blocked',{},str(e)+'；未重放POST'
         if not 200 <= int(code) < 300:
             return 'blocked',{},f'BRAIN预检返回HTTP {code}；未重放POST'
