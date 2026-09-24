@@ -187,3 +187,63 @@ class PolicyBoundaryTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class EarlyAvoidanceTests(unittest.TestCase):
+    """更早规避：本地自相关预筛、排队定时任务不阻塞、预算预测、提交频率可配置。"""
+
+    def test_submitted_correlation_blocks_candidate_and_parent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg, c = make_env(tmp); feedback.setup(c); autopilot.setup(c); autopilot.brain_jobs.setup(c)
+            from wq import brain_submission; brain_submission.setup(c)
+            rec = lambda k: {'schema': {'properties': [{'name': 'date'}, {'name': 'pnl'}]},
+                             'records': [[f'2020-{1+i//28:02d}-{1+i%28:02d}', float(k(i))] for i in range(300)]}
+            sub_pnl = Path(tmp) / 'sub.json'; util.write_json(str(sub_pnl), rec(lambda i: i * i % 97))
+            tsub = store.enqueue_task(c, 'brain_submission', {}, 'k')[0]
+            c.execute("INSERT INTO brain_submissions(task_id,alpha_id,sim_id,state,started_at,updated_at) VALUES(?,?,?,?,?,?)", (tsub, 'SUB', 's', 'accepted', util.now_iso(), util.now_iso()))
+            c.execute("INSERT INTO research_feedback VALUES('SUB','id',?,?)", (json.dumps({'pnl_path': str(sub_pnl)}), util.now_iso()))
+            same = feedback.submitted_correlation(c, rec(lambda i: i * i % 97))
+            self.assertAlmostEqual(same['max'], 1.0); self.assertEqual(same['against'][0]['alpha_id'], 'SUB')
+            alpha = {'id': 'X', 'is': {'sharpe': 1.5, 'fitness': 1.1, 'turnover': 0.1, 'checks': [{'name': n, 'result': 'PASS'} for n in brain_submission.REQUIRED]},
+                     'train': {'sharpe': 1.5, 'fitness': 1.1}, 'test': {'sharpe': 1.5, 'fitness': 1.1}}
+            yearly = {'schema': {'properties': [{'name': n} for n in ('year', 'sharpe', 'fitness', 'pnl')]}, 'records': [['2021', 1, 1, 1], ['2022', 1, 1, 1], ['2023', 1, 1, 1]]}
+            clean = feedback.diagnose(alpha, yearly)
+            self.assertTrue(clean['submission_candidate'])
+            blocked = feedback.diagnose(alpha, yearly, submitted={'max': 0.72, 'against': [], 'missing': []})
+            self.assertFalse(blocked['submission_candidate']); self.assertIn('与已提交信号高相关（本地估计）', blocked['diagnosis'])
+            parent_only = feedback.diagnose(alpha, yearly, submitted={'max': 0.55, 'against': [], 'missing': []})
+            self.assertTrue(parent_only['submission_candidate']); self.assertFalse(parent_only['retain_for_complementarity'])
+            c.close()
+
+    def test_queued_timer_task_does_not_block_new_cycle(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg, c = make_env(tmp); autopilot.setup(c)
+            future = (util.now() + __import__('datetime').timedelta(hours=3)).isoformat()
+            store.enqueue_task(c, 'brain_submission', {}, 'k1')
+            c.execute("UPDATE tasks SET not_before=?", (future,))
+            blocking = c.execute("SELECT 1 FROM tasks WHERE status IN ('claimed','running','unknown') OR (status='queued' AND (not_before IS NULL OR not_before<=?)) LIMIT 1", (util.now_iso(),)).fetchone()
+            self.assertIsNone(blocking)
+            c.execute("UPDATE tasks SET not_before=?", ('2000-01-01T00:00:00+00:00',))
+            self.assertIsNotNone(c.execute("SELECT 1 FROM tasks WHERE status IN ('claimed','running','unknown') OR (status='queued' AND (not_before IS NULL OR not_before<=?)) LIMIT 1", (util.now_iso(),)).fetchone())
+            c.close()
+
+    def test_budget_forecast_warns_before_exhaustion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg, c = make_env(tmp, {'autopilot': {'max_simulations_per_week': 10, 'enabled': True}, 'routing': {'authorized_until': '2099-01-01T00:00:00Z'}})
+            autopilot.setup(c); autopilot.brain_jobs.setup(c)
+            self.assertIsNone(autopilot.budget_forecast(c, cfg)['warning'])
+            for i in range(6):
+                tid = store.enqueue_task(c, 'brain_simulation', {}, f'k{i}')[0]
+                c.execute("INSERT INTO research_cycles(state,policy_json,policy_hash,simulation_task,created_at,updated_at) VALUES('closed','{}','h',?,?,?)", (tid, util.now_iso(), util.now_iso()))
+            f = autopilot.budget_forecast(c, cfg)
+            self.assertEqual(f['rate_per_day'], 6); self.assertEqual(f['left'], 4); self.assertIn('耗尽', f['warning'])
+            c.close()
+
+    def test_submission_rate_configurable(self):
+        from wq import brain_submission
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg, c = make_env(tmp, {'brain_submission': {'max_posts_per_24h': 2}})
+            self.assertEqual(int(cfg.get('brain_submission', 'max_posts_per_24h', default=1)), 2)
+            cfg2, c2 = make_env(tmp + '/b')
+            self.assertEqual(int(cfg2.get('brain_submission', 'max_posts_per_24h', default=1)), 1)
+            c.close(); c2.close()

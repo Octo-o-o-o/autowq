@@ -229,10 +229,18 @@ def step(conn, cfg, task, payload):
         pending = conn.execute("SELECT 1 FROM brain_submissions WHERE state IN ('post_started','polling','verifying') AND task_id!=?", (tid,)).fetchone()
         if pending:
             return later(conn, tid, 300, '已有在途提交，串行等待')
-        # 单账号滚动24小时最多一次POST；未知和拒绝尝试也计入。
+        # 单账号滚动24小时最多 max_posts_per_24h 次POST（默认1）；未知和拒绝尝试也计入。
+        limit = int(cfg.get('brain_submission', 'max_posts_per_24h', default=1))
+        if limit <= 0:
+            return 'blocked', {}, '本地提交日额度为0'
+        starts = sorted(util.parse_iso(r[0]) for r in conn.execute("SELECT started_at FROM brain_submissions WHERE state!='checking' AND task_id!=?", (tid,)))
+        recent = [t for t in starts if util.now()-t < dt.timedelta(hours=24)]
         last = store.get_flag(conn, 'brain_last_submit_at')
-        if last and util.now()-util.parse_iso(last) < dt.timedelta(hours=24):
-            return later(conn, tid, (util.parse_iso(last)+dt.timedelta(hours=24)-util.now()).total_seconds(), '本地24小时提交上限')
+        if last and util.parse_iso(last) not in recent and util.now()-util.parse_iso(last) < dt.timedelta(hours=24):
+            recent.append(util.parse_iso(last))
+        if len(recent) >= limit:
+            oldest = sorted(recent)[-limit]
+            return later(conn, tid, (oldest+dt.timedelta(hours=24)-util.now()).total_seconds(), f'本地24小时提交上限（{limit}次）')
         set_state(conn, tid, 'post_started')
         conn.execute('UPDATE brain_submissions SET started_at=? WHERE task_id=?', (util.now_iso(), tid))
         store.set_flag(conn, 'brain_last_submit_at', util.now_iso())

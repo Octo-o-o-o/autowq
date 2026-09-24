@@ -94,7 +94,32 @@ def bands(stats):
             '换手档': band(stats.get('turnover'), BAND_CUTS['换手档'])}
 
 
-def diagnose(alpha, yearly=None, rules=None):
+SUBMITTED_CORR_BLOCK = 0.7      # 本地估计 >= 该值：不列为提交候选（官方门槛 0.7）
+SUBMITTED_CORR_PARENT = 0.5     # 本地估计 >  该值：不再作组合父信号（组合腿会把相关带进去）
+
+
+def submitted_correlation(conn, pnl_doc, exclude=None):
+    """候选与全部已接收提交的本地日 PnL 相关最大值；缺 PnL 的提交记为未知。"""
+    setup(conn)
+    tables={x[0] for x in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if 'brain_submissions' not in tables: return {'max': None, 'against': [], 'missing': []}
+    out, missing = [], []
+    for r in conn.execute("SELECT alpha_id FROM brain_submissions WHERE state='accepted'"):
+        aid = r[0]
+        if aid == exclude: continue
+        row = conn.execute('SELECT report_json FROM research_feedback WHERE alpha_id=?', (aid,)).fetchone()
+        path = json.loads(row[0]).get('pnl_path') if row else None
+        try:
+            corr = correlation(pnl_doc, util.read_json(path)) if path else {'value': None}
+        except (OSError, ValueError, KeyError, TypeError):
+            corr = {'value': None}
+        if corr['value'] is None: missing.append(aid)
+        else: out.append({'alpha_id': aid, 'value': corr['value']})
+    values = [abs(x['value']) for x in out]
+    return {'max': max(values) if values else None, 'against': out, 'missing': missing}
+
+
+def diagnose(alpha, yearly=None, rules=None, submitted=None):
     rules = rules or SEGMENT_RULES
     checks = alpha.get('is', {}).get('checks', [])
     blockers = problems(checks)
@@ -132,9 +157,16 @@ def diagnose(alpha, yearly=None, rules=None):
             if y['pnl'] <= 0 or y['sharpe'] <= 0: negative.append(str(y.get('year')))
         if len(negative) > rules['max_negative_years']:
             gaps.extend('年度收益非正：'+y for y in negative)
+    corr_max = (submitted or {}).get('max')
+    if number(corr_max) and corr_max >= SUBMITTED_CORR_BLOCK:
+        categories.append('与已提交信号高相关（本地估计）')
+        gaps.append(f'与已提交信号本地日PnL相关{corr_max:.2f}>={SUBMITTED_CORR_BLOCK}（官方自相关门槛0.7）')
+    if number(corr_max) and corr_max > SUBMITTED_CORR_PARENT:
+        retain = False
     return {'alpha_id':alpha['id'], 'identity':identity(alpha), 'diagnosis':categories,
             'platform_blockers':blockers, 'retain_for_complementarity':bool(retain),
             'bands':bands(stats), 'temporal':temporal, 'validation_gaps':gaps, 'segment_rules':dict(rules),
+            'submitted_correlation':submitted or {'max': None, 'against': [], 'missing': []},
             'submission_candidate':not blockers and not gaps,
             'note':'保留不等于达标；年度正收益是本地筛选，非平台门槛。反馈选出的候选属于适应性研究，不能声称未污染样本外。'}
 
@@ -186,7 +218,8 @@ def step(conn, cfg, task, payload):
         if (root/'check.json').exists():
             alpha=dict(alpha)
             alpha['is']={**alpha['is'],'checks':util.read_json(str(root/'check.json'))['is']['checks']}
-        result = diagnose(alpha, util.read_json(str(root/'yearly-stats.json')), segment_rules(cfg))
+        result = diagnose(alpha, util.read_json(str(root/'yearly-stats.json')), segment_rules(cfg),
+                          submitted_correlation(conn, pnl, exclude=aid))
         result['collection_status']='complete'
         result['pnl_path'] = str(root/'pnl.json')
         result['updated_at'] = util.now_iso()
@@ -219,7 +252,8 @@ def refresh_local(conn, cfg):
         if (root/'check.json').exists():
             alpha = dict(alpha); alpha['is'] = {**alpha['is'], 'checks': util.read_json(str(root/'check.json'))['is']['checks']}
         old = json.loads(row['report_json'])
-        result = diagnose(alpha, util.read_json(str(root/'yearly-stats.json')), rules)
+        result = diagnose(alpha, util.read_json(str(root/'yearly-stats.json')), rules,
+                          submitted_correlation(conn, util.read_json(str(root/'pnl.json')), exclude=row['alpha_id']))
         result.update(collection_status='complete', pnl_path=str(root/'pnl.json'), updated_at=old.get('updated_at') or util.now_iso(),
                       recomputed_at=util.now_iso(), recomputed_note='按当前 segment_rules 事后重算；不是新的平台资料')
         old_cmp = {k: v for k, v in old.items() if k not in ('recomputed_at', 'recomputed_note')}
@@ -313,7 +347,11 @@ def next_combination(conn, max_plans=2):
     def tainted(aid,seen=()):
         if aid in submitted: return True
         return any(tainted(x,seen+(aid,)) for x in lineage.get(aid,[]) if x not in seen)
-    pairs = [x for x in report(conn)['pairs'] if x['worth_combination_review'] and not any(tainted(i) for i in x['parents'])]
+    reports={r['alpha_id']:json.loads(r['report_json']) for r in conn.execute('SELECT alpha_id,report_json FROM research_feedback')}
+    def correlated(aid):
+        value=(reports.get(aid,{}).get('submitted_correlation') or {}).get('max')
+        return number(value) and value > SUBMITTED_CORR_PARENT
+    pairs = [x for x in report(conn)['pairs'] if x['worth_combination_review'] and not any(tainted(i) or correlated(i) for i in x['parents'])]
     for pair in sorted(pairs, key=lambda x: (-(strength(x['parents'][0])+strength(x['parents'][1])), abs(x['value']))):
         ids = pair['parents']; key = ':'.join(ids)
         if not all(x in parents for x in ids): continue
