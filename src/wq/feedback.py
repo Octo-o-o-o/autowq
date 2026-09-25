@@ -321,6 +321,7 @@ def model_context(conn):
 
 DISPLAY_ONLY_SETTINGS = ('testPeriod', 'visualization')
 MIN_PARENT_SHARPE = 0.9   # 历史 16 次组合里父信号 Sharpe<0.8 的从未通过门槛
+MAX_FAILED_BLENDS = 3     # 同一父信号参与 3 次未过门槛的组合后不再作父信号（如 xA3jJmkW 连败 5 次）
 
 
 def simulation_settings(settings):
@@ -359,7 +360,16 @@ def next_combination(conn, max_plans=2, min_parent_sharpe=MIN_PARENT_SHARPE):
     def correlated(aid):
         value=(reports.get(aid,{}).get('submitted_correlation') or {}).get('max')
         return number(value) and value > SUBMITTED_CORR_PARENT
-    pairs = [x for x in report(conn)['pairs'] if x['worth_combination_review'] and not any(tainted(i) or correlated(i) for i in x['parents'])]
+    # 已被反复组合但从未产出更强结果的父信号视为"已挖尽"，不再消耗组合轮。
+    failed_blends={}
+    for r in conn.execute('''SELECT p.pair_key,b.alpha_id FROM combination_plans p
+            JOIN research_cycles c ON c.cycle_id=p.cycle_id LEFT JOIN brain_runs b ON b.task_id=c.simulation_task'''):
+        blend=strength(r['alpha_id']) if r['alpha_id'] else 0.0
+        for parent in r['pair_key'].split(':'):
+            if blend <= max(strength(parent), MIN_PARENT_SHARPE) or blend < 1.25:
+                failed_blends[parent]=failed_blends.get(parent,0)+1
+    exhausted={a for a,n in failed_blends.items() if n >= MAX_FAILED_BLENDS}
+    pairs = [x for x in report(conn)['pairs'] if x['worth_combination_review'] and not any(tainted(i) or correlated(i) or i in exhausted for i in x['parents'])]
     for pair in sorted(pairs, key=lambda x: (-(strength(x['parents'][0])+strength(x['parents'][1])), abs(x['value']))):
         ids = pair['parents']; key = ':'.join(ids)
         if not all(x in parents for x in ids): continue

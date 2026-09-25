@@ -142,3 +142,31 @@ class CombinationRankingTests(unittest.TestCase):
                 plan=feedback.next_combination(c,max_plans=6,min_parent_sharpe=0)
             self.assertEqual(plan['parents'],['weakA','weakB'])
             c.close()
+
+
+class ExhaustedParentTests(unittest.TestCase):
+    def test_parent_with_repeated_failed_blends_is_skipped(self):
+        from unittest.mock import patch
+        from wq import store, research_dsl
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg,c=make_env(tmp);autopilot.setup(c);feedback.setup(c);autopilot.brain_jobs.setup(c)
+            bindings={n:{'expression':f'f{i}','fields':[f'f{i}'],'source':'s'} for i,n in enumerate(research_dsl.ROLES)}
+            policy=json.dumps({'settings':{'decay':0},'bindings':bindings}); roles=list(research_dsl.ROLES)
+            def add(cid,aid,sharpe,role,plan=None):
+                tid=store.enqueue_task(c,'brain_simulation',{},'k'+aid)[0]
+                c.execute("INSERT INTO research_cycles(cycle_id,state,policy_json,policy_hash,simulation_task,candidate_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+                          (cid,'closed',policy,'h',tid,json.dumps({'ast':{'op':'mean','arg':{'op':'field','name':role},'window':20}}),util.now_iso(),util.now_iso()))
+                c.execute("INSERT INTO brain_runs(task_id,state,alpha_id,started_at,updated_at) VALUES(?,?,?,?,?)",(tid,'complete',aid,util.now_iso(),util.now_iso()))
+                c.execute("INSERT INTO families(family_id,family_key,origin,synthetic,created_at) VALUES(?,?,?,?,?)",('fam'+aid,'fk'+aid,'t',0,util.now_iso()))
+                c.execute("INSERT INTO candidates(candidate_id,family_id,expression,config_json,config_hash,synthetic,created_at) VALUES(?,?,?,?,?,?,?)",('cand'+aid,'fam'+aid,'x','{}','ch'+aid,0,util.now_iso()))
+                c.execute("INSERT INTO simulations(sim_id,candidate_id,remote_id,source,synthetic,status,stats_json,imported_at) VALUES(?,?,?,?,?,?,?,?)",('sim'+aid,'cand'+aid,aid,'api',0,'failed',json.dumps({'sharpe':sharpe}),util.now_iso()))
+                if plan: c.execute("INSERT INTO combination_plans VALUES(?,?,?,?)",(plan,cid,'{}',util.now_iso()))
+            add(1,'tired',1.2,roles[0]); add(2,'fresh',1.0,roles[1]); add(3,'other',1.0,roles[2])
+            for k,(cid,aid) in enumerate([(4,'b1'),(5,'b2'),(6,'b3')]): add(cid,aid,0.5,roles[3],plan=f'tired:x{k}')
+            pairs=[{'parents':['fresh','tired'],'value':0.01,'worth_combination_review':True},
+                   {'parents':['fresh','other'],'value':0.2,'worth_combination_review':True}]
+            with patch('wq.feedback.report',return_value={'pairs':pairs}):
+                plan=feedback.next_combination(c,max_plans=10)
+            self.assertEqual(plan['parents'],['fresh','other'])
+            c.close()
+

@@ -159,4 +159,5 @@ UNKNOWN 对账先查官方历史，并保留核实依据。以下命令中的 ID
 - 节奏参数（2026-09-25 复盘后）：`autopilot.max_cycles_per_day` 按 UTC 日计数，设得太低会在北京时间凌晨触顶空转到 08:00；`models.grok.timeout_s` 需覆盖提案的实际耗时（近期 9–13 分钟）；`research_feedback.max_combination_plans` 是终身配额，用完后不再有组合实验，而组合轮与自由探索轮现在自动交替（上一轮是组合则本轮必为探索）。
 - 组合父信号配对只比较影响持仓的设置（忽略 `testPeriod`/`visualization`），并要求双方 Sharpe ≥ 0.9（`feedback.MIN_PARENT_SHARPE`；历史 16 次组合中弱父信号从未通过）。2026-09-25 前 `testPeriod` 差异曾让 9 月 22 日之前的强父信号无法参与配对。
 - decay 变体触发阈值 2026-09-25 起为基础换手 ≥ 12.5%（Fitness 公式中换手的下限；低于它 decay 不能提高 Fitness）。第 80 轮组合 Sharpe 1.42 / 换手 17.6% 仅 Fitness 未过，就是这类情况。
+- 父信号参与 ≥3 次未过门槛（组合 Sharpe<1.25 且不高于父信号）的组合后视为"已挖尽"，不再登记组合（`feedback.MAX_FAILED_BLENDS`）。2026-09-25 复盘：同一批 6 个父信号反复配对，第 72–82 轮 6 次组合全部未过；组合枯竭时轮次自动回到自由探索，产出新的强单信号才是根本。
 
