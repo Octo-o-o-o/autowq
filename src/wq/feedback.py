@@ -338,6 +338,14 @@ def next_combination(conn, max_plans=2, min_parent_sharpe=MIN_PARENT_SHARPE):
             JOIN brain_runs b ON b.task_id=c.simulation_task
             WHERE c.state='closed' '''):
         if r['candidate_json']: parents[r['alpha_id']]=dict(r)
+    # 预登记的符号翻转复核结果也可作父信号：AST 即 neg(基础 AST)，基础提案已经过审查。
+    from .autopilot import setup as _ap_setup
+    _ap_setup(conn)
+    for r in conn.execute('''SELECT c.cycle_id,c.candidate_json,c.policy_json,b.alpha_id FROM cycle_simulations s
+            JOIN research_cycles c ON c.cycle_id=s.cycle_id JOIN brain_runs b ON b.task_id=s.task_id
+            WHERE s.label='sign_flip' AND c.state='closed' AND c.candidate_json IS NOT NULL'''):
+        cand=json.loads(r['candidate_json']); cand['ast']={'op':'neg','arg':cand['ast']}
+        parents[r['alpha_id']]={**dict(r),'candidate_json':json.dumps(cand,ensure_ascii=False)}
     # 低相关只是准入条件；在准入的配对里优先父信号更强的组合（唯一一次全过门槛的
     # 提交 vRrlJZpQ 就是强父信号的等权组合，弱+弱组合的第 30 轮未能救活）。
     def strength(aid):

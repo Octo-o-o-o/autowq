@@ -314,3 +314,17 @@ from wq import research_dsl
 for _name in list(vars(VariantTests)):
     if _name.startswith('test_'):
         setattr(FocusRoleTests, _name, None)
+
+
+class PausedClusterTests(unittest.TestCase):
+    def test_paused_cluster_roles_rejected_in_free_proposals(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            proof = Path(tmp) / 'e.json'; util.write_json(str(proof), {'x': 1})
+            b = {n: {'expression': f'rank(f_{i})', 'fields': [f'f_{i}'], 'source': 's'} for i, n in enumerate(research_dsl.ROLES)}
+            b['eps_dispersion'] = {'expression': 'rank(f_9)', 'fields': ['f_9'], 'source': 's', 'description': '分析师分歧代理', 'cluster': 'analyst'}
+            p = {'version': 1, 'scope': 'exploratory_only_no_submission', 'valid_until': '2099-01-01T00:00:00Z', 'verified_at': '2026-01-01T00:00:00Z',
+                 'source': 's', 'bindings': b, 'settings': {'region': 'USA', 'universe': 'TOP3000', 'delay': 1, 'decay': 0, 'truncation': 0.08, 'neutralization': 'INDUSTRY'},
+                 'evidence_files': [{'path': str(proof), 'sha256': util.sha256_json({'x': 1})}], 'paused_clusters': ['analyst']}
+            autopilot.check_policy(p)
+            bad = dict(p); bad['paused_clusters'] = 'analyst'
+            with self.assertRaises(ValueError): autopilot.check_policy(bad)
