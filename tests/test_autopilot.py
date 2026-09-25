@@ -69,6 +69,10 @@ class AutopilotTests(unittest.TestCase):
             history.append(item)
         context=json.loads(autopilot.history_context(history,proposal('std')))
         self.assertEqual(context['full_candidates'],history)
+        older=[{'cycle':i,'candidate':proposal('mean')} for i in range(20)]
+        compacted=json.loads(autopilot.history_context(older))['full_candidates']
+        self.assertEqual(compacted[14]['candidate'],proposal('mean'))
+        self.assertEqual(set(compacted[15]['candidate']),{'title','ast','note'})
         prompt=autopilot.review_prompt(proposal(),history)
         self.assertIn(history[2]['counterexample'],prompt)
         self.assertNotIn('reason建议120',prompt)

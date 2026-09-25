@@ -265,3 +265,52 @@ class CombinationSpacingTests(unittest.TestCase):
             previous = c.execute('SELECT cycle_id FROM research_cycles WHERE cycle_id<? ORDER BY cycle_id DESC LIMIT 1', (2,)).fetchone()
             self.assertTrue(c.execute('SELECT 1 FROM combination_plans WHERE cycle_id=?', (previous[0],)).fetchone())
             c.close()
+
+
+class FocusRoleTests(VariantTests):
+    """聚焦角色队列：前 N 轮逐个做单角色基线，提案必须只用该角色，期间不登记组合。"""
+    def setUp(self):
+        super().setUp()
+        self.p['setting_variants'] = []
+        self.p['focus_roles'] = ['activity_rank', 'market_cap_rank']
+        self.save_policy()
+        self.focus_ok = True
+
+    def dispatch(self, conn, cfg, t):
+        payload = json.loads(t['payload_json'])
+        if t['kind'] == 'agent_call' and payload['role'] == 'research':
+            row = conn.execute("SELECT * FROM research_cycles WHERE state!='closed'").fetchone()
+            focus = store.get_flag(conn, f"autopilot_focus_{row['cycle_id']}")
+            role = focus if (focus and self.focus_ok) else 'daily_return'
+            prompt_text = Path(payload['job_dir']).joinpath('prompt.txt').read_text()
+            self.assertEqual(bool(focus), f'角色 {focus}' in prompt_text if focus else True)
+            cand = {'title': '聚焦角色单基线实验', 'hypothesis': '按角色更新频率选择窗口，方向为正，反例是规模因子解释。', 'counterexample': '若被市值排名完全解释则放弃，不改窗口重试。',
+                    'ast': {'op': 'mean', 'arg': {'op': 'field', 'name': role}, 'window': 60}}
+            util.write_json(str(Path(payload['job_dir']) / 'result.json'), {'status': 'completed', 'candidate': cand})
+            conn.execute('INSERT INTO task_routes(task_id,snapshot_json,phase,updated_at) VALUES(?,?,?,?)', (t['task_id'], json.dumps({'chain': ['a'], 'preset': 'steady'}), 'complete', util.now_iso()))
+            return 'succeeded', {}, None
+        return super().dispatch(conn, cfg, t)
+
+    def test_focus_queue_orders_baselines_and_rejects_other_roles(self):
+        for _ in range(60): self.tick()
+        self.assertEqual(self.cycle()['state'], 'closed')
+        self.assertEqual(store.get_flag(self.c, 'autopilot_focus_1'), 'activity_rank')
+        self.assertEqual(research_dsl.roles_used(json.loads(self.cycle()['candidate_json'])['ast']), ['activity_rank'])
+        store.set_flag(self.c, 'autopilot_next_at', '2000-01-01T00:00:00Z')
+        self.focus_ok = False   # 模型无视聚焦指令 → 本轮以输入错误关闭，不回测
+        for _ in range(6): self.tick()
+        self.assertEqual(self.cycle()['cycle_id'], 2)
+        self.assertEqual(store.get_flag(self.c, 'autopilot_focus_2'), 'market_cap_rank')
+        self.assertIn('聚焦角色', self.cycle()['outcome'])
+        self.assertEqual(self.posts, 1)
+        self.assertEqual(self.c.execute('SELECT COUNT(*) FROM combination_plans').fetchone()[0], 0)
+
+    def test_policy_rejects_unknown_focus_role(self):
+        self.p['focus_roles'] = ['not_a_role']; self.save_policy()
+        with self.assertRaises(ValueError): autopilot.policy(self.cfg)
+
+
+from wq import research_dsl
+for _name in list(vars(VariantTests)):
+    if _name.startswith('test_'):
+        setattr(FocusRoleTests, _name, None)
