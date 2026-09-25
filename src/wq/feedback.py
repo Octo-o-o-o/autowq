@@ -319,7 +319,15 @@ def model_context(conn):
     return result
 
 
-def next_combination(conn, max_plans=2):
+DISPLAY_ONLY_SETTINGS = ('testPeriod', 'visualization')
+MIN_PARENT_SHARPE = 0.9   # 历史 16 次组合里父信号 Sharpe<0.8 的从未通过门槛
+
+
+def simulation_settings(settings):
+    return {k: v for k, v in settings.items() if k not in DISPLAY_ONLY_SETTINGS}
+
+
+def next_combination(conn, max_plans=2, min_parent_sharpe=MIN_PARENT_SHARPE):
     setup(conn)
     if conn.execute('SELECT COUNT(*) FROM combination_plans').fetchone()[0] >= max_plans: return None
     # 只组合经过模型审查的父提案（含已审查的组合轮本身，允许一层再组合；复杂度上限
@@ -357,7 +365,9 @@ def next_combination(conn, max_plans=2):
         if not all(x in parents for x in ids): continue
         if conn.execute('SELECT 1 FROM combination_plans WHERE pair_key=?',(key,)).fetchone(): continue
         a,b = [parents[x] for x in ids]
-        if json.loads(a['policy_json'])['settings'] != json.loads(b['policy_json'])['settings']: continue
+        # 只比较影响持仓的设置；testPeriod/visualization 只影响展示与分段，不影响回测本身。
+        if simulation_settings(json.loads(a['policy_json'])['settings']) != simulation_settings(json.loads(b['policy_json'])['settings']): continue
+        if min(strength(ids[0]), strength(ids[1])) < min_parent_sharpe: continue
         ast = {'op':'add','left':{'op':'rank','arg':json.loads(a['candidate_json'])['ast']},
                'right':{'op':'rank','arg':json.loads(b['candidate_json'])['ast']}}
         from . import research_dsl

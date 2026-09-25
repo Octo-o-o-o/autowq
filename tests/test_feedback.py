@@ -88,10 +88,10 @@ class FeedbackTests(unittest.TestCase):
                 c.execute("INSERT INTO research_cycles(cycle_id,state,policy_json,policy_hash,candidate_json,simulation_task,created_at,updated_at) VALUES(?,'closed',?,'hash',?,?,?,?)",(i,json.dumps(policy),json.dumps(candidate),'task'+str(i),util.now_iso(),util.now_iso()))
                 c.execute('INSERT INTO brain_runs VALUES(?,?)',('task'+str(i),'alpha'+str(i)))
             with patch('wq.feedback.report',return_value={'pairs':[{'parents':['alpha1','alpha2'],'value':-.1,'worth_combination_review':True}]}):
-                plan=feedback.next_combination(c);self.assertIsNotNone(plan)
+                plan=feedback.next_combination(c,min_parent_sharpe=0);self.assertIsNotNone(plan)
                 c.execute('INSERT INTO combination_plans VALUES(?,?,?,?)',(plan['pair_key'],3,json.dumps(plan),util.now_iso()))
-                self.assertIsNone(feedback.next_combination(c))
-                self.assertIsNone(feedback.next_combination(c,0))
+                self.assertIsNone(feedback.next_combination(c,min_parent_sharpe=0))
+                self.assertIsNone(feedback.next_combination(c,0,min_parent_sharpe=0))
             c.close()
 
 
@@ -118,18 +118,27 @@ class CombinationRankingTests(unittest.TestCase):
             with patch('wq.feedback.report',return_value={'pairs':pairs}):
                 plan=feedback.next_combination(c,max_plans=4)
             self.assertEqual(plan['parents'],['strongA','strongB'])
-            # 已提交的父信号被排除，退到下一对
+            # testPeriod 只影响展示，不应阻止配对；其它设置不同才阻止
+            c.execute("UPDATE research_cycles SET policy_json=? WHERE cycle_id=1",(json.dumps({'settings':{'decay':0,'testPeriod':'P1Y'},'bindings':bindings}),))
+            with patch('wq.feedback.report',return_value={'pairs':pairs}):
+                self.assertEqual(feedback.next_combination(c,max_plans=4)['parents'],['strongA','strongB'])
+            c.execute("UPDATE research_cycles SET policy_json=? WHERE cycle_id=1",(json.dumps({'settings':{'decay':4},'bindings':bindings}),))
+            with patch('wq.feedback.report',return_value={'pairs':pairs}):
+                self.assertNotEqual(feedback.next_combination(c,max_plans=4,min_parent_sharpe=0)['parents'],['strongA','strongB'])
+            c.execute("UPDATE research_cycles SET policy_json=? WHERE cycle_id=1",(policy,))
+            # 已提交的父信号被排除，退到下一对（弱父信号需放宽最低强度才允许）
             from wq import brain_submission; brain_submission.setup(c)
             tsub=store.enqueue_task(c,'brain_submission',{},'ksub')[0]
             c.execute("INSERT INTO brain_submissions(task_id,alpha_id,sim_id,state,started_at,updated_at) VALUES(?,?,?,?,?,?)",(tsub,'strongA','simstrongA','accepted',util.now_iso(),util.now_iso()))
             with patch('wq.feedback.report',return_value={'pairs':pairs}):
-                plan=feedback.next_combination(c,max_plans=4)
+                self.assertIsNone(feedback.next_combination(c,max_plans=4))          # 默认最低父强度 0.9 挡住 weak 对
+                plan=feedback.next_combination(c,max_plans=4,min_parent_sharpe=0)
             self.assertEqual(plan['parents'],['weakA','weakB'])
             # 祖先含已提交信号的组合轮 alpha 也不能再作父信号
             add(5,'blendA',1.5,roles[4])
             c.execute("INSERT INTO combination_plans VALUES(?,?,?,?)",('strongA:strongB',5,'{}',util.now_iso()))
             pairs.append({'parents':['blendA','weakA'],'value':0.02,'worth_combination_review':True})
             with patch('wq.feedback.report',return_value={'pairs':pairs}):
-                plan=feedback.next_combination(c,max_plans=6)
+                plan=feedback.next_combination(c,max_plans=6,min_parent_sharpe=0)
             self.assertEqual(plan['parents'],['weakA','weakB'])
             c.close()
