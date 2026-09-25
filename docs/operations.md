@@ -156,4 +156,5 @@ UNKNOWN 对账先查官方历史，并保留核实依据。以下命令中的 ID
 - **周预算预测**：`wq autopilot status` 按最近 24 小时实际登记的请求速率预测周预算耗尽时间，早于本周结束或授权到期时在状态里预警（`budget_forecast`）。
 - **提交频率可配置**：`brain_submission.max_posts_per_24h`（默认 1）控制滚动 24 小时 POST 次数；平台自身的提交限额未核验，放大前自行确认。
 - **单角色探测汇总进提示词**：每个角色单独回测的最佳档位与最近诊断进入研究提示词，要求模型不再单独重测档位 <1.0 的角色，转向有机制解释的跨簇交互/比率。`research_feedback.max_combination_plans` 现为 12。
+- 节奏参数（2026-09-25 复盘后）：`autopilot.max_cycles_per_day` 按 UTC 日计数，设得太低会在北京时间凌晨触顶空转到 08:00；`models.grok.timeout_s` 需覆盖提案的实际耗时（近期 9–13 分钟）；`research_feedback.max_combination_plans` 是终身配额，用完后不再有组合实验，而组合轮与自由探索轮现在自动交替（上一轮是组合则本轮必为探索）。
 

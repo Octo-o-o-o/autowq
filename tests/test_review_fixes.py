@@ -247,3 +247,21 @@ class EarlyAvoidanceTests(unittest.TestCase):
             cfg2, c2 = make_env(tmp + '/b')
             self.assertEqual(int(cfg2.get('brain_submission', 'max_posts_per_24h', default=1)), 1)
             c.close(); c2.close()
+
+
+class CombinationSpacingTests(unittest.TestCase):
+    def test_recent_roles_listed_and_plan_skipped_after_plan_cycle(self):
+        from wq import research_dsl
+        history = [{'cycle': 3, 'candidate': {'ast': {'op': 'mean', 'arg': {'op': 'field', 'name': 'social_buzz'}, 'window': 20}}},
+                   {'cycle': 2, 'candidate': {'ast': {'op': 'field', 'name': 'peer_return'}}},
+                   {'cycle': 1, 'candidate': {'ast': {'op': 'field', 'name': 'leverage'}}},
+                   {'cycle': 0, 'candidate': {'ast': {'op': 'field', 'name': 'old_role'}}}]
+        usage = autopilot.role_usage(history, {})
+        self.assertEqual(usage['最近3轮已用角色（本轮避免再用）'], ['leverage', 'peer_return', 'social_buzz'])
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg, c = make_env(tmp); autopilot.setup(c); feedback.setup(c)
+            c.execute("INSERT INTO research_cycles(cycle_id,state,policy_json,policy_hash,created_at,updated_at) VALUES(1,'closed','{}','h',?,?)", (util.now_iso(), util.now_iso()))
+            c.execute("INSERT INTO combination_plans VALUES('a:b',1,'{}',?)", (util.now_iso(),))
+            previous = c.execute('SELECT cycle_id FROM research_cycles WHERE cycle_id<? ORDER BY cycle_id DESC LIMIT 1', (2,)).fetchone()
+            self.assertTrue(c.execute('SELECT 1 FROM combination_plans WHERE cycle_id=?', (previous[0],)).fetchone())
+            c.close()
