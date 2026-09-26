@@ -8,7 +8,7 @@
 
 ## 安装
 
-需要 Python 3.11+，以及你自己的模型 CLI 订阅账号或 API Key。运行时只使用 Python 标准库。支持 macOS；Linux/Windows WSL2 使用 Docker 隔离模型进程。原生 Windows 暂不支持。
+需要 Python 3.11+，以及你自己的模型 CLI 订阅账号或 API Key。核心运行时只使用 Python 标准库。支持 macOS；Linux/Windows WSL2 使用 Docker 隔离模型进程。原生 Windows 实验性支持托盘与调度控制层（见方式二下方的 Windows 说明）。
 
 ```sh
 # 方式一：Homebrew（macOS）
@@ -17,6 +17,8 @@ brew install --cask Octo-o-o-o/autowq/worldquant   # 可选：菜单栏 App
 ```
 
 方式二：macOS 菜单栏 App。从 [Releases](https://github.com/Octo-o-o-o/autowq/releases) 下载 `WorldQuant-<版本>.dmg`，拖入"应用程序"后双击；首启向导引导选择工作区、准备运行时并调起 onboard，完成后菜单栏常驻。未公证版本可用 `brew install --cask` 安装（自动去除隔离属性），或首次右键打开。
+
+Windows（实验性）：托盘与 macOS 菜单栏同功能、同控制层。从 [Releases](https://github.com/Octo-o-o-o/autowq/releases) 下载 `WorldQuantTray.exe`（单文件、内置引擎），在已完成 `wq onboard` 的工作区运行，可用 `--workspace <目录>` 指定；或源码方式 `pip install pystray Pillow` 后运行 `python scripts/setup_windows.py` 注册任务计划调度与登录自启。Provider 不随 exe 发布，需自行配置 profiles.json；完整研究栈仍建议 Linux / Windows WSL2，见[跨平台部署](docs/linux-windows.md)。
 
 方式三：源码（开发）：
 
@@ -56,6 +58,7 @@ cd autowq
 - 逐候选正式提交：研究验收、最新平台检查、单次 POST、真实接收状态核验。
 - 中文任务进度、token 及费用来源；未知费用不记作零。
 - 单并发、预算、授权期限、平台限流、崩溃恢复与去重。
+- macOS 菜单栏 / Windows 托盘（实验性）：状态、轮次历史与已提交 Alpha，切换路由预设、渠道与频率上限，提交成功或任务失败时系统通知。
 
 ## 常用命令
 
@@ -97,7 +100,7 @@ PYTHONPATH=src python3 -m unittest discover -s tests
 
 - [首次使用与模型选择](docs/onboarding.md)
 - [运行、配置、提交与恢复](docs/operations.md)
-- [Linux / Windows WSL2 部署](docs/linux-windows.md)
+- [Linux / Windows 部署（含实验性原生 Windows 托盘）](docs/linux-windows.md)
 - [架构与数据边界](docs/architecture.md)
 - [第三方与许可](NOTICE.md)
 

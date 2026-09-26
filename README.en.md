@@ -8,7 +8,7 @@ A local WorldQuant BRAIN research workflow: propose a hypothesis → review thro
 
 ## Install
 
-Requirements: Python 3.11+ and your own CLI subscription accounts or API keys. Runtime dependencies are Python standard library only. macOS is supported; Linux and Windows WSL2 use Docker-isolated providers. Native Windows is not supported.
+Requirements: Python 3.11+ and your own CLI subscription accounts or API keys. The core runtime uses the Python standard library only. macOS is supported; Linux and Windows WSL2 use Docker-isolated providers. Native Windows has experimental support for the tray and scheduler control layer (see the Windows note under Option 2).
 
 ```sh
 # Option 1: Homebrew (macOS)
@@ -17,6 +17,8 @@ brew install --cask Octo-o-o-o/autowq/worldquant   # optional menu-bar app
 ```
 
 Option 2: macOS menu-bar app. Download `WorldQuant-<version>.dmg` from [Releases](https://github.com/Octo-o-o-o/autowq/releases), drag it into Applications and double-click; the first-launch wizard picks a workspace, prepares the runtime and starts onboarding. If the build is not notarized, install via `brew install --cask` (which removes quarantine) or right-click Open once.
+
+Windows (experimental): the tray shares the same control layer and feature set as the macOS menu bar. Download `WorldQuantTray.exe` (single file, engine bundled) from [Releases](https://github.com/Octo-o-o-o/autowq/releases) and run it inside a workspace that has completed `wq onboard`, optionally with `--workspace <dir>`; or from source, `pip install pystray Pillow` then `python scripts/setup_windows.py` to register the Task Scheduler runner and login autostart. Providers are not bundled with the exe — configure profiles.json yourself; the full research stack still recommends Linux / Windows WSL2, see the cross-platform guide.
 
 Option 3: source checkout (development):
 
@@ -56,6 +58,7 @@ Follow the **[complete bilingual onboarding checklist](docs/onboarding.md)**: si
 - Per-candidate submission: research review, fresh platform checks, one POST and verified acceptance.
 - Task progress and token/cost provenance; unknown costs never become zero.
 - Single concurrency, budgets, authorization expiration, rate-limit handling, recovery and deduplication.
+- macOS menu bar / Windows tray (experimental): status, cycle history and submitted Alphas; routing preset, provider and cadence/limit switching; system notifications on accepted submissions or failed tasks.
 
 ## Common commands
 
@@ -97,7 +100,7 @@ PYTHONPATH=src python3 -m unittest discover -s tests
 
 - [Onboarding and model selection — bilingual](docs/onboarding.md)
 - [Operations, configuration, submissions and recovery — Chinese](docs/operations.md)
-- [Linux / Windows WSL2 deployment — Chinese](docs/linux-windows.md)
+- [Linux / Windows deployment incl. experimental native-Windows tray — Chinese](docs/linux-windows.md)
 - [Architecture and data boundaries — Chinese](docs/architecture.md)
 - [Third-party notices and licensing — Chinese](NOTICE.md)
 

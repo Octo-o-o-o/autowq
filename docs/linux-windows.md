@@ -75,6 +75,8 @@ python -m pip install pystray Pillow
 python scripts\setup_windows.py            # 注册调度任务与托盘登录自启；移除用 --remove
 ```
 
+或直接从 Releases 下载 `WorldQuantTray.exe`（PyInstaller 单文件、内置引擎），在已完成 `wq onboard` 的工作区运行，支持 `--workspace <目录>` 指定；注意任务计划调度目前仍由 `setup_windows.py` 注册，纯 exe 使用前需要一次源码环境。
+
 - 托盘脚本 `scripts/desktop_tray.py`；调度包装器与日志在 `var\run\`（runner.out.log / tray.log）。
 - 队列核心已做 Windows 可移植：单实例锁用 msvcrt，进程树终止用 taskkill，进程探活用 tasklist（`os.kill(pid,0)` 在 Windows 是发 CTRL_C_EVENT，不可用）。
 - **Provider 仍需自行解决**：profiles.json 里的 grok/devin/cursor 启动器是按部署生成的 macOS/Linux 路径；原生 Windows 需要本机可用的各 CLI 并自行配置 profiles.json，本项目不发布 Windows 版 Provider 二进制。要开箱即用的完整研究栈仍推荐 WSL2/Linux 路线。
