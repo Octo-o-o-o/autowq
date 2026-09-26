@@ -654,7 +654,7 @@ def build_parser(lang=None) -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="wq", description="WorldQuant 研究试点本地工具（离线优先）")
     lang=lang or default_language()
     p.add_argument("--lang",choices=["zh","en"],default=lang,help="界面语言 / Interface language")
-    p.add_argument("--version",action="version",version="wq 0.2.2")
+    p.add_argument("--version",action="version",version="wq 0.2.3")
     p.add_argument("--config", help="config.json 路径，默认 ./config/config.json")
     p.add_argument("--db", help="覆盖 SQLite 路径（测试用）")
     sub = p.add_subparsers(dest="cmd", required=True)
