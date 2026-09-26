@@ -100,6 +100,9 @@ def claim_task(conn, owner: str, lease_s: int = 300):
     now = util.now()
     conn.execute("BEGIN IMMEDIATE")
     try:
+        if is_paused(conn):
+            conn.execute("COMMIT")
+            return None
         rows = conn.execute(
             "SELECT * FROM tasks WHERE status='queued' AND not_before<=? ORDER BY created_at",
             (now.isoformat(timespec="microseconds"),)).fetchall()

@@ -70,3 +70,16 @@
 ## All-cycle research review (2026-09-23)
 
 Added all-closed-cycle diagnostic snapshots, manual/idle periodic review, research plus distinct-provider verification, hash/citation validation and fixed guidance injection into future prompts. Eight focused tests passed; full suite 297 discovered, 295 passed, two optional Docker tests skipped. This verifies software behavior, not improved Alpha quality. Raw platform data is not copied to model packets.
+
+## 运行记录核查与菜单栏控制 — 2026-09-26
+
+本次针对近期历史修改、完整本地轮次汇总、队列/模拟/提交账本及全历史复盘失败产物进行核查，不宣称全代码独立审计。
+
+- 发现全历史复盘14次失败均含正确标签引用，但超过隐藏的20条上限；改为快照轮数上限并拒绝重复引用，保留快照/标签绑定和独立复核。只读重验14份旧产物均通过结构校验，旧状态未改写，不等于独立复核通过。
+- 组合计划选择时按当前策略过滤已暂停数据簇，并使用当前角色绑定检查AST，避免先消耗研究调用再被本轮门禁拒绝。
+- 增加温和暂停，并在原子领取事务内检查暂停状态，修补暂停与派发的竞态。
+- 原生Swift菜单栏应用复用现有队列，提供开始、暂停、退出、日志及状态；安装器保留已有runner配置，增加登录自启与图标单实例保护。暂停跨登录保留，退出前必须成功暂停。
+- 已实机安装、签名、验证plist与LaunchAgent运行；控制桥实际暂停→读回暂停→开始→读回恢复通过，未中断在途任务或重发平台请求。无窗口应用的CUA读取超时，未完成菜单视觉/点击验收；未重启用户电脑，因此登录自启验证止于注册配置与实际加载。
+- 研究质量仍有大量收益效率、时间分段和年度稳定性缺口；本次不放宽研究质量门槛、不改自动提交权限，也不把账本接收状态当作收益。
+
+最终本机验证：378项 unittest，376通过、2项可选Docker集成跳过，退出0；wheel构建与 `git diff --check` 退出0。原生应用构建、签名与安装退出0；实际菜单进程计数为1，暂停/恢复后 paused=false、调度已加载、UNKNOWN=0。最终检查时原队列全历史复盘模型任务仍在运行，其独立复核及后续研究效果尚未验收。测试证据：`var/run/desktop-final-20260926.log` 和对应summary；原生构建证据：`var/run/desktop-verify-20260926.log`。本轮未commit、未push。

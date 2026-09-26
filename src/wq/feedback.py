@@ -96,13 +96,25 @@ def bands(stats):
 
 SUBMITTED_CORR_BLOCK = 0.7      # 本地估计 >= 该值：不列为提交候选（官方门槛 0.7）
 SUBMITTED_CORR_PARENT = 0.5     # 本地估计 >  该值：不再作组合父信号（组合腿会把相关带进去）
+# 社区脚本与另一账号 /check 观测：相关 >0.7 时若候选 Sharpe ≥ 1.10×相关同伴最大 Sharpe 仍 PASS。
+# 这是待本账号官方结果核验的假说；只影响本地“提交前缺口”标签，官方 /check 全 PASS 仍是唯一放行条件。
+SHARPE_PREMIUM = 1.10
 
 
-def submitted_correlation(conn, pnl_doc, exclude=None):
-    """候选与全部已接收提交的本地日 PnL 相关最大值；缺 PnL 的提交记为未知。"""
+def alpha_sharpe(conn, aid):
+    row = conn.execute('SELECT stats_json FROM simulations WHERE remote_id=? AND synthetic=0', (aid,)).fetchone()
+    try: value = json.loads(row['stats_json']).get('sharpe') if row else None
+    except (ValueError, TypeError): value = None
+    return value if number(value) else None
+
+
+def submitted_correlation(conn, pnl_doc, exclude=None, candidate_sharpe=None):
+    """候选与全部已接收提交的本地日 PnL 相关最大值；缺 PnL 的提交记为未知。
+    另附 Sharpe 溢价假说：相关 ≥0.7 的同伴里最大 Sharpe×1.10 与候选 Sharpe 比较，结果只作标签。"""
     setup(conn)
     tables={x[0] for x in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    if 'brain_submissions' not in tables: return {'max': None, 'against': [], 'missing': []}
+    empty = {'max': None, 'against': [], 'missing': [], 'premium': None}
+    if 'brain_submissions' not in tables: return empty
     out, missing = [], []
     for r in conn.execute("SELECT alpha_id FROM brain_submissions WHERE state='accepted'"):
         aid = r[0]
@@ -114,9 +126,47 @@ def submitted_correlation(conn, pnl_doc, exclude=None):
         except (OSError, ValueError, KeyError, TypeError):
             corr = {'value': None}
         if corr['value'] is None: missing.append(aid)
-        else: out.append({'alpha_id': aid, 'value': corr['value']})
+        else: out.append({'alpha_id': aid, 'value': corr['value'], 'sharpe': alpha_sharpe(conn, aid)})
     values = [abs(x['value']) for x in out]
-    return {'max': max(values) if values else None, 'against': out, 'missing': missing}
+    result = {'max': max(values) if values else None, 'against': out, 'missing': missing, 'premium': None}
+    peers = [x for x in out if abs(x['value']) >= SUBMITTED_CORR_BLOCK]
+    if peers:
+        known = [x['sharpe'] for x in peers if x['sharpe'] is not None]
+        needed = max(known) * SHARPE_PREMIUM if known and len(known) == len(peers) else None
+        result['premium'] = {'rule': f'候选Sharpe ≥ {SHARPE_PREMIUM}×相关同伴最大Sharpe（社区观测，待官方核验）',
+                             'peers': [x['alpha_id'] for x in peers], 'needed_sharpe': needed,
+                             'candidate_sharpe': candidate_sharpe if number(candidate_sharpe) else None,
+                             'hit': bool(needed is not None and number(candidate_sharpe) and candidate_sharpe >= needed)}
+    return result
+
+
+# 官方检查名 → 固定诊断标签。前七项是提交必需项；其余为社区在真实账号见到的检查/WARNING 名，
+# 只影响标签可读性：任何非 PASS 项仍由 brain_submission.problems() 原样阻断。
+CHECK_LABELS = {'LOW_SHARPE':'收益风险比不足', 'LOW_FITNESS':'收益效率不足',
+                'HIGH_TURNOVER':'换手过高', 'LOW_TURNOVER':'换手过低',
+                'CONCENTRATED_WEIGHT':'权重集中', 'LOW_SUB_UNIVERSE_SHARPE':'子股票池不稳健',
+                'SELF_CORRELATION':'与已提交信号重叠',
+                'PROD_CORRELATION':'与平台生产信号重叠', 'POWER_POOL_CORRELATION':'与Power Pool信号重叠',
+                'IS_LADDER_SHARPE':'样本内分段梯度不稳健', 'LOW_2Y_SHARPE':'近两年收益风险比不足',
+                'HT_PNL_REALIZATION_HORIZON':'收益实现期过长（稳健性警示）',
+                'HT_HIGH_TURNOVER_RETURNS_RATIO':'换手收益比失衡（稳健性警示）',
+                'UNITS':'量纲检查未过', 'MATCHES_THEMES':'主题归类待决', 'MATCHES_COMPETITION':'比赛归类待决',
+                'MATCHES_CLASSIFICATION':'分类归类待决'}
+WARNING_CLASSES = {'soft': ('UNITS', 'HT_TURNOVER', 'OSMOSIS_ALLOCATION'),
+                   'robustness': ('HT_HIGH_TURNOVER_RETURNS_RATIO', 'HT_PNL_REALIZATION_HORIZON'),
+                   'classification': ('MATCHES_THEMES', 'MATCHES_CLASSIFICATION', 'MATCHES_COMPETITION')}
+
+
+def classify_warnings(checks):
+    """非 PASS/FAIL 结果（WARNING/PENDING 等）按社区三级口径归类；只作解释，不改变阻断。"""
+    out = {k: [] for k in WARNING_CLASSES}; out['unknown'] = []
+    for c in checks or []:
+        if not isinstance(c, dict) or c.get('result') in ('PASS', 'FAIL', None): continue
+        name = c.get('name')
+        for cls, names in WARNING_CLASSES.items():
+            if name in names: out[cls].append(name); break
+        else: out['unknown'].append(name)
+    return {k: v for k, v in out.items() if v}
 
 
 def diagnose(alpha, yearly=None, rules=None, submitted=None):
@@ -126,11 +176,7 @@ def diagnose(alpha, yearly=None, rules=None, submitted=None):
     failed = [c.get('name') for c in checks if c.get('result') == 'FAIL']
     names = {c.get('name'): c.get('result') for c in checks}
     categories = []
-    mapping = {'LOW_SHARPE':'收益风险比不足', 'LOW_FITNESS':'收益效率不足',
-               'HIGH_TURNOVER':'换手过高', 'LOW_TURNOVER':'换手过低',
-               'CONCENTRATED_WEIGHT':'权重集中', 'LOW_SUB_UNIVERSE_SHARPE':'子股票池不稳健',
-               'SELF_CORRELATION':'与已提交信号重叠'}
-    categories = [mapping.get(x, '其他平台门槛失败') for x in failed]
+    categories = [CHECK_LABELS.get(x, '其他平台门槛失败') for x in failed]
     if not categories: categories = ['检查待完成' if blockers else '平台快照通过']
     stats = alpha.get('is', {})
     retain = (len(names)==len(checks) and not any(x.startswith('缺少') for x in blockers)
@@ -158,15 +204,27 @@ def diagnose(alpha, yearly=None, rules=None, submitted=None):
         if len(negative) > rules['max_negative_years']:
             gaps.extend('年度收益非正：'+y for y in negative)
     corr_max = (submitted or {}).get('max')
+    premium = (submitted or {}).get('premium') or {}
+    corr_state = '未知' if not number(corr_max) else ('安全（本地估计）' if corr_max < SUBMITTED_CORR_BLOCK
+                 else ('高相关，Sharpe溢价假说命中（待官方核验）' if premium.get('hit') else '高相关（本地估计）'))
     if number(corr_max) and corr_max >= SUBMITTED_CORR_BLOCK:
-        categories.append('与已提交信号高相关（本地估计）')
-        gaps.append(f'与已提交信号本地日PnL相关{corr_max:.2f}>={SUBMITTED_CORR_BLOCK}（官方自相关门槛0.7）')
+        if premium.get('hit'):
+            # 溢价假说命中时不再写入提交前缺口：官方 /check 全 PASS 仍是唯一放行条件，本地不再先行打死。
+            categories.append('与已提交信号高相关（本地估计，Sharpe溢价假说命中，待官方核验）')
+        else:
+            categories.append('与已提交信号高相关（本地估计）')
+            gaps.append(f'与已提交信号本地日PnL相关{corr_max:.2f}>={SUBMITTED_CORR_BLOCK}（官方自相关门槛0.7）')
     if number(corr_max) and corr_max > SUBMITTED_CORR_PARENT:
         retain = False
+    margins = {'sharpe_over_1.25': round(stats['sharpe']-1.25, 3) if number(stats.get('sharpe')) else None,
+               'fitness_over_1.0': round(stats['fitness']-1.0, 3) if number(stats.get('fitness')) else None,
+               'corr_under_0.7': round(SUBMITTED_CORR_BLOCK-corr_max, 3) if number(corr_max) else None}
     return {'alpha_id':alpha['id'], 'identity':identity(alpha), 'diagnosis':categories,
-            'platform_blockers':blockers, 'retain_for_complementarity':bool(retain),
+            'platform_blockers':blockers, 'warning_classes':classify_warnings(checks),
+            'retain_for_complementarity':bool(retain),
             'bands':bands(stats), 'temporal':temporal, 'validation_gaps':gaps, 'segment_rules':dict(rules),
-            'submitted_correlation':submitted or {'max': None, 'against': [], 'missing': []},
+            'submitted_correlation':submitted or {'max': None, 'against': [], 'missing': [], 'premium': None},
+            'correlation_state':corr_state, 'margins':margins,
             'submission_candidate':not blockers and not gaps,
             'note':'保留不等于达标；年度正收益是本地筛选，非平台门槛。反馈选出的候选属于适应性研究，不能声称未污染样本外。'}
 
@@ -219,7 +277,7 @@ def step(conn, cfg, task, payload):
             alpha=dict(alpha)
             alpha['is']={**alpha['is'],'checks':util.read_json(str(root/'check.json'))['is']['checks']}
         result = diagnose(alpha, util.read_json(str(root/'yearly-stats.json')), segment_rules(cfg),
-                          submitted_correlation(conn, pnl, exclude=aid))
+                          submitted_correlation(conn, pnl, exclude=aid, candidate_sharpe=(alpha.get('is') or {}).get('sharpe')))
         result['collection_status']='complete'
         result['pnl_path'] = str(root/'pnl.json')
         result['updated_at'] = util.now_iso()
@@ -253,7 +311,8 @@ def refresh_local(conn, cfg):
             alpha = dict(alpha); alpha['is'] = {**alpha['is'], 'checks': util.read_json(str(root/'check.json'))['is']['checks']}
         old = json.loads(row['report_json'])
         result = diagnose(alpha, util.read_json(str(root/'yearly-stats.json')), rules,
-                          submitted_correlation(conn, util.read_json(str(root/'pnl.json')), exclude=row['alpha_id']))
+                          submitted_correlation(conn, util.read_json(str(root/'pnl.json')), exclude=row['alpha_id'],
+                                                candidate_sharpe=(alpha.get('is') or {}).get('sharpe')))
         result.update(collection_status='complete', pnl_path=str(root/'pnl.json'), updated_at=old.get('updated_at') or util.now_iso(),
                       recomputed_at=util.now_iso(), recomputed_note='按当前 segment_rules 事后重算；不是新的平台资料')
         old_cmp = {k: v for k, v in old.items() if k not in ('recomputed_at', 'recomputed_note')}
@@ -279,7 +338,114 @@ def report(conn):
             pairs.append({'parents':sorted([a['alpha_id'],b['alpha_id']]), **corr,
                           'worth_combination_review':corr['value'] is not None and abs(corr['value']) < .3})
     return {'candidates':rows,'pairs':pairs,'automatic_submission':False,
+            'submission_order':submission_order(rows),
+            'attempt_counts':attempt_counts(conn),
+            'shadow':shadow_statistics(conn),
             'note':'相关性<0.3是本地组合候选规则；每对父信号最多一次等权rank组合，仍须Grok论证和Devin审查。'}
+
+
+def submission_order(rows):
+    """多个本地合格候选时的人工排序建议：先提对已提交池相关最低的（保住相关预算），再看适应度、收益风险比。
+    只是排序建议：不预测官方结果，不自动提交。"""
+    ranked = []
+    for row in rows:
+        if row.get('platform_submission') == 'accepted': continue
+        premium = ((row.get('submitted_correlation') or {}).get('premium') or {}).get('hit')
+        if not row.get('submission_candidate') and not premium: continue
+        stats = {t['segment']: t for t in row.get('temporal', []) if 'segment' in t}
+        corr = (row.get('submitted_correlation') or {}).get('max')
+        margins = row.get('margins') or {}
+        ranked.append({'alpha_id': row['alpha_id'], 'local_corr_max': corr,
+                       'fitness_margin': margins.get('fitness_over_1.0'), 'sharpe_margin': margins.get('sharpe_over_1.25'),
+                       'correlation_state': row.get('correlation_state'),
+                       'basis': 'submission_candidate' if row.get('submission_candidate') else 'premium_hypothesis_only',
+                       'test_sharpe': (stats.get('test') or {}).get('sharpe')})
+    ranked.sort(key=lambda x: (x['local_corr_max'] if number(x['local_corr_max']) else 1.0,
+                               -(x['fitness_margin'] if number(x['fitness_margin']) else -9),
+                               -(x['sharpe_margin'] if number(x['sharpe_margin']) else -9)))
+    return ranked
+
+
+def attempt_counts(conn):
+    """按机制族统计全部尝试（基础/变体/翻转，含失败与未知），用于多重检验说明；计数不改变任何门禁。"""
+    from .autopilot import setup as _ap_setup
+    _ap_setup(conn)
+    tables={x[0] for x in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if 'brain_runs' not in tables: return {}
+    out = {}
+    def add(family, label, status, sharpe):
+        if not family: return
+        entry = out.setdefault(family, {'attempts': 0, 'by_label': {}, 'unknown': 0, 'best_sharpe': None, 'cycles': []})
+        entry['attempts'] += 1
+        entry['by_label'][label] = entry['by_label'].get(label, 0) + 1
+        if status == 'unknown': entry['unknown'] += 1
+        if number(sharpe) and (entry['best_sharpe'] is None or sharpe > entry['best_sharpe']): entry['best_sharpe'] = round(sharpe, 3)
+    for r in conn.execute('''SELECT c.cycle_id,c.family_hash,t.status,b.alpha_id FROM research_cycles c
+            JOIN tasks t ON t.task_id=c.simulation_task LEFT JOIN brain_runs b ON b.task_id=c.simulation_task'''):
+        add(r['family_hash'], 'base', r['status'], alpha_sharpe(conn, r['alpha_id']) if r['alpha_id'] else None)
+        if r['family_hash']: out[r['family_hash']]['cycles'].append(r['cycle_id'])
+    for r in conn.execute('''SELECT c.family_hash,s.label,t.status,b.alpha_id FROM cycle_simulations s
+            JOIN research_cycles c ON c.cycle_id=s.cycle_id LEFT JOIN tasks t ON t.task_id=s.task_id
+            LEFT JOIN brain_runs b ON b.task_id=s.task_id WHERE s.task_id NOT LIKE 'skipped:%' '''):
+        add(r['family_hash'], r['label'], r['status'], alpha_sharpe(conn, r['alpha_id']) if r['alpha_id'] else None)
+    return out
+
+
+DEAD_ZONE_MIN_OBS = 3          # 同一角色集合至少 3 次真实平台结果全部弱势才列入影子死区
+DEAD_ZONE_SHARPE = 0.5         # |Sharpe| 低于该值视为无信号（含翻转结果）
+
+
+def shadow_statistics(conn):
+    """影子统计（不改变派发与门禁）：
+    dead_zones：按候选使用的角色集合归并，全部真实结果 |Sharpe|<0.5 且观测 ≥3 次、没有任何成功的组合；
+    early_stop：最近 5 个有真实结果的基础轮是否全部 FAIL 且 ≥3 个同一主诊断（只触发人工复核提示）。"""
+    from . import research_dsl
+    from .autopilot import setup as _ap_setup
+    _ap_setup(conn)
+    tables={x[0] for x in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if 'brain_runs' not in tables: return {'dead_zones': [], 'early_stop': None}
+    groups = {}
+    def observe(roles_key, sharpe, passed):
+        g = groups.setdefault(roles_key, {'roles': list(roles_key), 'observations': 0, 'weak': 0, 'best_abs_sharpe': 0.0, 'any_pass': False})
+        g['observations'] += 1
+        if number(sharpe):
+            g['best_abs_sharpe'] = max(g['best_abs_sharpe'], round(abs(sharpe), 3))
+            if abs(sharpe) < DEAD_ZONE_SHARPE: g['weak'] += 1
+        if passed: g['any_pass'] = True
+    def sim_of(aid):
+        row = conn.execute('SELECT status,stats_json FROM simulations WHERE remote_id=? AND synthetic=0', (aid,)).fetchone()
+        if not row: return None, None
+        try: sharpe = json.loads(row['stats_json'] or '{}').get('sharpe')
+        except (ValueError, TypeError): sharpe = None
+        return (sharpe if number(sharpe) else None), row['status'] == 'passed'
+    base_rows = []
+    for r in conn.execute('''SELECT c.cycle_id,c.candidate_json,b.alpha_id FROM research_cycles c
+            JOIN brain_runs b ON b.task_id=c.simulation_task WHERE c.candidate_json IS NOT NULL AND b.alpha_id IS NOT NULL ORDER BY c.cycle_id'''):
+        roles = tuple(research_dsl.roles_used(json.loads(r['candidate_json']).get('ast')))
+        sharpe, passed = sim_of(r['alpha_id'])
+        if sharpe is None and not passed: continue
+        observe(roles, sharpe, passed); base_rows.append((r['cycle_id'], r['alpha_id']))
+        for v in conn.execute('SELECT s.label,b.alpha_id FROM cycle_simulations s JOIN brain_runs b ON b.task_id=s.task_id WHERE s.cycle_id=? AND b.alpha_id IS NOT NULL', (r['cycle_id'],)):
+            vs, vp = sim_of(v['alpha_id'])
+            if vs is None and not vp: continue
+            observe(roles, vs, vp)
+    dead = [g for g in groups.values() if g['observations'] >= DEAD_ZONE_MIN_OBS and g['weak'] == g['observations'] and not g['any_pass']]
+    dead.sort(key=lambda g: (-g['observations'], g['roles']))
+    early = None
+    recent = base_rows[-5:]
+    if len(recent) == 5:
+        diags = []
+        for _, aid in recent:
+            row = conn.execute('SELECT report_json FROM research_feedback WHERE alpha_id=?', (aid,)).fetchone()
+            d = json.loads(row[0]).get('diagnosis') if row else None
+            diags.append(d[0] if d else None)
+        all_fail = all(sim_of(aid)[1] is False for _, aid in recent)
+        top = max(((diags.count(x), x) for x in set(diags) if x), default=(0, None))
+        early = {'recent_cycles': [c for c, _ in recent], 'all_fail': all_fail, 'dominant_diagnosis': top[1], 'dominant_count': top[0],
+                 'checkpoint': bool(all_fail and top[0] >= 3),
+                 'note': '只提示人工复核（变体是否成功、是否同簇、是否真实平台失败），不自动暂停数据簇'}
+    return {'dead_zones': dead, 'early_stop': early,
+            'note': f'影子统计：角色集合 ≥{DEAD_ZONE_MIN_OBS} 次真实结果全部 |Sharpe|<{DEAD_ZONE_SHARPE} 且无通过；不自动拒绝，只进入提示词作材料'}
 
 
 def model_context(conn):
@@ -328,7 +494,7 @@ def simulation_settings(settings):
     return {k: v for k, v in settings.items() if k not in DISPLAY_ONLY_SETTINGS}
 
 
-def next_combination(conn, max_plans=2, min_parent_sharpe=MIN_PARENT_SHARPE):
+def next_combination(conn, max_plans=2, min_parent_sharpe=MIN_PARENT_SHARPE, current_policy=None):
     setup(conn)
     if conn.execute('SELECT COUNT(*) FROM combination_plans').fetchone()[0] >= max_plans: return None
     # 只组合经过模型审查的父提案（含已审查的组合轮本身，允许一层再组合；复杂度上限
@@ -389,8 +555,13 @@ def next_combination(conn, max_plans=2, min_parent_sharpe=MIN_PARENT_SHARPE):
         ast = {'op':'add','left':{'op':'rank','arg':json.loads(a['candidate_json'])['ast']},
                'right':{'op':'rank','arg':json.loads(b['candidate_json'])['ast']}}
         from . import research_dsl
+        active_policy = current_policy or json.loads(a['policy_json'])
+        bindings = active_policy['bindings']
+        paused = set(active_policy.get('paused_clusters') or [])
+        if any(bindings.get(role, {}).get('cluster') in paused for role in research_dsl.roles_used(ast)):
+            continue
         try:
-            research_dsl.compile_ast(ast,json.loads(a['policy_json'])['bindings'],'combination')
+            research_dsl.compile_ast(ast,bindings,'combination')
         except ValueError: continue
         return {'pair_key':key,'parents':ids,'parent_cycles':[a['cycle_id'],b['cycle_id']],
                 'ast':ast,'correlation':pair,'experiment':'一次固定等权rank组合；不优化权重、窗口、符号；失败终止该父对'}

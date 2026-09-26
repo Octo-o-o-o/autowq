@@ -125,7 +125,12 @@ def _snapshot(conn, cfg, tid, payload):
     data = catalog(cfg)
     name = active_preset(conn, cfg, data)
     preset = data['presets'][name]
-    chain = [n for n in preset['routes'][payload['role']] if n not in payload.get('excluded_providers', [])]
+    routes = preset['routes'][payload['role']]
+    order = payload.get('provider_order')
+    if isinstance(order, list) and order:
+        # 任务级优先顺序（如单双轮互换研究/审查渠道）：只能重排预设已含的渠道，不能引入预设外渠道。
+        routes = [n for n in order if n in routes] + [n for n in routes if n not in order]
+    chain = [n for n in routes if n not in payload.get('excluded_providers', [])]
     if not chain:
         raise ValueError('排除提案渠道后没有可用审查渠道')
     snapshot = {'preset': name, 'chain': chain, 'retries': 3,

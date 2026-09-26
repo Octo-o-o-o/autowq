@@ -67,8 +67,12 @@ def validate_recommendation(obj, evidence):
         rule=item['rule']; cited=item['cycles']
         if rule not in RULES or rule in ids: raise ValueError('Unknown/duplicate priority')
         ids.add(rule)
-        if not isinstance(cited,list) or not cited or len(cited)>20 or any(type(i) is not int or i not in rows or rule not in rows[i]['tags'] for i in cited):
+        if not isinstance(cited,list) or not cited or len(cited)>len(rows):
+            raise ValueError('Citations must be a nonempty list bounded by snapshot cycle count')
+        if any(type(i) is not int or i not in rows or rule not in rows[i]['tags'] for i in cited):
             raise ValueError('Each cited cycle must actually contain the selected diagnostic tag')
+        if len(set(cited)) != len(cited):
+            raise ValueError('Duplicate cycle citations are not allowed')
         if not isinstance(item['reason'],str) or not 8<=len(item['reason'])<=1200: raise ValueError('Concrete reasoning required')
     return rec
 
@@ -83,7 +87,7 @@ def enqueue(conn,cfg,evidence=None):
     path=Path(cfg.ensure_private_dir())/'history-research'/digest
     path.mkdir(parents=True,exist_ok=True,mode=0o700)
     prompt=path/'research.md'
-    prompt.write_text('复盘全部历史轮次的程序诊断，选择最多3个后续研究重点。标签是诊断而非因果证明。不要发明平台数据，不建议扫参数、降低门槛或增加预算。引用实际含对应标签的cycle编号。不能根据这些数据证明改进会有效；说明反例和误判可能。\n'
+    prompt.write_text('复盘全部历史轮次的程序诊断，选择最多3个后续研究重点。标签是诊断而非因果证明。不要发明平台数据，不建议扫参数、降低门槛或增加预算。引用实际含对应标签的cycle编号；每项可引用全部有效轮次，每个编号只能出现一次。不能根据这些数据证明改进会有效；说明反例和误判可能。\n'
         +json.dumps({'snapshot':evidence,'rules':RULES,'required_output':{'status':'completed','summary':'摘要','findings':[],
           'recommendation':{'snapshot_hash':digest,'priorities':[{'rule':'RULE_ID','cycles':[1],'reason':'证据、解释和反例'}]}}},ensure_ascii=False))
     prompt.chmod(0o600)

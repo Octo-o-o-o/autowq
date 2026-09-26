@@ -26,6 +26,17 @@ class HistoryResearchTests(unittest.TestCase):
         for key,value in [('cycles',[46]),('rule','turnover_control'),('rule','change_threshold')]:
             bad=copy.deepcopy(self.rec);bad['priorities'][0][key]=value
             with self.assertRaises(ValueError):h.validate_recommendation({'recommendation':bad},self.doc)
+    def test_full_history_citations_over_twenty_are_valid(self):
+        rec=copy.deepcopy(self.rec)
+        rec['priorities'][0]['cycles']=list(range(1,46))
+        self.assertEqual(h.validate_recommendation({'recommendation':rec},self.doc),rec)
+        rec['priorities'][0]['cycles']=[1,1]
+        with self.assertRaisesRegex(ValueError,'Duplicate'):
+            h.validate_recommendation({'recommendation':rec},self.doc)
+        rec['priorities'][0]['cycles']=[True]
+        with self.assertRaises(ValueError):
+            h.validate_recommendation({'recommendation':rec},self.doc)
+
     def insert(self,state='researching'):
         now=util.now_iso();digest=util.sha256_json(self.doc)
         tid,_=store.enqueue_task(self.conn,'agent_call',{},'history-fixture')

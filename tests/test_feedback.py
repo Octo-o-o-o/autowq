@@ -88,6 +88,10 @@ class FeedbackTests(unittest.TestCase):
                 c.execute("INSERT INTO research_cycles(cycle_id,state,policy_json,policy_hash,candidate_json,simulation_task,created_at,updated_at) VALUES(?,'closed',?,'hash',?,?,?,?)",(i,json.dumps(policy),json.dumps(candidate),'task'+str(i),util.now_iso(),util.now_iso()))
                 c.execute('INSERT INTO brain_runs VALUES(?,?)',('task'+str(i),'alpha'+str(i)))
             with patch('wq.feedback.report',return_value={'pairs':[{'parents':['alpha1','alpha2'],'value':-.1,'worth_combination_review':True}]}):
+                policy['bindings']['daily_return']['cluster'] = 'price'
+                policy['paused_clusters'] = ['price']
+                self.assertIsNone(feedback.next_combination(c,min_parent_sharpe=0,current_policy=policy))
+                policy['paused_clusters'] = []
                 plan=feedback.next_combination(c,min_parent_sharpe=0);self.assertIsNotNone(plan)
                 c.execute('INSERT INTO combination_plans VALUES(?,?,?,?)',(plan['pair_key'],3,json.dumps(plan),util.now_iso()))
                 self.assertIsNone(feedback.next_combination(c,min_parent_sharpe=0))
