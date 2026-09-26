@@ -58,9 +58,12 @@ def render(root, runtime, binaries=None):
         path.write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n');path.chmod(0o600)
     shutil.copyfile(asset_path('autopilot-policy.example.json'),targets[2])
     run = root/'var/run';run.mkdir(parents=True,exist_ok=True)
+    # pipx/brew/DMG 安装的工作区没有 ./wq shim：统一用当前解释器 -m wq；源码检出额外给 PYTHONPATH。
+    env = {'PATH':str(Path(sys.executable).parent)+':/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin'}
+    if (root/'src'/'wq'/'__init__.py').exists(): env['PYTHONPATH'] = str(root/'src')
     plist = {'Label':'com.worldquant.wq-runner', 'RunAtLoad':True,'StartInterval':60,
-             'WorkingDirectory':str(root),'ProgramArguments':[str(root/'wq'),'run-once','--lease','3600'],
-             'EnvironmentVariables':{'PATH':str(Path(sys.executable).parent)+':/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin'},
+             'WorkingDirectory':str(root),'ProgramArguments':[sys.executable,'-m','wq','run-once','--lease','3600'],
+             'EnvironmentVariables':env,
              'StandardOutPath':str(run/'launchd.out.log'),'StandardErrorPath':str(run/'launchd.err.log')}
     with (runtime/'com.worldquant.wq-runner.plist').open('wb') as f:plistlib.dump(plist,f)
     return runtime

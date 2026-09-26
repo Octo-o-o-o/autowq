@@ -28,10 +28,18 @@ class SetupTests(unittest.TestCase):
         self.assertTrue(all(not m['enabled'] for m in cfg['models'].values()))
         self.assertEqual(cfg['routing']['work_root'],str(self.runtime/'jobs'))
         with (self.runtime/'com.worldquant.wq-runner.plist').open('rb') as f:pl=plistlib.load(f)
-        self.assertEqual(pl['ProgramArguments'][0],str(self.root/'wq'))
+        self.assertEqual(pl['ProgramArguments'][:3],[sys.executable,'-m','wq'])
+        self.assertNotIn('PYTHONPATH',pl['EnvironmentVariables'])  # 安装包工作区无 src/，不注入
         before=(self.root/'config/config.json').read_bytes()
         with self.assertRaises(ValueError):setup.render(self.root,self.runtime)
         self.assertEqual((self.root/'config/config.json').read_bytes(),before)
+
+    def test_source_checkout_gets_pythonpath_in_plist(self):
+        (self.root/'src'/'wq').mkdir(parents=True);(self.root/'src'/'wq'/'__init__.py').write_text('')
+        runtime=setup.render(self.root,self.runtime)
+        with (runtime/'com.worldquant.wq-runner.plist').open('rb') as f:pl=plistlib.load(f)
+        self.assertEqual(pl['EnvironmentVariables']['PYTHONPATH'],str(self.root/'src'))
+        self.assertEqual(pl['ProgramArguments'][:3],[sys.executable,'-m','wq'])
 
     def test_runtime_cannot_be_inside_project(self):
         with self.assertRaises(ValueError):setup.render(self.root,self.root/'runtime')

@@ -32,7 +32,7 @@
 4. 对自己的平台字段和运算符核验后，填 `autopilot-policy.json` 的抽象角色绑定、完整 settings、来源、verified_at、valid_until、证据文件绝对路径与 canonical JSON SHA256。真实证据在私有目录，不能交给研究模型。canonical hash 使用 `wq.util.sha256_json`，不是原文件字节哈希。占位模板故意不能通过。
 5. `./wq autopilot start`。CLI 检查策略文件，runner 在每次新动作前检查预算、期限、证据和任务状态。start 成功仅表示启用开关，实际是否开跑以 status/tasks 为准。
 
-安装生成的 launchd 文件前先确认本机没有同名运行实例，避免替换已有部署：
+安装生成的 launchd 文件前先确认本机没有同名运行实例，避免替换已有部署。plist 用生成时的 Python 解释器 `-m wq` 启动（pipx/Homebrew/DMG 工作区没有 `./wq`；源码检出会附带 `PYTHONPATH`）：
 
 ```sh
 mkdir -p ~/Library/LaunchAgents
