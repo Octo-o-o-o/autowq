@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>autowq — 把 WorldQuant BRAIN 研究关进一条回路</title>
-<meta name="description" content="autowq：开源、本地优先的 WorldQuant BRAIN 研究回路。异渠道审查、预算闸门、提交前验收。本地已有订阅的 Agent CLI 即可上手，macOS 菜单栏与 Windows 托盘常驻。">
+<title>autowq — 开箱即用的 WorldQuant BRAIN 全自动研究工具</title>
+<meta name="description" content="autowq：开源、开箱即用的 WorldQuant BRAIN 全自动研究回路。异渠道审查、预算闸门、提交前验收。本地已有订阅的 Agent CLI 即可上手，macOS 菜单栏与 Windows 托盘常驻。">
 <link rel="canonical" href="https://autowq.octoooo.com/">
 <link rel="alternate" hreflang="zh-CN" href="https://autowq.octoooo.com/">
 <link rel="alternate" hreflang="en" href="https://autowq.octoooo.com/en/">
@@ -33,8 +33,10 @@
 </head>
 <body>
 <nav>
+  <div class="inner">
   <a class="brand" href="/"><img src="/favicon-32.png" alt="autowq 标志">auto<em>wq</em></a>
   <div class="links">
+    <a href="#pillars">特点</a>
     <a href="#start">上手</a>
     <a href="#tray">托盘</a>
     <a href="#case">案例</a>
@@ -43,14 +45,15 @@
     <a href="https://github.com/Octo-o-o-o/autowq">GitHub</a>
     <a class="lang" href="/en/">EN</a>
   </div>
+  </div>
 </nav>
 
 <div class="wrap">
 <section class="hero">
   <div>
     <div class="kicker">Open source · Apache-2.0 · Local-first</div>
-    <h1>把 BRAIN 研究<br>关进一条<span class="amber">回路</span>。</h1>
-    <p class="sub">假设 → 异渠道审查 → 有限回测 → 诊断 → 提交前验收。它住在你的菜单栏和托盘里，用你的账号、你的预算、你的节奏运转——不依赖聊天窗口在线。</p>
+    <h1>开箱即用的<br><span class="amber">全自动</span> BRAIN 研究。</h1>
+    <p class="sub">装上就在菜单栏里运转：假设 → 异渠道审查 → 有限回测 → 诊断 → 提交前验收，一条回路自动循环。用你的账号、你的预算、你的节奏。</p>
     <div class="cta">
       <a class="btn primary" href="#start">5 分钟上手</a>
       <a class="btn" href="https://github.com/Octo-o-o-o/autowq">GitHub →</a>
@@ -62,7 +65,6 @@
     <path class="trace d2" d="M 42 130 L 72 130 L 92 90 L 112 130 L 138 96 L 166 58"/>
   </svg>
 </section>
-</div>
 
 <div class="tape" aria-label="真实运行记录">
   <div class="run" id="tape-run">
@@ -70,14 +72,16 @@
   </div>
 </div>
 
-<div class="wrap">
-
-<section id="principles">
-  <h2><span class="no">01</span>三条不容商量的原则</h2>
-  <div class="principles rise">
-    <div class="p"><div class="idx">REVIEW</div><h3>异渠道审查</h3><p>研究角色出假设，审查角色必须来自另一家模型提供方。同一模型的盲区，不能用来确认它自己。</p></div>
-    <div class="p"><div class="idx">GATES</div><h3>闸门默认关闭</h3><p>预算上限、授权期限、提交验收全是门禁。向导不会替你打开任何付费开关，UNKNOWN 请求必须人工对账。</p></div>
-    <div class="p"><div class="idx">LOCAL</div><h3>数据不出本机</h3><p>配置、Cookie、真实 Alpha、账本全部留在本地。导出自动剔除凭证与任务输入，模型请求只发给你显式选择的渠道。</p></div>
+<section id="pillars">
+  <h2><span class="no">01</span>七个关键词</h2>
+  <div class="pillars rise">
+    <div class="pillar"><div class="k">方便</div><div class="d">开箱即用，有订阅的 Agent 就能跑</div></div>
+    <div class="pillar"><div class="k">高质量</div><div class="d">异渠道审查 + 提交前验收门禁</div></div>
+    <div class="pillar"><div class="k">低成本</div><div class="d">每天几美元，逐日逐轮可见</div></div>
+    <div class="pillar"><div class="k">可见</div><div class="d">轮次、成本、进度全在托盘</div></div>
+    <div class="pillar"><div class="k">可控制</div><div class="d">预算、授权、暂停随时在手</div></div>
+    <div class="pillar"><div class="k">安全</div><div class="d">数据不出本机，闸门默认关闭</div></div>
+    <div class="pillar"><div class="k">开源</div><div class="d">Apache-2.0，500 项自动化测试</div></div>
   </div>
 </section>
 

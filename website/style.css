@@ -37,10 +37,12 @@ a:hover { color: var(--amber-hot); }
 /* ── 顶栏 ── */
 nav {
   position: sticky; top: 0; z-index: 50;
-  display: flex; align-items: center; gap: 22px;
-  padding: 12px 26px;
   background: rgba(11, 14, 12, 0.82); backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--line);
+}
+nav .inner {
+  max-width: 1040px; margin: 0 auto; padding: 12px 24px;
+  display: flex; align-items: center; gap: 22px;
 }
 nav .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 17px; color: var(--paper); letter-spacing: 0.02em; }
 nav .brand img { width: 26px; height: 26px; border-radius: 7px; }
@@ -51,7 +53,7 @@ nav .links a:hover { color: var(--amber); }
 nav .lang { border: 1px solid var(--line); border-radius: 6px; padding: 3px 10px; color: var(--dim); }
 nav .lang:hover { color: var(--amber); border-color: var(--amber); }
 
-.wrap { max-width: 980px; margin: 0 auto; padding: 0 24px; position: relative; z-index: 1; }
+.wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; position: relative; z-index: 1; }
 section { padding: 84px 0 12px; }
 section:target { scroll-margin-top: 72px; }
 
@@ -95,9 +97,9 @@ section:target { scroll-margin-top: 72px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
 
-/* ── 数据走马灯 ── */
+/* ── 数据走马灯（ contained LED 读数条，超宽屏不再撑满） ── */
 .tape {
-  border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  border: 1px solid var(--line); border-radius: 6px;
   background: var(--panel); overflow: hidden; white-space: nowrap; position: relative; z-index: 1;
 }
 .tape .run {
@@ -117,6 +119,23 @@ h2 {
 }
 h2 .no { color: var(--amber); margin-right: 12px; font-size: 15px; vertical-align: 3px; }
 .lead { color: var(--dim); margin-bottom: 34px; max-width: 680px; }
+
+/* ── 七关键词 ── */
+.pillars {
+  display: grid; grid-template-columns: repeat(7, 1fr); gap: 0;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--panel); overflow: hidden;
+}
+.pillar { padding: 18px 14px; border-left: 1px solid var(--line); transition: background 0.2s; }
+.pillar:first-child { border-left: none; }
+.pillar:hover { background: var(--amber-soft); }
+.pillar .k {
+  font-family: ui-monospace, Menlo, monospace; font-size: 15px; font-weight: 700; color: var(--amber);
+}
+.pillar .d { color: var(--dim); font-size: 12px; line-height: 1.6; margin-top: 6px; }
+@media (max-width: 900px) {
+  .pillars { grid-template-columns: repeat(2, 1fr); }
+  .pillar { border-top: 1px solid var(--line); }
+}
 
 /* ── 三原则 ── */
 .principles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }

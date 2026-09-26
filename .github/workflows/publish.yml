@@ -41,4 +41,7 @@ jobs:
         with:
           name: dist
           path: dist/
+      # 优先 PYPI_API_TOKEN secret；未配置时回退 trusted publishing（需 PyPI 后台登记）。
       - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
