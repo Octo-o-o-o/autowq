@@ -134,6 +134,7 @@ class SchedulerBackendTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'setup_windows'):
                 desktop.control('start')
 
+    @unittest.skipIf(sys.platform == 'win32', 'macOS 后端的 launchctl 域依赖 os.getuid（POSIX 专有）')
     def test_macos_backend_keeps_launchctl(self):
         with patch.object(desktop, 'MACOS', True), patch.object(desktop, 'command') as command:
             command.return_value.returncode = 0
