@@ -11,21 +11,14 @@
 需要 Python 3.11+，以及你自己的模型 CLI 订阅账号或 API Key。运行时只使用 Python 标准库。支持 macOS；Linux/Windows WSL2 使用 Docker 隔离模型进程。原生 Windows 暂不支持。
 
 ```sh
-# 方式一：pipx（推荐；pipx 本身见 https://pipx.pypa.io）
-pipx install wq-pilot
-mkdir ~/autowq && cd ~/autowq   # 任选目录作为工作区
-wq onboard
-```
-
-```sh
-# 方式二：Homebrew（macOS）
+# 方式一：Homebrew（macOS）
 brew tap Octo-o-o-o/autowq && brew install wq-pilot
 brew install --cask Octo-o-o-o/autowq/worldquant   # 可选：菜单栏 App
 ```
 
-方式三：macOS 菜单栏 App。从 [Releases](https://github.com/Octo-o-o-o/autowq/releases) 下载 `WorldQuant-<版本>.dmg`，拖入"应用程序"后双击；首启向导引导选择工作区、准备运行时并调起 onboard，完成后菜单栏常驻。未公证版本可用 `brew install --cask` 安装（自动去除隔离属性），或首次右键打开。
+方式二：macOS 菜单栏 App。从 [Releases](https://github.com/Octo-o-o-o/autowq/releases) 下载 `WorldQuant-<版本>.dmg`，拖入"应用程序"后双击；首启向导引导选择工作区、准备运行时并调起 onboard，完成后菜单栏常驻。未公证版本可用 `brew install --cask` 安装（自动去除隔离属性），或首次右键打开。
 
-方式四：源码（开发）：
+方式三：源码（开发）：
 
 ```sh
 git clone https://github.com/Octo-o-o-o/autowq.git
@@ -36,6 +29,9 @@ cd autowq
 ./wq import-results fixtures/synthetic-result-pass.json
 ./wq tasks
 ```
+
+方式四：pipx（`pipx install wq-pilot`，随后 `mkdir ~/autowq && cd ~/autowq && wq onboard`）。**PyPI 发布尚未开通（Trusted Publisher 未配置），此方式暂不可用**；开通后再启用。
+
 
 向导检测宿主 CLI，让你选择渠道、模型 ID、研究/审查/工程角色及可选思考强度。它生成本机配置与隔离运行入口，**不覆盖已有部署、不启动付费推理、不安装调度器**。默认语言按环境判断：中文环境用中文，其余用英文；第一步可以切换，也可用 `--lang zh/en` 显式指定。向导包含供应商CLI与BRAIN登录，并提供[官方注册链接](https://platform.worldquantbrain.com/sign-up)。可以跳过登录，随后用 `./wq onboard --login-only` 继续。模型是否能用取决于你自己的账号；登录命令成功不等于验证了模型权限。
 
