@@ -11,7 +11,7 @@ sys.path.insert(0, str(ROOT / 'src'))
 _ran_as_script = __name__ == '__main__'
 __name__ = 'desktop_control'
 _source = ROOT / 'src/wq/desktop_control.py'
-exec(compile(_source.read_text(), str(_source), 'exec'), globals())
+exec(compile(_source.read_text(encoding='utf-8'), str(_source), 'exec'), globals())
 ROOT = Path(__file__).resolve().parents[1]
 
 if _ran_as_script:
