@@ -1,0 +1,34 @@
+# autowq
+
+> autowq 是开源（Apache-2.0）的本地 WorldQuant BRAIN 研究编排工具。模型提出假设 → 不同渠道审查 → 有限回测 → 真实结果诊断 → 互补信号研究 → 提交前验收。模型、预算、证据和队列由用户控制。
+
+- 官网: https://autowq.octoooo.com/ （中文） · https://autowq.octoooo.com/en/ （English）
+- 仓库: https://github.com/Octo-o-o-o/autowq
+- PyPI: https://pypi.org/project/wq-pilot/
+- Homebrew: https://github.com/Octo-o-o-o/homebrew-autowq
+
+## 安装
+
+- pipx: `pipx install wq-pilot`，然后 `mkdir ~/autowq && cd ~/autowq && wq onboard`
+- Homebrew: `brew tap Octo-o-o-o/autowq && brew install wq-pilot`；菜单栏 App: `brew install --cask Octo-o-o-o/autowq/worldquant`
+- macOS DMG: GitHub Releases 的 WorldQuant-<版本>.dmg，双击后首启向导完成 onboard
+- 源码: `git clone` 后 `./wq onboard`
+
+## 关键事实
+
+- 运行时零第三方依赖，纯 Python 3.11+ 标准库
+- 平台: macOS（sandbox-exec 隔离 + 菜单栏 App）、Linux 与 Windows WSL2（Docker 隔离）；原生 Windows 不支持
+- 支持的模型渠道: Grok Build、Devin、Cursor、ZCode、Claude Code、Codex、Gemini CLI、GitHub Copilot CLI、Qwen Code、OpenCode、OpenAI/Anthropic 标准 API
+- 安全默认值: 单并发、逐渠道预算、授权期限、UNKNOWN 请求人工对账、崩溃恢复与去重、提交前验收；模型/自动研究/提交初始全部关闭
+- 数据边界: 配置、Cookie、真实 Alpha、数据库、日志留在本地；导出不包含 Cookie、密码、任务输入
+- 非 WorldQuant 官方产品；研究工具，不承诺收益
+
+## 常用命令
+
+- `wq onboard [--list|--login-only]` — 首启向导 / 只检测 / 续登录
+- `wq doctor --fix-private` — 环境体检
+- `wq autopilot status|start|stop|feedback` — 自动研究控制
+- `wq tasks` — 任务队列
+- `wq brain fields --datasets` — 只读字段目录
+- `wq export --kind summary|tasks|results --format json|csv` — 导出
+- `wq pause --reason ...` — 暂停

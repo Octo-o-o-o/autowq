@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>autowq — Local, self-governed WorldQuant BRAIN research automation</title>
+<meta name="description" content="autowq is an open-source, local-first WorldQuant BRAIN research orchestrator: hypothesis → cross-provider review → bounded simulation → real-result diagnosis → complementary signals → pre-submission gates. Zero-dependency Python; install via pipx, Homebrew or macOS DMG.">
+<link rel="canonical" href="https://autowq.octoooo.com/en/">
+<link rel="alternate" hreflang="zh-CN" href="https://autowq.octoooo.com/">
+<link rel="alternate" hreflang="en" href="https://autowq.octoooo.com/en/">
+<meta property="og:title" content="autowq — Local WorldQuant BRAIN research automation">
+<meta property="og:description" content="Open-source, local-first BRAIN research orchestration: cross-provider review, budget gates, pre-submission acceptance.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://autowq.octoooo.com/en/">
+<link rel="stylesheet" href="/style.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "autowq",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "macOS, Linux, Windows (WSL2)",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+  "license": "https://www.apache.org/licenses/LICENSE-2.0",
+  "url": "https://autowq.octoooo.com/en/",
+  "codeRepository": "https://github.com/Octo-o-o-o/autowq",
+  "description": "Local WorldQuant BRAIN research orchestration: hypotheses, cross-provider review, bounded simulation, diagnosis and gated submission — budgets and authorization stay under your control."
+}
+</script>
+</head>
+<body>
+<nav>
+  <a class="logo" href="/en/">auto<span>wq</span></a>
+  <div class="links">
+    <a href="#install">Install</a>
+    <a href="#how">How it works</a>
+    <a href="#features">Features</a>
+    <a href="#commands">Commands</a>
+    <a href="#faq">FAQ</a>
+    <a href="https://github.com/Octo-o-o-o/autowq">GitHub</a>
+    <a class="icon-btn" href="/">中文</a>
+    <button class="icon-btn" onclick="toggleTheme()" aria-label="Toggle theme">◐</button>
+  </div>
+</nav>
+
+<div class="wrap">
+<section class="hero" id="top">
+  <span class="badge">Open source · Apache-2.0 · v0.2.0</span>
+  <h1>Continuous WorldQuant BRAIN research,<br><span class="grad">on your own machine</span></h1>
+  <p class="sub">Hypothesis → review through a different provider → bounded simulation → real-result diagnosis → complementary signals → pre-submission acceptance. You control models, budgets, evidence and the queue — no chat window needs to stay online.</p>
+  <div class="cta">
+    <a class="btn primary" href="#install">Get started</a>
+    <a class="btn" href="https://github.com/Octo-o-o-o/autowq">GitHub</a>
+  </div>
+  <div class="terminal">
+    <div class="bar"><i></i><i></i><i></i></div>
+<pre><span class="c"># pick one: pipx / Homebrew / DMG</span>
+<span class="g">$</span> pipx install wq-pilot
+<span class="g">$</span> brew tap Octo-o-o-o/autowq && brew install wq-pilot
+
+<span class="c"># any directory becomes your workspace</span>
+<span class="g">$</span> mkdir ~/autowq && cd ~/autowq
+<span class="g">$</span> wq onboard</pre>
+  </div>
+</section>
+
+<section id="install">
+  <h2>Install</h2>
+  <p class="lead">Zero third-party dependencies, pure Python 3.11+ standard library. Four install paths; macOS users can add a menu-bar app.</p>
+  <div class="grid">
+    <div class="card"><h3><span class="k">①</span>pipx (recommended)</h3>
+      <p>One command, cross-platform: <code>pipx install wq-pilot</code>, then <code>wq onboard</code> in any empty directory.</p></div>
+    <div class="card"><h3><span class="k">②</span>Homebrew</h3>
+      <p><code>brew tap Octo-o-o-o/autowq && brew install wq-pilot</code>; menu-bar app: <code>brew install --cask Octo-o-o-o/autowq/worldquant</code>.</p></div>
+    <div class="card"><h3><span class="k">③</span>macOS DMG</h3>
+      <p>Download the DMG from <a href="https://github.com/Octo-o-o-o/autowq/releases">Releases</a>, drag to Applications and double-click: the first-launch wizard picks a workspace, prepares the runtime and starts onboarding, then lives in your menu bar.</p></div>
+    <div class="card"><h3><span class="k">④</span>Source (development)</h3>
+      <p><code>git clone</code> the repo, then <code>./wq onboard</code>; tests: <code>PYTHONPATH=src python3 -m unittest discover -s tests</code>.</p></div>
+  </div>
+  <div class="callout"><strong>Note:</strong> onboarding never bypasses human steps — BRAIN registration/sign-in and vendor CLI logins are completed by you in the browser or terminal; the wizard only launches them and records their state. Models, APIs, automation and submission all start disabled.</div>
+</section>
+
+<section id="how">
+  <h2>How it works</h2>
+  <p class="lead">A gated research pipeline: every step is auditable, every budget capped, every submission verified.</p>
+  <div class="steps">
+    <div class="step"><div><h3>Hypothesize</h3><p>The research-role model proposes candidate alphas from field evidence and full-history reviews; each task freezes its own routing snapshot.</p></div></div>
+    <div class="step"><div><h3>Cross-provider review</h3><p>The review role must run on a different provider, so one model's blind spots never confirm themselves.</p></div></div>
+    <div class="step"><div><h3>Bounded simulation</h3><p>Real simulations, GET polling and result accounting; uncertain POSTs are never blindly retried.</p></div></div>
+    <div class="step"><div><h3>Diagnose real results</h3><p>Failure-reason feedback, time-segment evidence and daily PnL correlations flow back into the next cycle.</p></div></div>
+    <div class="step"><div><h3>Complementary signals</h3><p>Bounded combination experiments with preregistered decay/neutralization variants, every result recorded.</p></div></div>
+    <div class="step"><div><h3>Pre-submission acceptance</h3><p>Per-candidate submission: research review, fresh platform checks, a single POST and verified acceptance status.</p></div></div>
+  </div>
+</section>
+
+<section id="features">
+  <h2>Features</h2>
+  <p class="lead">Built for long unattended runs: budgets, authorization, recovery and dedup are defaults, not options.</p>
+  <div class="grid">
+    <div class="card"><h3>Multi-provider orchestration</h3><p>Grok Build, Devin, Cursor, ZCode, Claude Code, Codex, Gemini CLI, GitHub Copilot CLI, Qwen Code, OpenCode, plus standard OpenAI / Anthropic APIs.</p></div>
+    <div class="card"><h3>Process isolation</h3><p>sandbox-exec confines model processes on macOS; Docker images isolate them on Linux/WSL2; credentials live in a 0700 private directory.</p></div>
+    <div class="card"><h3>Budgets &amp; authorization gates</h3><p>Single concurrency, per-provider budgets, authorization expiry, rate-limit handling; unknown costs are never booked as zero.</p></div>
+    <div class="card"><h3>Crash recovery &amp; dedup</h3><p>A local SQLite ledger tracks every task; runs resume from the ledger and UNKNOWN requests require human reconciliation.</p></div>
+    <div class="card"><h3>macOS menu-bar app</h3><p>Cycle history, submitted alphas, routing presets, provider switches, intervals and system notifications — all from the menu bar.</p></div>
+    <div class="card"><h3>Progress &amp; export</h3><p>Task progress with token/cost provenance; export summary/tasks/results (JSON/CSV) without cookies, passwords or task inputs.</p></div>
+  </div>
+</section>
+
+<section id="commands">
+  <h2>Common commands</h2>
+  <p class="lead">Run inside your workspace after install; every destructive capability starts disabled.</p>
+<pre class="code"><button class="copy-btn" data-done="Copied">Copy</button><span class="g">$</span> wq onboard --list            <span class="c"># detect host CLIs only; no writes</span>
+<span class="g">$</span> wq onboard                   <span class="c"># first-run wizard: providers, models, roles, login</span>
+<span class="g">$</span> wq doctor --fix-private      <span class="c"># environment checks, private-dir repair</span>
+<span class="g">$</span> wq autopilot status          <span class="c"># automation status</span>
+<span class="g">$</span> wq tasks                     <span class="c"># task queue</span>
+<span class="g">$</span> wq brain fields --datasets   <span class="c"># read-only data-field catalog snapshot</span>
+<span class="g">$</span> wq pause --reason "manual"   <span class="c"># pause queue and local model calls</span></pre>
+  <table>
+    <tr><th>Platform</th><th>Install</th><th>Process isolation</th></tr>
+    <tr><td>macOS</td><td>pipx / Homebrew / DMG</td><td>sandbox-exec</td></tr>
+    <tr><td>Linux</td><td>pipx / source</td><td>Docker images</td></tr>
+    <tr><td>Windows</td><td>WSL2 (same as Linux)</td><td>Docker images</td></tr>
+  </table>
+</section>
+
+<section id="faq">
+  <h2>FAQ</h2>
+  <details><summary>Is autowq an official WorldQuant product?</summary><p>No. autowq is an independent open-source project (Apache-2.0), not affiliated with WorldQuant. WorldQuant/BRAIN trademarks, platform and data belong to their owners.</p></details>
+  <details><summary>Does autowq cost anything?</summary><p>autowq itself is free and open source. It orchestrates your own model CLI subscriptions or API keys and your own BRAIN account — those costs are between you and the vendors. Onboarding never starts paid inference.</p></details>
+  <details><summary>Do my credentials or research leave my machine?</summary><p>No. Configuration, cookies, real alphas, databases, model outputs and logs stay local; exports exclude cookies, passwords, task inputs and evidence paths. Model requests go only to providers you explicitly select.</p></details>
+  <details><summary>Is Windows supported?</summary><p>Not natively. Use the WSL2 + Docker path; macOS and Linux are supported natively.</p></details>
+  <details><summary>Does automated research mean automated submission and income?</summary><p>No. Passing a screen, an accepted submission, consultant eligibility and actual payment are separate states. Research automation does not grant submission privileges; submission has its own acceptance gates.</p></details>
+  <details><summary>Why must review run on a different provider?</summary><p>A model reviewing its own hypotheses shares its own blind spots. autowq requires research and review roles to come from different providers for continuous automation, and the wizard enforces this at configuration time.</p></details>
+</section>
+</div>
+
+<footer>
+  <div>© 2026 autowq contributors · Apache-2.0 · Not an official WorldQuant product</div>
+  <div>
+    <a href="https://github.com/Octo-o-o-o/autowq">GitHub</a> ·
+    <a href="https://github.com/Octo-o-o-o/autowq/releases">Releases</a> ·
+    <a href="https://pypi.org/project/wq-pilot/">PyPI</a> ·
+    <a href="https://github.com/Octo-o-o-o/homebrew-autowq">Homebrew Tap</a> ·
+    <a href="/">中文</a>
+  </div>
+</footer>
+<script src="/script.js"></script>
+</body>
+</html>
