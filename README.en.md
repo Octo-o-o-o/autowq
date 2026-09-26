@@ -11,16 +11,23 @@ A local WorldQuant BRAIN research workflow: propose a hypothesis → review thro
 Requirements: Python 3.11+ and your own CLI subscription accounts or API keys. The core runtime uses the Python standard library only. macOS is supported; Linux and Windows WSL2 use Docker-isolated providers. Native Windows has experimental support for the tray and scheduler control layer (see the Windows note under Option 2).
 
 ```sh
-# Option 1: Homebrew (macOS)
+# Option 1: pipx (recommended; see https://pipx.pypa.io)
+pipx install wq-pilot
+mkdir ~/autowq && cd ~/autowq   # any directory becomes your workspace
+wq onboard
+```
+
+```sh
+# Option 2: Homebrew (macOS)
 brew tap Octo-o-o-o/autowq && brew install wq-pilot
 brew install --cask Octo-o-o-o/autowq/worldquant   # optional menu-bar app
 ```
 
-Option 2: macOS menu-bar app. Download `WorldQuant-<version>.dmg` from [Releases](https://github.com/Octo-o-o-o/autowq/releases), drag it into Applications and double-click; the first-launch wizard picks a workspace, prepares the runtime and starts onboarding. If the build is not notarized, install via `brew install --cask` (which removes quarantine) or right-click Open once.
+Option 3: macOS menu-bar app. Download `WorldQuant-<version>.dmg` from [Releases](https://github.com/Octo-o-o-o/autowq/releases), drag it into Applications and double-click; the first-launch wizard picks a workspace, prepares the runtime and starts onboarding. If the build is not notarized, install via `brew install --cask` (which removes quarantine) or right-click Open once.
 
 Windows (experimental): the tray shares the same control layer and feature set as the macOS menu bar. Download `WorldQuantTray.exe` (single file, engine bundled) from [Releases](https://github.com/Octo-o-o-o/autowq/releases) and run it inside a workspace that has completed `wq onboard`, optionally with `--workspace <dir>`; or from source, `pip install pystray Pillow` then `python scripts/setup_windows.py` to register the Task Scheduler runner and login autostart. Providers are not bundled with the exe — configure profiles.json yourself; the full research stack still recommends Linux / Windows WSL2, see the cross-platform guide.
 
-Option 3: source checkout (development):
+Option 4: source checkout (development):
 
 ```sh
 git clone https://github.com/Octo-o-o-o/autowq.git
@@ -32,7 +39,6 @@ cd autowq
 ./wq tasks
 ```
 
-Option 4: pipx (`pipx install wq-pilot`, then `mkdir ~/autowq && cd ~/autowq && wq onboard`). **Not available yet: the PyPI release is not set up (no Trusted Publisher configured).** It will be enabled once publishing works.
 
 
 The wizard detects host executables and lets you select providers, model IDs, research/review/engineering roles and optional reasoning effort. It generates local configuration and isolated launchers. **It never overwrites an existing deployment, starts paid inference or installs a scheduler.** The default language is Chinese for Chinese locales and English otherwise. Choose another language at the first prompt or pass `--lang zh/en`. The wizard includes vendor CLI and BRAIN login, with the [official registration URL](https://platform.worldquantbrain.com/sign-up). You can skip and resume with `./wq onboard --login-only`. A successful login command does not verify model entitlement.

@@ -5,7 +5,7 @@
 - 官网: https://autowq.octoooo.com/ （中文） · https://autowq.octoooo.com/en/ （English）
 - 仓库: https://github.com/Octo-o-o-o/autowq
 - Homebrew: https://github.com/Octo-o-o-o/homebrew-autowq
-- PyPI: https://pypi.org/project/wq-pilot/ （上架中）
+- PyPI: https://pypi.org/project/wq-pilot/ （`pipx install wq-pilot`）
 
 ## 安装
 
