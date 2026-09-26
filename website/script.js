@@ -1,25 +1,66 @@
-// 主题切换 + 代码复制
+// autowq 官网动效：onboard 打字机、数字滚动、进入视口上浮
 (function () {
-  var saved = null;
-  try { saved = localStorage.getItem('wq-theme'); } catch (e) {}
-  if (saved === 'light') document.documentElement.setAttribute('data-theme', 'light');
+  'use strict';
 
-  window.toggleTheme = function () {
-    var light = document.documentElement.getAttribute('data-theme') === 'light';
-    if (light) { document.documentElement.removeAttribute('data-theme'); }
-    else { document.documentElement.setAttribute('data-theme', 'light'); }
-    try { localStorage.setItem('wq-theme', light ? 'dark' : 'light'); } catch (e) {}
-  };
+  /* ── onboard 打字机 ── */
+  var term = document.getElementById('typewriter');
+  if (term) {
+    var LINES = window.ONBOARD_LINES || [];
+    var li = 0, ci = 0, out = '';
+    function render(cursor) {
+      term.innerHTML = out + (cursor ? '<span class="cursor"></span>' : '');
+    }
+    function tick() {
+      if (li >= LINES.length) {
+        render(false);
+        setTimeout(function () { li = 0; ci = 0; out = ''; render(true); setTimeout(tick, 600); }, 4200);
+        return;
+      }
+      var line = LINES[li];
+      if (ci <= line.text.length) {
+        var shown = line.text.slice(0, ci);
+        var html = '<span class="' + line.cls + '">' + shown.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</span>';
+        term.innerHTML = out + html + '<span class="cursor"></span>';
+        ci++;
+        setTimeout(tick, line.fast ? 14 : 34);
+      } else {
+        out += '<span class="' + line.cls + '">' + line.text.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</span>\n';
+        li++; ci = 0;
+        render(true);
+        setTimeout(tick, line.pause || 260);
+      }
+    }
+    tick();
+  }
 
-  document.addEventListener('click', function (ev) {
-    var btn = ev.target.closest('.copy-btn');
-    if (!btn) return;
-    var pre = btn.parentElement.querySelector('pre') || btn.parentElement;
-    var text = pre.innerText.replace(/^复制$|^Copy$/m, '').trim();
-    navigator.clipboard.writeText(text).then(function () {
-      var old = btn.textContent;
-      btn.textContent = btn.dataset.done || 'OK';
-      setTimeout(function () { btn.textContent = old; }, 1200);
+  /* ── 数字滚动 ── */
+  function countUp(el) {
+    var target = parseFloat(el.dataset.count);
+    var decimals = (el.dataset.count.split('.')[1] || '').length;
+    var t0 = null;
+    function step(ts) {
+      if (!t0) t0 = ts;
+      var p = Math.min((ts - t0) / 1400, 1);
+      var eased = 1 - Math.pow(1 - p, 3);
+      el.textContent = (target * eased).toFixed(decimals);
+      if (p < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
+
+  var io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) {
+      if (!e.isIntersecting) return;
+      e.target.classList.add('on');
+      e.target.querySelectorAll('[data-count]').forEach(function (el) {
+        if (!el.dataset.done) { el.dataset.done = '1'; countUp(el); }
+      });
+      if (e.target.hasAttribute('data-count') && !e.target.dataset.done) {
+        e.target.dataset.done = '1'; countUp(e.target);
+      }
+      io.unobserve(e.target);
     });
-  });
+  }, { threshold: 0.25 });
+
+  document.querySelectorAll('.rise, [data-count]').forEach(function (el) { io.observe(el); });
 })();

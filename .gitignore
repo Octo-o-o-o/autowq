@@ -42,3 +42,4 @@ exports/
 # Local editable workflows
 config/workflow*.json
 !config/workflow.example.json
+.wrangler/

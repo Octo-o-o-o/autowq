@@ -33,6 +33,8 @@ cat > "$APP/Contents/Info.plist" <<EOF
 	<string>WorldQuantMenu</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.worldquant.wq-menu</string>
+	<key>CFBundleIconFile</key>
+	<string>WorldQuant</string>
 	<key>CFBundleName</key>
 	<string>WorldQuant</string>
 	<key>CFBundlePackageType</key>
@@ -50,6 +52,7 @@ cat > "$APP/Contents/Info.plist" <<EOF
 EOF
 
 cp macos/Assets/ResearchIcon.png "$APP/Contents/Resources/ResearchIcon.png"
+cp packaging/macos/WorldQuant.icns "$APP/Contents/Resources/WorldQuant.icns"
 cp "$WHEELS"/wq_pilot-*.whl "$APP/Contents/Resources/"
 cp packaging/macos/app_setup.py "$APP/Contents/Resources/app_setup.py"
 

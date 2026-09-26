@@ -3,15 +3,18 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>autowq — Local, self-governed WorldQuant BRAIN research automation</title>
-<meta name="description" content="autowq is an open-source, local-first WorldQuant BRAIN research orchestrator: hypothesis → cross-provider review → bounded simulation → real-result diagnosis → complementary signals → pre-submission gates. Zero-dependency Python; install via pipx, Homebrew or macOS DMG.">
+<title>autowq — A research loop for WorldQuant BRAIN, on your machine</title>
+<meta name="description" content="autowq: an open-source, local-first research loop for WorldQuant BRAIN. Cross-provider review, budget gates, pre-submission acceptance. Works with the agent CLIs you already subscribe to; lives in your macOS menu bar and Windows tray.">
 <link rel="canonical" href="https://autowq.octoooo.com/en/">
 <link rel="alternate" hreflang="zh-CN" href="https://autowq.octoooo.com/">
 <link rel="alternate" hreflang="en" href="https://autowq.octoooo.com/en/">
-<meta property="og:title" content="autowq — Local WorldQuant BRAIN research automation">
-<meta property="og:description" content="Open-source, local-first BRAIN research orchestration: cross-provider review, budget gates, pre-submission acceptance.">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta property="og:title" content="autowq — a local BRAIN research loop">
+<meta property="og:description" content="Cross-provider review · budget gates · pre-submission acceptance · your data never leaves the machine">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://autowq.octoooo.com/en/">
+<meta property="og:image" content="https://autowq.octoooo.com/assets/og.png">
 <link rel="stylesheet" href="/style.css">
 <script type="application/ld+json">
 {
@@ -19,119 +22,157 @@
   "@type": "SoftwareApplication",
   "name": "autowq",
   "applicationCategory": "DeveloperApplication",
-  "operatingSystem": "macOS, Linux, Windows (WSL2)",
+  "operatingSystem": "macOS, Windows, Linux",
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
   "license": "https://www.apache.org/licenses/LICENSE-2.0",
   "url": "https://autowq.octoooo.com/en/",
   "codeRepository": "https://github.com/Octo-o-o-o/autowq",
-  "description": "Local WorldQuant BRAIN research orchestration: hypotheses, cross-provider review, bounded simulation, diagnosis and gated submission — budgets and authorization stay under your control."
+  "description": "A local research loop for WorldQuant BRAIN: hypothesis, cross-provider review, bounded simulation, diagnosis and gated submission — budgets and authorization stay under your control."
 }
 </script>
 </head>
 <body>
 <nav>
-  <a class="logo" href="/en/">auto<span>wq</span></a>
+  <a class="brand" href="/en/"><img src="/favicon-32.png" alt="autowq logo">auto<em>wq</em></a>
   <div class="links">
+    <a href="#start">Onboarding</a>
+    <a href="#tray">Tray</a>
+    <a href="#case">Case study</a>
     <a href="#install">Install</a>
-    <a href="#how">How it works</a>
-    <a href="#features">Features</a>
-    <a href="#commands">Commands</a>
     <a href="#faq">FAQ</a>
     <a href="https://github.com/Octo-o-o-o/autowq">GitHub</a>
-    <a class="icon-btn" href="/">中文</a>
-    <button class="icon-btn" onclick="toggleTheme()" aria-label="Toggle theme">◐</button>
+    <a class="lang" href="/">中文</a>
   </div>
 </nav>
 
 <div class="wrap">
-<section class="hero" id="top">
-  <span class="badge">Open source · Apache-2.0 · v0.2.0</span>
-  <h1>Continuous WorldQuant BRAIN research,<br><span class="grad">on your own machine</span></h1>
-  <p class="sub">Hypothesis → review through a different provider → bounded simulation → real-result diagnosis → complementary signals → pre-submission acceptance. You control models, budgets, evidence and the queue — no chat window needs to stay online.</p>
-  <div class="cta">
-    <a class="btn primary" href="#install">Get started</a>
-    <a class="btn" href="https://github.com/Octo-o-o-o/autowq">GitHub</a>
+<section class="hero">
+  <div>
+    <div class="kicker">Open source · Apache-2.0 · Local-first</div>
+    <h1>BRAIN research,<br>closed into a <span class="amber">loop</span>.</h1>
+    <p class="sub">Hypothesis → cross-provider review → bounded simulation → diagnosis → gated submission. It lives in your menu bar and tray, running on your accounts, your budgets, your cadence — no chat window required.</p>
+    <div class="cta">
+      <a class="btn primary" href="#start">Up in 5 minutes</a>
+      <a class="btn" href="https://github.com/Octo-o-o-o/autowq">GitHub →</a>
+    </div>
   </div>
-  <div class="terminal">
-    <div class="bar"><i></i><i></i><i></i></div>
-<pre><span class="c"># pick one: pipx / Homebrew / DMG</span>
-<span class="g">$</span> pipx install wq-pilot
-<span class="g">$</span> brew tap Octo-o-o-o/autowq && brew install wq-pilot
+  <svg class="loopmark" viewBox="0 0 200 200" aria-label="autowq loop mark">
+    <circle class="halo" cx="100" cy="100" r="94"/>
+    <path class="trace" d="M 152 52 A 78 78 0 1 0 152 148"/>
+    <path class="trace d2" d="M 42 130 L 72 130 L 92 90 L 112 130 L 138 96 L 166 58"/>
+  </svg>
+</section>
+</div>
 
-<span class="c"># any directory becomes your workspace</span>
-<span class="g">$</span> mkdir ~/autowq && cd ~/autowq
-<span class="g">$</span> wq onboard</pre>
+<div class="tape" aria-label="Real run ledger">
+  <div class="run" id="tape-run">
+    <span>09-20 <b>first day</b> · $1.02</span><span>09-21 <b>18 research cycles</b> · $4.07</span><span>09-22 <b class="star">★ 1st alpha accepted</b> · $2.87</span><span>09-23 <b class="star">★ accepted, day 2</b> · $6.41</span><span>09-24 <b class="star">★ accepted, day 3</b> · $6.97</span><span>09-25 <b class="star">★ accepted, day 4</b> · $11.03</span><span>09-26 <b>17 cycles</b> · $4.93</span><span>maintainer's local ledger · costs are CLI estimates</span>
   </div>
+</div>
+
+<div class="wrap">
+
+<section id="principles">
+  <h2><span class="no">01</span>Three non-negotiables</h2>
+  <div class="principles rise">
+    <div class="p"><div class="idx">REVIEW</div><h3>Cross-provider review</h3><p>Research proposes; review must come from a different provider. A model's blind spots never confirm the model.</p></div>
+    <div class="p"><div class="idx">GATES</div><h3>Gates closed by default</h3><p>Budget caps, authorization expiry and submission acceptance are all gates. The wizard never flips a paid switch for you; UNKNOWN results require human reconciliation.</p></div>
+    <div class="p"><div class="idx">LOCAL</div><h3>Data stays local</h3><p>Config, cookies, real alphas and the ledger never leave your machine. Exports strip credentials and task inputs; model calls go only to providers you explicitly pick.</p></div>
+  </div>
+</section>
+
+<section id="start">
+  <h2><span class="no">02</span>Zero friction: your subscribed agents are enough</h2>
+  <p class="lead">Nothing new to buy. The wizard detects the agent CLIs you already subscribe to — Grok, Devin, Cursor, Claude Code, Codex and ten more, or OpenAI / Anthropic API keys — and orchestrates them.</p>
+  <div class="split">
+    <div class="term">
+      <div class="bar"><i></i><i></i><i></i><span class="ttl">wq onboard — first-run wizard</span></div>
+      <pre id="typewriter"></pre>
+    </div>
+    <ul class="bullets rise">
+      <li><b>The wizard does three things</b>: detects your installed CLIs, writes config from your choices, launches logins. Models, automation and submission stay off.</li>
+      <li><b>Honest login tracking</b>: BRAIN and vendor CLI sign-ins are launched one by one, states recorded as-is; skip and resume anytime with <code>wq onboard --login-only</code>.</li>
+      <li><b>No baked-in paths, no scheduler</b>: any empty directory becomes a workspace; scheduling is installed only when you explicitly enable it.</li>
+      <li><b>Research ≠ review</b>: pick a single provider and the wizard tells you plainly — continuous research requires a distinct reviewer.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="tray">
+  <h2><span class="no">03</span>It lives in your tray</h2>
+  <p class="lead">Status, history, submissions and budget switches — all from the menu bar / tray, no browser tab required. Both platforms share one bounded bridge with identical capabilities.</p>
+  <div class="trays rise">
+    <div class="oscard">
+      <div class="osbar"><img src="/favicon-32.png" alt="">macOS menu bar<span class="dot"></span></div>
+      <div class="osbody"><div class="menu">
+        <div class="mi head">Automation enabled<span class="r">●</span></div>
+        <div class="mi dim">next: research grok → review cursor</div>
+        <hr>
+        <div class="mi">Cycle history<span class="r">123 cycles ▸</span></div>
+        <div class="mi">Submitted alphas (4)<span class="r">▸</span></div>
+        <div class="mi">Settings<span class="r">budget · interval ▸</span></div>
+        <hr>
+        <div class="mi hot">Run next cycle now</div>
+        <div class="mi">Pause (after current task)</div>
+      </div></div>
+    </div>
+    <div class="oscard">
+      <div class="osbar"><img src="/favicon-32.png" alt="">Windows tray<span class="dot"></span></div>
+      <div class="osbody"><div class="menu">
+        <div class="mi head">Scheduler running<span class="r">●</span></div>
+        <div class="mi dim">Task Scheduler wakes every minute</div>
+        <hr>
+        <div class="mi">Cycle history<span class="r">▸</span></div>
+        <div class="mi">Submitted alphas<span class="r">▸</span></div>
+        <div class="mi">Settings<span class="r">notify · limits ▸</span></div>
+        <hr>
+        <div class="mi hot">Start automation</div>
+        <div class="mi">Quit (pause automation)</div>
+      </div></div>
+    </div>
+  </div>
+</section>
+
+<section id="case">
+  <h2><span class="no">04</span>A real ledger, not a mockup</h2>
+  <p class="lead">Week one from the maintainer's local ledger (2026-09-20 → 09-26): an alpha formally accepted by the platform every single day, with daily model costs in plain sight.</p>
+  <div class="stats rise">
+    <div class="stat"><div class="n" data-count="123">0</div><div class="l">research cycles / 7 days</div></div>
+    <div class="stat"><div class="n" data-count="160">0</div><div class="l">real simulations</div></div>
+    <div class="stat"><div class="n" data-count="4">0</div><div class="l">alphas accepted · 4 days straight</div></div>
+    <div class="stat"><div class="n">$<span data-count="37.30">0</span></div><div class="l">total model cost, 7 days</div></div>
+  </div>
+  <div class="bars rise">
+    <div class="bar"><b>$1.02</b><i style="height:9%"></i><em>09-20</em></div>
+    <div class="bar"><b>$4.07</b><i style="height:37%;animation-delay:.1s"></i><em>09-21</em></div>
+    <div class="bar accepted"><b>$2.87</b><i style="height:26%;animation-delay:.2s"></i><em>09-22 ★</em></div>
+    <div class="bar accepted"><b>$6.41</b><i style="height:58%;animation-delay:.3s"></i><em>09-23 ★</em></div>
+    <div class="bar accepted"><b>$6.97</b><i style="height:63%;animation-delay:.4s"></i><em>09-24 ★</em></div>
+    <div class="bar accepted"><b>$11.03</b><i style="height:100%;animation-delay:.5s"></i><em>09-25 ★</em></div>
+    <div class="bar"><b>$4.93</b><i style="height:45%;animation-delay:.6s"></i><em>09-26</em></div>
+  </div>
+  <p class="fineprint">★ = an alpha received a formal platform submission receipt that day. Costs are CLI-side estimates, not vendor invoices; "accepted" implies neither passing screens nor income — this is a research tool, not a promise of returns.</p>
 </section>
 
 <section id="install">
-  <h2>Install</h2>
-  <p class="lead">Zero third-party dependencies, pure Python 3.11+ standard library. Four install paths; macOS users can add a menu-bar app.</p>
-  <div class="grid">
-    <div class="card"><h3><span class="k">①</span>pipx (recommended)</h3>
-      <p>One command, cross-platform: <code>pipx install wq-pilot</code>, then <code>wq onboard</code> in any empty directory.</p></div>
-    <div class="card"><h3><span class="k">②</span>Homebrew</h3>
-      <p><code>brew tap Octo-o-o-o/autowq && brew install wq-pilot</code>; menu-bar app: <code>brew install --cask Octo-o-o-o/autowq/worldquant</code>.</p></div>
-    <div class="card"><h3><span class="k">③</span>macOS DMG</h3>
-      <p>Download the DMG from <a href="https://github.com/Octo-o-o-o/autowq/releases">Releases</a>, drag to Applications and double-click: the first-launch wizard picks a workspace, prepares the runtime and starts onboarding, then lives in your menu bar.</p></div>
-    <div class="card"><h3><span class="k">④</span>Source (development)</h3>
-      <p><code>git clone</code> the repo, then <code>./wq onboard</code>; tests: <code>PYTHONPATH=src python3 -m unittest discover -s tests</code>.</p></div>
-  </div>
-  <div class="callout"><strong>Note:</strong> onboarding never bypasses human steps — BRAIN registration/sign-in and vendor CLI logins are completed by you in the browser or terminal; the wizard only launches them and records their state. Models, APIs, automation and submission all start disabled.</div>
-</section>
-
-<section id="how">
-  <h2>How it works</h2>
-  <p class="lead">A gated research pipeline: every step is auditable, every budget capped, every submission verified.</p>
-  <div class="steps">
-    <div class="step"><div><h3>Hypothesize</h3><p>The research-role model proposes candidate alphas from field evidence and full-history reviews; each task freezes its own routing snapshot.</p></div></div>
-    <div class="step"><div><h3>Cross-provider review</h3><p>The review role must run on a different provider, so one model's blind spots never confirm themselves.</p></div></div>
-    <div class="step"><div><h3>Bounded simulation</h3><p>Real simulations, GET polling and result accounting; uncertain POSTs are never blindly retried.</p></div></div>
-    <div class="step"><div><h3>Diagnose real results</h3><p>Failure-reason feedback, time-segment evidence and daily PnL correlations flow back into the next cycle.</p></div></div>
-    <div class="step"><div><h3>Complementary signals</h3><p>Bounded combination experiments with preregistered decay/neutralization variants, every result recorded.</p></div></div>
-    <div class="step"><div><h3>Pre-submission acceptance</h3><p>Per-candidate submission: research review, fresh platform checks, a single POST and verified acceptance status.</p></div></div>
-  </div>
-</section>
-
-<section id="features">
-  <h2>Features</h2>
-  <p class="lead">Built for long unattended runs: budgets, authorization, recovery and dedup are defaults, not options.</p>
-  <div class="grid">
-    <div class="card"><h3>Multi-provider orchestration</h3><p>Grok Build, Devin, Cursor, ZCode, Claude Code, Codex, Gemini CLI, GitHub Copilot CLI, Qwen Code, OpenCode, plus standard OpenAI / Anthropic APIs.</p></div>
-    <div class="card"><h3>Process isolation</h3><p>sandbox-exec confines model processes on macOS; Docker images isolate them on Linux/WSL2; credentials live in a 0700 private directory.</p></div>
-    <div class="card"><h3>Budgets &amp; authorization gates</h3><p>Single concurrency, per-provider budgets, authorization expiry, rate-limit handling; unknown costs are never booked as zero.</p></div>
-    <div class="card"><h3>Crash recovery &amp; dedup</h3><p>A local SQLite ledger tracks every task; runs resume from the ledger and UNKNOWN requests require human reconciliation.</p></div>
-    <div class="card"><h3>macOS menu-bar app</h3><p>Cycle history, submitted alphas, routing presets, provider switches, intervals and system notifications — all from the menu bar.</p></div>
-    <div class="card"><h3>Progress &amp; export</h3><p>Task progress with token/cost provenance; export summary/tasks/results (JSON/CSV) without cookies, passwords or task inputs.</p></div>
-  </div>
-</section>
-
-<section id="commands">
-  <h2>Common commands</h2>
-  <p class="lead">Run inside your workspace after install; every destructive capability starts disabled.</p>
-<pre class="code"><button class="copy-btn" data-done="Copied">Copy</button><span class="g">$</span> wq onboard --list            <span class="c"># detect host CLIs only; no writes</span>
-<span class="g">$</span> wq onboard                   <span class="c"># first-run wizard: providers, models, roles, login</span>
-<span class="g">$</span> wq doctor --fix-private      <span class="c"># environment checks, private-dir repair</span>
-<span class="g">$</span> wq autopilot status          <span class="c"># automation status</span>
-<span class="g">$</span> wq tasks                     <span class="c"># task queue</span>
-<span class="g">$</span> wq brain fields --datasets   <span class="c"># read-only data-field catalog snapshot</span>
-<span class="g">$</span> wq pause --reason "manual"   <span class="c"># pause queue and local model calls</span></pre>
+  <h2><span class="no">05</span>Install</h2>
+  <p class="lead">Zero third-party dependencies, pure Python 3.11+ standard library. Desktop builds are turnkey; the CLI goes anywhere.</p>
   <table>
-    <tr><th>Platform</th><th>Install</th><th>Process isolation</th></tr>
-    <tr><td>macOS</td><td>pipx / Homebrew / DMG</td><td>sandbox-exec</td></tr>
-    <tr><td>Linux</td><td>pipx / source</td><td>Docker images</td></tr>
-    <tr><td>Windows</td><td>WSL2 (same as Linux)</td><td>Docker images</td></tr>
+    <tr><th>Platform</th><th>How</th><th>Notes</th></tr>
+    <tr><td>macOS</td><td><code>brew install --cask Octo-o-o-o/autowq/worldquant</code></td><td>Menu-bar app (DMG); the first-launch wizard guides everything</td></tr>
+    <tr><td>Windows</td><td><code>WorldQuantTray.exe</code> from Releases</td><td>Native tray + Task Scheduler (experimental)</td></tr>
+    <tr><td>CLI (macOS/Linux)</td><td><code>brew install Octo-o-o-o/autowq/wq-pilot</code></td><td>Any empty directory + <code>wq onboard</code> = a workspace</td></tr>
+    <tr><td>Source</td><td><code>git clone</code>, then <code>./wq onboard</code></td><td>Linux/WSL2 isolate via Docker; PyPI listing in progress</td></tr>
   </table>
 </section>
 
 <section id="faq">
-  <h2>FAQ</h2>
-  <details><summary>Is autowq an official WorldQuant product?</summary><p>No. autowq is an independent open-source project (Apache-2.0), not affiliated with WorldQuant. WorldQuant/BRAIN trademarks, platform and data belong to their owners.</p></details>
-  <details><summary>Does autowq cost anything?</summary><p>autowq itself is free and open source. It orchestrates your own model CLI subscriptions or API keys and your own BRAIN account — those costs are between you and the vendors. Onboarding never starts paid inference.</p></details>
-  <details><summary>Do my credentials or research leave my machine?</summary><p>No. Configuration, cookies, real alphas, databases, model outputs and logs stay local; exports exclude cookies, passwords, task inputs and evidence paths. Model requests go only to providers you explicitly select.</p></details>
-  <details><summary>Is Windows supported?</summary><p>Not natively. Use the WSL2 + Docker path; macOS and Linux are supported natively.</p></details>
-  <details><summary>Does automated research mean automated submission and income?</summary><p>No. Passing a screen, an accepted submission, consultant eligibility and actual payment are separate states. Research automation does not grant submission privileges; submission has its own acceptance gates.</p></details>
-  <details><summary>Why must review run on a different provider?</summary><p>A model reviewing its own hypotheses shares its own blind spots. autowq requires research and review roles to come from different providers for continuous automation, and the wizard enforces this at configuration time.</p></details>
+  <h2><span class="no">06</span>FAQ</h2>
+  <details><summary>Is this an official WorldQuant product?</summary><p>No. autowq is an independent open-source project (Apache-2.0), unaffiliated with WorldQuant; BRAIN trademarks, platform and data belong to their owners.</p></details>
+  <details><summary>Does autowq itself cost anything?</summary><p>No — it's free and open source. It orchestrates your own model subscriptions / API keys and your own BRAIN account; those costs are between you and the vendors. The wizard never starts paid inference.</p></details>
+  <details><summary>Does automation mean submissions and income?</summary><p>No. Passing screens, accepted submissions, consultant eligibility and actual payouts are four different states, and submission has its own acceptance gates.</p></details>
+  <details><summary>Do my credentials or research get uploaded?</summary><p>No. All state lives in a local SQLite ledger; exports exclude cookies, passwords and task inputs; model calls go only to providers you explicitly select.</p></details>
+  <details><summary>How well is Windows supported?</summary><p>The native tray and Task Scheduler runner work (experimental); the most mature process-isolation paths remain sandbox-exec on macOS and Docker on Linux/WSL2.</p></details>
 </section>
 </div>
 
@@ -140,11 +181,25 @@
   <div>
     <a href="https://github.com/Octo-o-o-o/autowq">GitHub</a> ·
     <a href="https://github.com/Octo-o-o-o/autowq/releases">Releases</a> ·
-    <a href="https://pypi.org/project/wq-pilot/">PyPI</a> ·
-    <a href="https://github.com/Octo-o-o-o/homebrew-autowq">Homebrew Tap</a> ·
+    <a href="https://github.com/Octo-o-o-o/homebrew-autowq">Homebrew</a> ·
     <a href="/">中文</a>
   </div>
 </footer>
+
+<script>
+window.ONBOARD_LINES = [
+  { text: '$ brew install --cask Octo-o-o-o/autowq/worldquant', cls: 'w', pause: 500 },
+  { text: '# double-click the icon; the wizard takes over — or anywhere:', cls: 'c', fast: true, pause: 350 },
+  { text: '$ wq onboard', cls: 'w', pause: 500 },
+  { text: 'host CLIs detected: grok ✓  devin ✓  cursor ✓  claude ✓  codex ✓', cls: 'c', fast: true, pause: 400 },
+  { text: 'providers: grok,cursor', cls: 'w', pause: 350 },
+  { text: 'research [grok] ⏎    review [cursor] ⏎', cls: 'w', pause: 500 },
+  { text: '✓ config written: models, automation, submission all OFF', cls: 'ok', fast: true, pause: 350 },
+  { text: '✓ sandboxed runtime ready; budgets wait for your explicit opt-in', cls: 'ok', fast: true, pause: 350 },
+  { text: '→ launching logins: BRAIN + selected providers (skippable)', cls: 'p_g', fast: true, pause: 600 },
+  { text: 'Done. Hit "Start automation" in the menu bar.', cls: 'ok', pause: 900 }
+];
+</script>
 <script src="/script.js"></script>
 </body>
 </html>

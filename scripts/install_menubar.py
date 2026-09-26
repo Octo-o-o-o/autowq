@@ -30,9 +30,13 @@ def install(destination, activate):
     resources = app / 'Contents/Resources'
     resources.mkdir(parents=True, exist_ok=True)
     shutil.copy2(ROOT / 'macos/Assets/ResearchIcon.png', resources / 'ResearchIcon.png')
+    icns = ROOT / 'packaging/macos/WorldQuant.icns'
+    if icns.exists():
+        shutil.copy2(icns, resources / 'WorldQuant.icns')
     shutil.copy2(ROOT / 'packaging/macos/app_setup.py', resources / 'app_setup.py')
     info.write_bytes(plistlib.dumps({'CFBundleExecutable': 'WorldQuantMenu',
         'CFBundleIdentifier': LABEL, 'CFBundleName': 'WorldQuant',
+        'CFBundleIconFile': 'WorldQuant',
         'CFBundlePackageType': 'APPL', 'CFBundleVersion': '3',
         'LSUIElement': True, 'LSMinimumSystemVersion': '12.0'}))
     subprocess.run(['/usr/bin/codesign', '--force', '--sign', '-', str(app)], check=True, timeout=30)

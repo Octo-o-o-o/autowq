@@ -11,9 +11,21 @@ import subprocess
 import sys
 import threading
 
-ROOT = Path(__file__).resolve().parents[1]
-os.chdir(ROOT)
-sys.path.insert(0, str(ROOT / 'src'))
+if getattr(sys, 'frozen', False):
+    # PyInstaller 打包：__file__ 指向解包临时目录；工作区用 --workspace 指定，默认 cwd。
+    argv_ws = None
+    if '--workspace' in sys.argv:
+        i = sys.argv.index('--workspace')
+        if i + 1 < len(sys.argv):
+            argv_ws = sys.argv[i + 1]
+    ROOT = Path(argv_ws).resolve() if argv_ws else Path.cwd()
+    BUNDLE = Path(sys._MEIPASS)
+    os.chdir(ROOT)
+else:
+    ROOT = Path(__file__).resolve().parents[1]
+    BUNDLE = None
+    os.chdir(ROOT)
+    sys.path.insert(0, str(ROOT / 'src'))
 
 from wq import desktop_control as bridge  # noqa: E402
 
@@ -270,10 +282,17 @@ def main():
     tray = Tray()
     tray.icon = pystray.Icon('WorldQuant', title='WorldQuant 自动研究',
                              menu=render_menu(menu_model({}), tray.on_action))
-    icon_path = ROOT / 'macos/Assets/ResearchIcon.png'
-    try:
-        tray.icon.icon = Image.open(icon_path)
-    except OSError:
+    candidates = [ROOT / 'packaging/assets/tray-icon.png']
+    if BUNDLE is not None:
+        candidates.insert(0, BUNDLE / 'tray-icon.png')
+    candidates.append(ROOT / 'macos/Assets/ResearchIcon.png')
+    for icon_path in candidates:
+        try:
+            tray.icon.icon = Image.open(icon_path)
+            break
+        except OSError:
+            continue
+    else:
         tray.icon.icon = Image.new('RGB', (64, 64), (40, 90, 60))
     worker = threading.Thread(target=tray.loop, daemon=True)
     worker.start()

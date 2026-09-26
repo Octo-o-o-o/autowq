@@ -16,6 +16,13 @@ class AssetsParityTests(unittest.TestCase):
         packaged = (files('wq.assets') / 'docker_provider.py').read_bytes()
         self.assertEqual(packaged, (ROOT / 'scripts' / 'docker_provider.py').read_bytes())
 
+    def test_cli_version_matches_pyproject(self):
+        import re
+        pyproject = (ROOT / 'pyproject.toml').read_text()
+        cli = (ROOT / 'src/wq/cli.py').read_text()
+        version = re.search(r'^version = "(.+?)"', pyproject, re.M).group(1)
+        self.assertIn(f'wq {version}', cli)
+
 
 if __name__ == '__main__':
     unittest.main()

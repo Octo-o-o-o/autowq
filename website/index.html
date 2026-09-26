@@ -3,15 +3,18 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>autowq — 本地运行的 WorldQuant BRAIN 自动研究工作流</title>
-<meta name="description" content="autowq 是开源的本地 WorldQuant BRAIN 研究编排工具：模型提出假设 → 异渠道审查 → 有限回测 → 真实结果诊断 → 互补信号研究 → 提交前验收。零依赖 Python，支持 pipx、Homebrew 与 macOS DMG 安装。">
+<title>autowq — 把 WorldQuant BRAIN 研究关进一条回路</title>
+<meta name="description" content="autowq：开源、本地优先的 WorldQuant BRAIN 研究回路。异渠道审查、预算闸门、提交前验收。本地已有订阅的 Agent CLI 即可上手，macOS 菜单栏与 Windows 托盘常驻。">
 <link rel="canonical" href="https://autowq.octoooo.com/">
 <link rel="alternate" hreflang="zh-CN" href="https://autowq.octoooo.com/">
 <link rel="alternate" hreflang="en" href="https://autowq.octoooo.com/en/">
-<meta property="og:title" content="autowq — 本地 WorldQuant BRAIN 自动研究">
-<meta property="og:description" content="开源、本地优先的 BRAIN 研究编排：异渠道审查、预算门禁、提交前验收。">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta property="og:title" content="autowq — 本地 BRAIN 研究回路">
+<meta property="og:description" content="异渠道审查 · 预算闸门 · 提交前验收 · 数据不出本机">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://autowq.octoooo.com/">
+<meta property="og:image" content="https://autowq.octoooo.com/assets/og.png">
 <link rel="stylesheet" href="/style.css">
 <script type="application/ld+json">
 {
@@ -19,135 +22,157 @@
   "@type": "SoftwareApplication",
   "name": "autowq",
   "applicationCategory": "DeveloperApplication",
-  "operatingSystem": "macOS, Linux, Windows (WSL2)",
+  "operatingSystem": "macOS, Windows, Linux",
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
   "license": "https://www.apache.org/licenses/LICENSE-2.0",
   "url": "https://autowq.octoooo.com/",
   "codeRepository": "https://github.com/Octo-o-o-o/autowq",
-  "description": "本地运行的 WorldQuant BRAIN 研究编排工具：假设、异渠道审查、有限回测、诊断与提交前验收，预算与授权由用户控制。"
-}
-</script>
-<script type="application/ld+json">
-{
-  "@context": "https://schema.org",
-  "@type": "FAQPage",
-  "mainEntity": [
-    { "@type": "Question", "name": "autowq 是 WorldQuant 官方产品吗？",
-      "acceptedAnswer": { "@type": "Answer", "text": "不是。autowq 是独立开源项目（Apache-2.0），与 WorldQuant 无隶属关系。WorldQuant/BRAIN 商标、平台和数据归其权利人。" } },
-    { "@type": "Question", "name": "使用 autowq 需要付费吗？",
-      "acceptedAnswer": { "@type": "Answer", "text": "autowq 本身免费开源。但它编排的是你自己的模型 CLI 订阅或 API Key，以及你自己的 BRAIN 账号，这些费用由你与相应供应商结算。" } },
-    { "@type": "Question", "name": "支持 Windows 吗？",
-      "acceptedAnswer": { "@type": "Answer", "text": "原生 Windows 暂不支持；Windows 用户请使用 WSL2 + Docker 隔离方案。macOS 与 Linux 原生支持。" } },
-    { "@type": "Question", "name": "自动研究等于自动提交和收益吗？",
-      "acceptedAnswer": { "@type": "Answer", "text": "不等于。平台筛选通过、正式提交接收、顾问资格和实际到账是不同状态。autowq 是研究工具，不承诺收益，提交有独立门禁。" } }
-  ]
+  "description": "本地运行的 WorldQuant BRAIN 研究回路：假设、异渠道审查、有限回测、诊断与提交前验收，预算与授权由用户控制。"
 }
 </script>
 </head>
 <body>
 <nav>
-  <a class="logo" href="/">auto<span>wq</span></a>
+  <a class="brand" href="/"><img src="/favicon-32.png" alt="autowq 标志">auto<em>wq</em></a>
   <div class="links">
+    <a href="#start">上手</a>
+    <a href="#tray">托盘</a>
+    <a href="#case">案例</a>
     <a href="#install">安装</a>
-    <a href="#how">工作原理</a>
-    <a href="#features">特性</a>
-    <a href="#commands">命令</a>
     <a href="#faq">FAQ</a>
     <a href="https://github.com/Octo-o-o-o/autowq">GitHub</a>
-    <a class="icon-btn" href="/en/">EN</a>
-    <button class="icon-btn" onclick="toggleTheme()" aria-label="切换主题">◐</button>
+    <a class="lang" href="/en/">EN</a>
   </div>
 </nav>
 
 <div class="wrap">
-<section class="hero" id="top">
-  <span class="badge">开源 · Apache-2.0 · v0.2.0</span>
-  <h1>在你的机器上，<br><span class="grad">持续自动研究</span> WorldQuant BRAIN</h1>
-  <p class="sub">模型提出假设 → 不同渠道审查 → 有限回测 → 真实结果诊断 → 互补信号研究 → 提交前验收。模型、预算、证据和队列由你控制，不依赖聊天窗口在线。</p>
-  <div class="cta">
-    <a class="btn primary" href="#install">立即安装</a>
-    <a class="btn" href="https://github.com/Octo-o-o-o/autowq">GitHub 仓库</a>
+<section class="hero">
+  <div>
+    <div class="kicker">Open source · Apache-2.0 · Local-first</div>
+    <h1>把 BRAIN 研究<br>关进一条<span class="amber">回路</span>。</h1>
+    <p class="sub">假设 → 异渠道审查 → 有限回测 → 诊断 → 提交前验收。它住在你的菜单栏和托盘里，用你的账号、你的预算、你的节奏运转——不依赖聊天窗口在线。</p>
+    <div class="cta">
+      <a class="btn primary" href="#start">5 分钟上手</a>
+      <a class="btn" href="https://github.com/Octo-o-o-o/autowq">GitHub →</a>
+    </div>
   </div>
-  <div class="terminal">
-    <div class="bar"><i></i><i></i><i></i></div>
-<pre><span class="c"># 任选其一：pipx / Homebrew / DMG</span>
-<span class="g">$</span> pipx install wq-pilot
-<span class="g">$</span> brew tap Octo-o-o-o/autowq && brew install wq-pilot
+  <svg class="loopmark" viewBox="0 0 200 200" aria-label="autowq 回路标志">
+    <circle class="halo" cx="100" cy="100" r="94"/>
+    <path class="trace" d="M 152 52 A 78 78 0 1 0 152 148"/>
+    <path class="trace d2" d="M 42 130 L 72 130 L 92 90 L 112 130 L 138 96 L 166 58"/>
+  </svg>
+</section>
+</div>
 
-<span class="c"># 任选目录作为工作区，启动向导</span>
-<span class="g">$</span> mkdir ~/autowq && cd ~/autowq
-<span class="g">$</span> wq onboard</pre>
+<div class="tape" aria-label="真实运行记录">
+  <div class="run" id="tape-run">
+    <span>09-20 <b>首日运行</b> · $1.02</span><span>09-21 <b>18 轮研究</b> · $4.07</span><span>09-22 <b class="star">★ 第 1 个 Alpha 被接收</b> · $2.87</span><span>09-23 <b class="star">★ 连续第 2 天被接收</b> · $6.41</span><span>09-24 <b class="star">★ 连续第 3 天被接收</b> · $6.97</span><span>09-25 <b class="star">★ 连续第 4 天被接收</b> · $11.03</span><span>09-26 <b>17 轮研究</b> · $4.93</span><span>维护者本地账本 · 成本为 CLI 估算</span>
   </div>
+</div>
+
+<div class="wrap">
+
+<section id="principles">
+  <h2><span class="no">01</span>三条不容商量的原则</h2>
+  <div class="principles rise">
+    <div class="p"><div class="idx">REVIEW</div><h3>异渠道审查</h3><p>研究角色出假设，审查角色必须来自另一家模型提供方。同一模型的盲区，不能用来确认它自己。</p></div>
+    <div class="p"><div class="idx">GATES</div><h3>闸门默认关闭</h3><p>预算上限、授权期限、提交验收全是门禁。向导不会替你打开任何付费开关，UNKNOWN 请求必须人工对账。</p></div>
+    <div class="p"><div class="idx">LOCAL</div><h3>数据不出本机</h3><p>配置、Cookie、真实 Alpha、账本全部留在本地。导出自动剔除凭证与任务输入，模型请求只发给你显式选择的渠道。</p></div>
+  </div>
+</section>
+
+<section id="start">
+  <h2><span class="no">02</span>开箱即用：有订阅的 Agent 就够</h2>
+  <p class="lead">不需要新买任何服务。你本地已订阅的 Agent CLI——Grok、Devin、Cursor、Claude Code、Codex 等十余个渠道，或 OpenAI / Anthropic API Key——向导检测到就能编排。</p>
+  <div class="split">
+    <div class="term">
+      <div class="bar"><i></i><i></i><i></i><span class="ttl">wq onboard — 首次向导</span></div>
+      <pre id="typewriter"></pre>
+    </div>
+    <ul class="bullets rise">
+      <li><b>向导只做三件事</b>：检测你已安装的 CLI、按你的选择生成配置、调起登录。模型、自动研究、提交默认全关。</li>
+      <li><b>双通道登录</b>：BRAIN 与各模型 CLI 的登录由向导逐个调起，状态如实标记，可跳过、可续跑 <code>wq onboard --login-only</code>。</li>
+      <li><b>不烙路径、不装调度</b>：任意空目录就是一个工作区；调度器只有在你明确启用后才安装。</li>
+      <li><b>研究≠审查</b>：只选一个渠道时向导会明说——自动研究要求异渠道审查，单渠道只能离线用。</li>
+    </ul>
+  </div>
+</section>
+
+<section id="tray">
+  <h2><span class="no">03</span>住在系统托盘里</h2>
+  <p class="lead">状态、历史、提交、预算开关——都在菜单栏 / 托盘完成，不用开浏览器。两个平台共享同一个受控桥接，能力完全一致。</p>
+  <div class="trays rise">
+    <div class="oscard">
+      <div class="osbar"><img src="/favicon-32.png" alt="">macOS 菜单栏<span class="dot"></span></div>
+      <div class="osbody"><div class="menu">
+        <div class="mi head">自动研究已启用<span class="r">●</span></div>
+        <div class="mi dim">下轮：研究 grok → 审查 cursor</div>
+        <hr>
+        <div class="mi">轮次历史<span class="r">共 123 轮 ▸</span></div>
+        <div class="mi">已提交 Alpha（4）<span class="r">▸</span></div>
+        <div class="mi">设置<span class="r">预算 · 间隔 ▸</span></div>
+        <hr>
+        <div class="mi hot">立刻运行下一轮</div>
+        <div class="mi">暂停（当前任务完成后）</div>
+      </div></div>
+    </div>
+    <div class="oscard">
+      <div class="osbar"><img src="/favicon-32.png" alt="">Windows 托盘<span class="dot"></span></div>
+      <div class="osbody"><div class="menu">
+        <div class="mi head">调度器运行中<span class="r">●</span></div>
+        <div class="mi dim">任务计划每分钟唤醒一次</div>
+        <hr>
+        <div class="mi">轮次历史<span class="r">▸</span></div>
+        <div class="mi">已提交 Alpha<span class="r">▸</span></div>
+        <div class="mi">设置<span class="r">通知 · 上限 ▸</span></div>
+        <hr>
+        <div class="mi hot">开始自动运行</div>
+        <div class="mi">退出（暂停自动运行）</div>
+      </div></div>
+    </div>
+  </div>
+</section>
+
+<section id="case">
+  <h2><span class="no">04</span>真实账本，不是效果图</h2>
+  <p class="lead">来自维护者本地账本的第一周（2026-09-20 → 09-26）：每天都有 Alpha 被平台正式接收，成本以美元计、按天可见。</p>
+  <div class="stats rise">
+    <div class="stat"><div class="n" data-count="123">0</div><div class="l">研究轮次 / 7 天</div></div>
+    <div class="stat"><div class="n" data-count="160">0</div><div class="l">真实模拟</div></div>
+    <div class="stat"><div class="n" data-count="4">0</div><div class="l">Alpha 被接收 · 连续 4 天</div></div>
+    <div class="stat"><div class="n">$<span data-count="37.30">0</span></div><div class="l">7 天模型成本合计</div></div>
+  </div>
+  <div class="bars rise">
+    <div class="bar"><b>$1.02</b><i style="height:9%"></i><em>09-20</em></div>
+    <div class="bar"><b>$4.07</b><i style="height:37%;animation-delay:.1s"></i><em>09-21</em></div>
+    <div class="bar accepted"><b>$2.87</b><i style="height:26%;animation-delay:.2s"></i><em>09-22 ★</em></div>
+    <div class="bar accepted"><b>$6.41</b><i style="height:58%;animation-delay:.3s"></i><em>09-23 ★</em></div>
+    <div class="bar accepted"><b>$6.97</b><i style="height:63%;animation-delay:.4s"></i><em>09-24 ★</em></div>
+    <div class="bar accepted"><b>$11.03</b><i style="height:100%;animation-delay:.5s"></i><em>09-25 ★</em></div>
+    <div class="bar"><b>$4.93</b><i style="height:45%;animation-delay:.6s"></i><em>09-26</em></div>
+  </div>
+  <p class="fineprint">★ = 当天有 Alpha 获得平台正式提交回执。成本为 CLI 侧估算、不是供应商账单；"被接收"不代表筛选通过或收益——研究工具，不是收益承诺。</p>
 </section>
 
 <section id="install">
-  <h2>安装</h2>
-  <p class="lead">引擎零第三方依赖、纯 Python 3.11+ 标准库。四种安装方式任选，macOS 用户还可以获得菜单栏常驻 App。</p>
-  <div class="grid">
-    <div class="card"><h3><span class="k">①</span>pipx（推荐）</h3>
-      <p>跨平台一条命令：<code>pipx install wq-pilot</code>，随后在任意空目录 <code>wq onboard</code> 初始化工作区。</p></div>
-    <div class="card"><h3><span class="k">②</span>Homebrew</h3>
-      <p><code>brew tap Octo-o-o-o/autowq && brew install wq-pilot</code>；菜单栏 App：<code>brew install --cask Octo-o-o-o/autowq/worldquant</code>。</p></div>
-    <div class="card"><h3><span class="k">③</span>macOS DMG</h3>
-      <p>从 <a href="https://github.com/Octo-o-o-o/autowq/releases">Releases</a> 下载 DMG，拖入“应用程序”双击：首启向导选择工作区、准备运行时并调起 onboard，完成后菜单栏常驻。</p></div>
-    <div class="card"><h3><span class="k">④</span>源码（开发）</h3>
-      <p><code>git clone</code> 仓库后 <code>./wq onboard</code>；测试：<code>PYTHONPATH=src python3 -m unittest discover -s tests</code>。</p></div>
-  </div>
-  <div class="callout"><strong>注意：</strong>onboard 不会替你绕过人工环节——BRAIN 注册/登录、各模型 CLI 登录都需要你本人在浏览器或终端完成，向导只负责调起与记录状态。初始状态下模型、API、自动研究和提交全部关闭。</div>
-</section>
-
-<section id="how">
-  <h2>工作原理</h2>
-  <p class="lead">一条有门禁的研究流水线：每一步都可审计，每个预算都有上限，每次提交都有验收。</p>
-  <div class="steps">
-    <div class="step"><div><h3>提出假设</h3><p>研究角色模型基于字段证据与历史复盘提出候选 Alpha 思路，任务冻结自己的路由快照。</p></div></div>
-    <div class="step"><div><h3>异渠道审查</h3><p>审查角色必须来自不同渠道，避免同一模型的盲区自我确认。</p></div></div>
-    <div class="step"><div><h3>有限回测</h3><p>真实模拟、GET 轮询与结果入账；POST 结果未知时停止重发，不产生重复提交。</p></div></div>
-    <div class="step"><div><h3>真实结果诊断</h3><p>失败原因反馈、时间分段资料、日 PnL 相关性，诊断回流到下一轮研究。</p></div></div>
-    <div class="step"><div><h3>互补信号研究</h3><p>有限组合实验与预登记的 decay/中性化变体，每轮少量回测，全部结果入账。</p></div></div>
-    <div class="step"><div><h3>提交前验收</h3><p>逐候选正式提交：研究验收、最新平台检查、单次 POST、真实接收状态核验。</p></div></div>
-  </div>
-</section>
-
-<section id="features">
-  <h2>特性</h2>
-  <p class="lead">为长期无人值守运行而设计：预算、授权、恢复与去重是默认值，不是可选项。</p>
-  <div class="grid">
-    <div class="card"><h3>多渠道模型编排</h3><p>Grok Build、Devin、Cursor、ZCode、Claude Code、Codex、Gemini CLI、GitHub Copilot CLI、Qwen Code、OpenCode，以及 OpenAI / Anthropic 标准 API。</p></div>
-    <div class="card"><h3>进程级隔离</h3><p>macOS 用 sandbox-exec 限定模型进程读写范围；Linux/WSL2 用 Docker 镜像隔离；凭证放在 0700 权限的私有目录。</p></div>
-    <div class="card"><h3>预算与授权闸门</h3><p>单并发、逐渠道预算、授权期限、平台限流处理；未知费用不记作零。</p></div>
-    <div class="card"><h3>崩溃恢复与去重</h3><p>本地 SQLite 账本记录每个任务状态；中断后按账本恢复，UNKNOWN 请求必须人工对账。</p></div>
-    <div class="card"><h3>macOS 菜单栏 App</h3><p>轮次历史、已提交 Alpha、路由预设、渠道开关、运行间隔与系统通知，全部在菜单栏完成。</p></div>
-    <div class="card"><h3>中文进度与导出</h3><p>任务进度、token 与费用来源中文呈现；导出 summary/tasks/results（JSON/CSV），不含 Cookie、密码与任务输入。</p></div>
-  </div>
-</section>
-
-<section id="commands">
-  <h2>常用命令</h2>
-  <p class="lead">安装后在你的工作区内运行；所有危险操作默认关闭。</p>
-<pre class="code"><button class="copy-btn" data-done="已复制">复制</button><span class="g">$</span> wq onboard --list            <span class="c"># 只检测宿主 CLI，不写配置</span>
-<span class="g">$</span> wq onboard                   <span class="c"># 首启向导：渠道、模型、角色、登录</span>
-<span class="g">$</span> wq doctor --fix-private      <span class="c"># 环境体检与私有目录修复</span>
-<span class="g">$</span> wq autopilot status          <span class="c"># 自动研究状态</span>
-<span class="g">$</span> wq tasks                     <span class="c"># 任务队列</span>
-<span class="g">$</span> wq brain fields --datasets   <span class="c"># 只读字段目录快照</span>
-<span class="g">$</span> wq pause --reason "manual"   <span class="c"># 暂停队列与本地模型调用</span></pre>
+  <h2><span class="no">05</span>安装</h2>
+  <p class="lead">引擎零第三方依赖、纯 Python 3.11+ 标准库。桌面端开箱即用，命令行随取随用。</p>
   <table>
-    <tr><th>平台</th><th>方式</th><th>模型进程隔离</th></tr>
-    <tr><td>macOS</td><td>pipx / Homebrew / DMG</td><td>sandbox-exec 沙箱</td></tr>
-    <tr><td>Linux</td><td>pipx / 源码</td><td>Docker 镜像</td></tr>
-    <tr><td>Windows</td><td>WSL2（同 Linux）</td><td>Docker 镜像</td></tr>
+    <tr><th>平台</th><th>方式</th><th>说明</th></tr>
+    <tr><td>macOS</td><td><code>brew install --cask Octo-o-o-o/autowq/worldquant</code></td><td>菜单栏 App（DMG）；双击后首启向导全程引导</td></tr>
+    <tr><td>Windows</td><td>Releases 下载 <code>WorldQuantTray.exe</code></td><td>原生托盘 + 任务计划（实验性）</td></tr>
+    <tr><td>CLI（macOS/Linux）</td><td><code>brew install Octo-o-o-o/autowq/wq-pilot</code></td><td>任意空目录 <code>wq onboard</code> 即工作区</td></tr>
+    <tr><td>源码</td><td><code>git clone</code> 后 <code>./wq onboard</code></td><td>Linux/WSL2 走 Docker 隔离；PyPI 上架中</td></tr>
   </table>
 </section>
 
 <section id="faq">
-  <h2>常见问题</h2>
-  <details><summary>autowq 是 WorldQuant 官方产品吗？</summary><p>不是。autowq 是独立开源项目（Apache-2.0），与 WorldQuant 无隶属关系。WorldQuant/BRAIN 商标、平台和数据归其权利人。</p></details>
-  <details><summary>使用 autowq 需要付费吗？</summary><p>autowq 本身免费开源。但它编排的是你自己的模型 CLI 订阅或 API Key，以及你自己的 BRAIN 账号——这些费用由你与相应供应商结算。onboarding 不会启动付费推理。</p></details>
-  <details><summary>我的凭证和研究成果会离开本机吗？</summary><p>不会。配置、Cookie、真实 Alpha、数据库、模型输出和日志都在本地；导出不包含 Cookie、密码、任务输入或证据路径。模型请求只发给你显式选择的渠道。</p></details>
-  <details><summary>支持 Windows 吗？</summary><p>原生 Windows 暂不支持。请使用 WSL2 + Docker 方案；macOS 与 Linux 原生支持。</p></details>
-  <details><summary>自动研究等于自动提交和收益吗？</summary><p>不等于。平台筛选通过、正式提交接收、顾问资格和实际到账是不同状态。自动研究不自动授予正式提交权限，提交有独立验收门禁。</p></details>
-  <details><summary>为什么审查必须用不同渠道？</summary><p>同一模型审查自己的假设会共享盲区。autowq 要求持续自动研究的研究与审查角色来自不同渠道，wizard 会在配置时强制这一点。</p></details>
+  <h2><span class="no">06</span>FAQ</h2>
+  <details><summary>是 WorldQuant 官方产品吗？</summary><p>不是。autowq 是独立开源项目（Apache-2.0），与 WorldQuant 无隶属关系；BRAIN 商标、平台与数据归其权利人。</p></details>
+  <details><summary>autowq 收费吗？</summary><p>项目本身免费开源。它编排的是你自己的模型订阅 / API Key 和你自己的 BRAIN 账号，费用由你与供应商结算；向导不会发起任何付费推理。</p></details>
+  <details><summary>自动研究 = 自动提交 = 收益吗？</summary><p>不等于。平台筛选通过、提交接收、顾问资格、实际到账是四种不同状态，提交有独立验收门禁。</p></details>
+  <details><summary>我的凭证和研究会上传吗？</summary><p>不会。一切状态存本地 SQLite 账本；导出不包含 Cookie、密码与任务输入；模型请求只发给你显式选择的渠道。</p></details>
+  <details><summary>Windows 支持到什么程度？</summary><p>原生托盘与任务计划调度已可用（实验性）；模型进程的沙箱隔离仍以 macOS sandbox-exec 与 Linux/WSL2 Docker 为最成熟路径。</p></details>
 </section>
 </div>
 
@@ -156,11 +181,25 @@
   <div>
     <a href="https://github.com/Octo-o-o-o/autowq">GitHub</a> ·
     <a href="https://github.com/Octo-o-o-o/autowq/releases">Releases</a> ·
-    <a href="https://pypi.org/project/wq-pilot/">PyPI</a> ·
-    <a href="https://github.com/Octo-o-o-o/homebrew-autowq">Homebrew Tap</a> ·
+    <a href="https://github.com/Octo-o-o-o/homebrew-autowq">Homebrew</a> ·
     <a href="/en/">English</a>
   </div>
 </footer>
+
+<script>
+window.ONBOARD_LINES = [
+  { text: '$ brew install --cask Octo-o-o-o/autowq/worldquant', cls: 'w', pause: 500 },
+  { text: '# 双击图标，首启向导接管 —— 或在任意目录：', cls: 'c', fast: true, pause: 350 },
+  { text: '$ wq onboard', cls: 'w', pause: 500 },
+  { text: '检测到宿主 CLI：grok ✓  devin ✓  cursor ✓  claude ✓  codex ✓', cls: 'c', fast: true, pause: 400 },
+  { text: '选择渠道：grok,cursor', cls: 'w', pause: 350 },
+  { text: '研究渠道 [grok] ⏎    审查渠道 [cursor] ⏎', cls: 'w', pause: 500 },
+  { text: '✓ 配置已生成：模型、自动研究、提交全部默认关闭', cls: 'ok', fast: true, pause: 350 },
+  { text: '✓ 运行时沙箱就绪；预算与授权等待你显式开启', cls: 'ok', fast: true, pause: 350 },
+  { text: '→ 调起登录：BRAIN + 所选渠道（可跳过，随时续跑）', cls: 'p_g', fast: true, pause: 600 },
+  { text: '完成。去菜单栏点「开始自动运行」。', cls: 'ok', pause: 900 }
+];
+</script>
 <script src="/script.js"></script>
 </body>
 </html>
