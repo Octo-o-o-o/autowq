@@ -200,8 +200,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
     func updateActivateRow() {
-        settingsMenu.removeItem(activateRow)
-        settingsMenu.removeItem(activateSep)
+        for row in [activateRow, activateSep] where settingsMenu.index(of: row) >= 0 {
+            settingsMenu.removeItem(row)
+        }
         if FileManager.default.fileExists(atPath: root + "/config/config.json") {
             activateRow.target = self
             activateRow.toolTip = "安装每 60 秒调度与登录自启（LaunchAgents）"
