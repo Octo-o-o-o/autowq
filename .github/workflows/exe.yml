@@ -16,8 +16,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Run tests
-        run: python -m unittest discover -s tests
+      # 全量单测以 POSIX 平台为准（见 tests.yml 的 ubuntu/macos 矩阵）；
+      # Windows 此处只跑托盘专项测试，引擎可移植性以打包产物冒烟验证。
+      - name: Run Windows tray tests
+        run: python -m unittest discover -s tests -p test_windows_tray.py -v
         env:
           PYTHONPATH: src
       - name: Build single-file tray exe
