@@ -92,6 +92,9 @@ def settings_snapshot(cfg, conn):
                   'reason': routing._unavailable(conn, cfg, name) or ''}
                  for name, definition in data['providers'].items()]
     return {'active_preset': routing.active_preset(conn, cfg, data),
+            'permanent_preset': store.get_flag(conn, 'active_preset', data['default']),
+            'preset_once': store.get_flag(conn, 'preset_once') or '',
+            'cycle_preset': routing.cycle_preset(conn) or '',
             'presets': presets, 'providers': providers,
             'notifications': desktop.notifications_enabled(cfg),
             'interval_s': cfg.get('autopilot', 'interval_s', default=3600),
@@ -122,14 +125,16 @@ def control(action, arg=None):
             return settings_snapshot(cfg, conn)
         finally:
             conn.close()
-    if action == 'preset':
+    if action in ('preset', 'preset-once'):
         from wq.db import connect
         cfg = _cfg()
         conn = connect(cfg.db_path)
         try:
-            routing.choose_preset(conn, cfg, arg)
+            routing.choose_preset(conn, cfg, arg, once=(action == 'preset-once'))
         finally:
             conn.close()
+        if action == 'preset-once':
+            return {'message': f'已登记仅一轮预设 {arg}：下一个新建轮次使用，结束后自动恢复永久预设。'}
         return {'message': f'已切换到预设 {arg}；下一项任务领取时生效，在途任务保持原路由。'}
     if action == 'provider':
         from wq.db import connect

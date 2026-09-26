@@ -261,6 +261,8 @@ def status(conn,cfg):
             'last_tick_at':store.get_flag(conn,'autopilot_last_tick'),
             'latest_cycle':dict(row) if row else None,
             'budget_forecast':forecast,
+            'preset_once':store.get_flag(conn,'preset_once') or None,
+            'cycle_preset':(store.get_flag(conn,f"cycle_preset_{row['cycle_id']}") or None) if row and row['state']!='closed' else None,
             'closed_cycles':conn.execute("SELECT COUNT(*) FROM research_cycles WHERE state='closed'").fetchone()[0],
             'automatic_submission':False}
 
@@ -732,13 +734,15 @@ def advance(conn,cfg,row,p):
         if duplicate or family in p.get('known_family_hashes',[]):finish(conn,cfg,row,'机制结构重复（含已登记直接实验），拒绝窗口/符号变体');return
         history=[{'cycle':r[0],'candidate':json.loads(r[1])} for r in conn.execute('SELECT cycle_id,candidate_json FROM research_cycles WHERE candidate_json IS NOT NULL AND cycle_id!=? ORDER BY cycle_id DESC LIMIT 40',(row['cycle_id'],))]
         history.append({'title':'基线机制：经营现金流相对正资产的截面强度排名','note':'平滑该基线本身不构成独立新机制；需要额外可证伪信息，不提供成绩'})
-        rt=make_job(conn,cfg,row['cycle_id'],'review',review_prompt(candidate,history,feedback.model_context(conn) if cfg.get('research_feedback','enabled') else None,public_plan,p['bindings']),[provider(conn,t['task_id'])],alternate_order(cfg,row['cycle_id'],'review'))
+        solo=routing.preset_is_solo(cfg,routing.active_preset(conn,cfg))
+        rt=make_job(conn,cfg,row['cycle_id'],'review',review_prompt(candidate,history,feedback.model_context(conn) if cfg.get('research_feedback','enabled') else None,public_plan,p['bindings']),[] if solo else [provider(conn,t['task_id'])],None if solo else alternate_order(cfg,row['cycle_id'],'review'))
         conn.execute("UPDATE research_cycles SET state='reviewing',review_task=? WHERE cycle_id=?",(rt,row['cycle_id']))
         event(conn,row['cycle_id'],'review_enqueued',rt)
     else:
         if conn.execute("SELECT 1 FROM tasks WHERE status='unknown' LIMIT 1").fetchone():
             message(conn,'存在UNKNOWN，完成对账前不派发新的研究模拟');return
-        if provider(conn,row['research_task'])==provider(conn,row['review_task']):raise ValueError('研究和审查必须来自不同渠道')
+        if provider(conn,row['research_task'])==provider(conn,row['review_task']) and not routing.preset_is_solo(cfg,routing.active_preset(conn,cfg)):
+            raise ValueError('研究和审查必须来自不同渠道')
         if not validate_review(artifact(conn,t['task_id']),row['candidate_hash']):
             finish(conn,cfg,row,'模型审查拒绝，不回测');return
         from . import workflow
@@ -801,6 +805,11 @@ def tick(conn,cfg):
         conn.execute('BEGIN IMMEDIATE')
         cur=conn.execute("INSERT INTO research_cycles(state,policy_json,policy_hash,created_at,updated_at) VALUES('researching',?,?,?,?)",(json.dumps(p),util.sha256_json(p),util.now_iso(),util.now_iso()))
         cid=cur.lastrowid
+        once=store.get_flag(conn,'preset_once')
+        if once:
+            # "仅一轮"预设：绑定到本轮，本轮结束后 active_preset 自动回到永久预设。
+            store.set_flag(conn,f'cycle_preset_{cid}',once); store.set_flag(conn,'preset_once','')
+            event(conn,cid,'preset_once',once)
         from . import feedback
         context=None;public_plan=None;focus=next_focus_role(conn,p)
         from . import workflow

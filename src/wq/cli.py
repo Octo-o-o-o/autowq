@@ -374,8 +374,11 @@ def cmd_preset(args) -> int:
     cfg, conn = _ctx(args)
     data = routing.catalog(cfg)
     if args.action == "use":
-        routing.choose_preset(conn, cfg, args.name)
-        print(f"已选择预设 {args.name}。下一项首次领取的路由任务生效；在途任务及其重试保持原预设。")
+        routing.choose_preset(conn, cfg, args.name, once=getattr(args, 'once', False))
+        if getattr(args, 'once', False):
+            print(f"已登记仅一轮预设 {args.name}：下一个新建的研究轮次使用它，该轮结束后自动回到永久预设 {routing.active_preset(conn, cfg)}。")
+        else:
+            print(f"已选择预设 {args.name}。下一项首次领取的路由任务生效；在途任务及其重试保持原预设。")
         return OK
     current = routing.active_preset(conn, cfg, data)
     print(f"当前预设：{current}；每个渠道：首次 + 3 次重试，仅明确额度/容量故障才切备用渠道。")
@@ -718,7 +721,7 @@ def build_parser(lang=None) -> argparse.ArgumentParser:
     ps = s.add_subparsers(dest='action', required=True)
     ps.add_parser('list').set_defaults(fn=cmd_preset)
     ps.add_parser('show').set_defaults(fn=cmd_preset)
-    use = ps.add_parser('use')
+    use = ps.add_parser('use'); use.add_argument('--once', action='store_true', help='仅下一个新建轮次使用该预设，结束后自动恢复')
     use.add_argument('name')
     use.set_defaults(fn=cmd_preset)
 

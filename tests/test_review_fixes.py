@@ -328,3 +328,49 @@ class PausedClusterTests(unittest.TestCase):
             autopilot.check_policy(p)
             bad = dict(p); bad['paused_clusters'] = 'analyst'
             with self.assertRaises(ValueError): autopilot.check_policy(bad)
+
+
+class PresetOnceAndSoloTests(VariantTests):
+    """仅一轮预设覆盖：绑定到下一个新建轮次，结束后回到永久预设；solo 预设允许同渠道审查。"""
+    def setUp(self):
+        super().setUp()
+        self.p['setting_variants'] = []; self.save_policy()
+        self.same_provider = True   # dispatch() 让研究与审查都记为渠道 a
+        self.add_patch('wq.routing.catalog', return_value={'default': 'steady', 'presets': {
+            'steady': {'routes': {'research': ['a'], 'review': ['b']}},
+            'solo-a': {'solo': True, 'routes': {'research': ['a'], 'engineering': ['a'], 'review': ['a']}}}})
+
+    def test_once_binds_to_one_cycle_then_reverts(self):
+        from wq import routing
+        routing.choose_preset(self.c, self.cfg, 'solo-a', once=True)
+        self.assertEqual(store.get_flag(self.c, 'preset_once'), 'solo-a')
+        self.assertEqual(routing.active_preset(self.c, self.cfg), 'steady')   # 尚无活动轮次
+        self.tick()   # 创建第 1 轮 → 领取 once
+        self.assertEqual(store.get_flag(self.c, 'cycle_preset_1'), 'solo-a')
+        self.assertEqual(store.get_flag(self.c, 'preset_once'), '')
+        self.assertEqual(routing.active_preset(self.c, self.cfg), 'solo-a')
+        for _ in range(60): self.tick()
+        self.assertEqual(self.cycle()['state'], 'closed')
+        self.assertNotIn('不同渠道', self.cycle()['outcome'])     # solo 允许同渠道审查
+        self.assertEqual(self.posts, 1)
+        self.assertEqual(routing.active_preset(self.c, self.cfg), 'steady')   # 轮次结束自动恢复
+        st = autopilot.status(self.c, self.cfg)
+        self.assertIsNone(st['preset_once']); self.assertIsNone(st['cycle_preset'])
+
+    def test_same_provider_review_still_rejected_without_solo(self):
+        for _ in range(4): self.tick()
+        self.assertEqual(self.cycle()['state'], 'closed')
+        self.assertIn('不同渠道', self.cycle()['outcome'])
+        self.assertEqual(self.posts, 0)
+
+    def test_permanent_switch_clears_once(self):
+        from wq import routing
+        routing.choose_preset(self.c, self.cfg, 'solo-a', once=True)
+        routing.choose_preset(self.c, self.cfg, 'steady')
+        self.assertEqual(store.get_flag(self.c, 'preset_once'), '')
+        with self.assertRaises(ValueError): routing.choose_preset(self.c, self.cfg, 'nope', once=True)
+
+
+for _name in list(vars(VariantTests)):
+    if _name.startswith('test_'):
+        setattr(PresetOnceAndSoloTests, _name, None)

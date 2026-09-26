@@ -101,12 +101,12 @@ def api_generate(item, prompt):
     return content, usage
 
 
-def cli_command(kind, binary, model, prompt):
+def cli_command(kind, binary, model, prompt, effort=None):
     if kind == 'claude':
-        return [binary, '-p', '--model', model, '--output-format', 'json', '--tools', '',
+        return [binary, '-p', '--model', model] + (['--effort', effort] if effort else []) + ['--output-format', 'json', '--tools', '',
                 '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--no-session-persistence', prompt]
     if kind == 'codex':
-        return [binary, 'exec', '--model', model, '--sandbox', 'read-only', '--skip-git-repo-check', '--ephemeral', '--json', prompt]
+        return [binary, 'exec', '--model', model] + (['-c', f'model_reasoning_effort="{effort}"'] if effort else []) + ['--sandbox', 'read-only', '--skip-git-repo-check', '--ephemeral', '--json', prompt]
     if kind in ('gemini', 'qwen'):
         return [binary, '-p', prompt, '--model', model, '--approval-mode', 'plan', '--output-format', 'json']
     if kind == 'copilot':
@@ -155,7 +155,7 @@ def main():
         env = dict(os.environ)
         if item['kind'] == 'opencode':
             env['OPENCODE_PERMISSION'] = json.dumps({'*': 'deny'})
-        proc = subprocess.run(cli_command(item['kind'], item['binary'], item['model'], prompt),
+        proc = subprocess.run(cli_command(item['kind'], item['binary'], item['model'], prompt, item.get('effort')),
             stdin=subprocess.DEVNULL, capture_output=True, text=True, env=env)
         if proc.returncode:
             raise ValueError('Provider CLI failed with exit ' + str(proc.returncode))

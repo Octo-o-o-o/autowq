@@ -188,3 +188,10 @@ UNKNOWN 对账先查官方历史，并保留核实依据。以下命令中的 ID
 取消图标自启：`launchctl bootout gui/$(id -u)/com.worldquant.wq-menu`，再移除 `~/Library/LaunchAgents/com.worldquant.wq-menu.plist`。这不取消研究调度；若要停止研究，先执行 `./wq pause --graceful`。关闭 Codex 不影响已安装的应用和调度器。
 
 同一套菜单功能在原生 Windows 上由 `scripts/desktop_tray.py`（pystray 托盘）提供，安装与调度见 [跨平台部署](linux-windows.md) 的原生 Windows 章节。
+
+### 单模型独立轮次与"仅一轮"预设（2026-09-26）
+
+- 新预设 `fable-only` / `opus-only` / `astra-only`（`solo: true`）：研究、工程、审查都由同一渠道（Claude Fable 5.1 / Claude Opus 5.5 / Codex gpt-6-astra，effort 均为 medium，写在 `providers.<name>.transport.effort`）完成。solo 预设下审查是同一模型的另一次独立 CLI 会话，独立性低于异渠道审查；其它门禁（预登记、分段、自相关预筛、逐候选提交验收）不变。
+- `wq preset use NAME --once`：只让下一个新建的研究轮次使用该预设（登记在 `preset_once`，轮次创建时绑定为 `cycle_preset_<id>`），该轮结束后自动回到永久预设；不带 `--once` 为永久切换并清除未领取的一轮登记。菜单栏应用点击预设时弹出"仅切换一轮 / 永久切换 / 取消"，菜单头显示永久预设、本轮临时预设与下一轮临时预设。
+- Claude/Codex CLI 渠道运行在生成的 macOS 沙箱（`<runtime>/agents.sb`）内，允许写各自的登录/会话目录；登录态过期时需本人在终端重新登录（`claude login` / `codex login`）。
+

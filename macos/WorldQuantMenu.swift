@@ -282,6 +282,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc func apply(_ sender: NSMenuItem) {
         guard let code = sender.representedObject as? String else { return }
         let parts = code.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+        if parts[0] == "preset", parts.count > 1 {
+            // 切换预设前让用户选择：仅下一个新建轮次使用，还是永久切换。
+            let box = NSAlert()
+            box.messageText = "切换路由预设：" + parts[1]
+            box.informativeText = "仅切换一轮：下一个新建的研究轮次使用该预设，结束后自动恢复当前永久预设。\n永久切换：之后所有新任务都使用该预设。\n在途任务都保持原路由。"
+            box.addButton(withTitle: "仅切换一轮")
+            box.addButton(withTitle: "永久切换")
+            box.addButton(withTitle: "取消")
+            NSApp.activate(ignoringOtherApps: true)
+            switch box.runModal() {
+            case .alertFirstButtonReturn: perform("preset-once", parts[1])
+            case .alertSecondButtonReturn: perform("preset", parts[1])
+            default: return
+            }
+            return
+        }
         perform(parts[0], parts.count > 1 ? parts[1] : nil)
     }
     func pickRow(_ title: String, _ code: String, on: Bool, tip: String, in target: NSMenu) {
@@ -337,6 +353,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         notifyRow.representedObject = "config=notifications=" + (notifications ? "off" : "on")
         presetMenu.removeAllItems()
         let active = response["active_preset"] as? String ?? ""
+        let permanent = response["permanent_preset"] as? String ?? active
+        let once = response["preset_once"] as? String ?? ""
+        let cyclePreset = response["cycle_preset"] as? String ?? ""
+        var head = "永久预设：" + permanent
+        if !cyclePreset.isEmpty { head += "｜本轮临时：" + cyclePreset }
+        if !once.isEmpty { head += "｜下一轮临时：" + once }
+        presetMenu.addItem(info(head))
+        presetMenu.addItem(info("点击预设后选择：仅切换一轮 / 永久切换"))
+        presetMenu.addItem(NSMenuItem.separator())
         for preset in response["presets"] as? [[String: Any]] ?? [] {
             let name = preset["name"] as? String ?? ""
             pickRow(name, "preset=" + name, on: name == active,

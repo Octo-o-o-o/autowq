@@ -58,22 +58,46 @@ def catalog(cfg):
     return data
 
 
+def cycle_preset(conn):
+    """当前活动研究轮次若带"仅一轮"预设覆盖，返回其名字；否则 None。"""
+    try:
+        row = conn.execute("SELECT cycle_id FROM research_cycles WHERE state!='closed' LIMIT 1").fetchone()
+    except Exception:
+        return None
+    if not row:
+        return None
+    return store.get_flag(conn, f'cycle_preset_{row[0]}') or None
+
+
 def active_preset(conn, cfg, data=None):
     data = data or catalog(cfg)
-    name = 'advanced' if cfg.get('workflow', 'file') else store.get_flag(conn, 'active_preset', data['default'])
+    if cfg.get('workflow', 'file'):
+        name = 'advanced'
+    else:
+        name = cycle_preset(conn) or store.get_flag(conn, 'active_preset', data['default'])
     if name not in data['presets']:
         raise ValueError(f'当前预设 {name} 已不存在；先选择有效预设')
     return name
 
 
-def choose_preset(conn, cfg, name):
+def choose_preset(conn, cfg, name, once=False):
+    """永久切换写 active_preset；once=True 只登记到 preset_once，由下一个新建轮次领取并在其结束后自动失效。"""
     if cfg.get('workflow','file'):
         raise ValueError('Advanced workflow controls routes; edit its routes or remove workflow configuration while idle')
     data = catalog(cfg)
     if name not in data['presets']:
         raise ValueError(f'未知预设 {name}')
-    store.set_flag(conn, 'active_preset', name)
+    if once:
+        store.set_flag(conn, 'preset_once', name)
+    else:
+        store.set_flag(conn, 'active_preset', name)
+        store.set_flag(conn, 'preset_once', '')
     return name
+
+
+def preset_is_solo(cfg, name):
+    """solo 预设：研究与审查允许同一渠道（不同会话）；由用户显式选择，独立性低于异渠道审查。"""
+    return bool(catalog(cfg)['presets'].get(name, {}).get('solo'))
 
 
 def manifest(root):
