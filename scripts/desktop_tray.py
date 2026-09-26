@@ -21,6 +21,18 @@ if getattr(sys, 'frozen', False):
     ROOT = Path(argv_ws).resolve() if argv_ws else Path.cwd()
     BUNDLE = Path(sys._MEIPASS)
     os.chdir(ROOT)
+    if len(sys.argv) > 1 and sys.argv[1] == '--engine':
+        # frozen 下 sys.executable 是本 exe，无法当解释器跑 `-m wq`；
+        # desktop_control.wq() 以 `exe --engine <args...>` 自代理到内置引擎。
+        # --windowed 构建 stdout 可能为 None，父进程靠管道捕获输出，须显式重绑 fd。
+        import io
+        if sys.stdout is None:
+            sys.stdout = io.open(1, 'w', closefd=False)
+        if sys.stderr is None:
+            sys.stderr = io.open(2, 'w', closefd=False)
+        sys.path.insert(0, str(BUNDLE))
+        from wq import cli as _cli
+        raise SystemExit(_cli.main(sys.argv[2:]))
 else:
     ROOT = Path(__file__).resolve().parents[1]
     BUNDLE = None
@@ -123,6 +135,14 @@ def menu_model(state):
     ]
     items += [info('下轮' + str(m.get('title', '未知'))) for m in st.get('next_models') or []]
     items += [
+        sep(),
+        submenu('WorldQuant 账号', [
+            info('BRAIN 账号：' + ('已绑定（本地会话存在）' if st.get('brain_bound')
+                                   else '未绑定；用下方「绑定 / 重新登录」')),
+            action('绑定 / 重新登录…', 'brain-login'),
+            action('核验会话（联网检查）', 'brain-check'),
+            action('打开 BRAIN 注册页', 'brain-register'),
+        ]),
         sep(),
         submenu(f"轮次历史（{hist.get('count', '…')}）", history_items(hist)),
         submenu(f"已提交 Alpha（{subs.get('count', '…')}）", submission_items(subs)),
@@ -230,7 +250,9 @@ class Tray:
                     self.icon.stop()
                     return
                 else:
-                    self.call(act, arg)
+                    result = self.call(act, arg)
+                    if isinstance(result, dict) and result.get('message'):
+                        self.notify('WorldQuant', str(result['message'])[:200])
                 if act in ('preset', 'provider', 'config'):
                     self.call('settings', quiet=True)   # 立即反映新勾选状态，不等周期轮询
             finally:
@@ -284,15 +306,21 @@ def main():
                              menu=render_menu(menu_model({}), tray.on_action))
     candidates = [ROOT / 'packaging/assets/tray-icon.png']
     if BUNDLE is not None:
-        candidates.insert(0, BUNDLE / 'tray-icon.png')
+        # PyInstaller 6.x onefile 数据文件可能在 _MEIPASS 根或 _internal 子目录
+        for sub in ('_internal', '.'):
+            candidates.insert(0, BUNDLE / sub / 'tray-icon.png')
     candidates.append(ROOT / 'macos/Assets/ResearchIcon.png')
     for icon_path in candidates:
         try:
             tray.icon.icon = Image.open(icon_path)
+            logging.info('托盘图标已加载: %s', icon_path)
             break
-        except OSError:
-            continue
+        except OSError as e:
+            logging.warning('托盘图标加载失败 %s: %s', icon_path, e)
     else:
+        if BUNDLE is not None and BUNDLE.is_dir():
+            logging.warning('BUNDLE=%s；目录内 png: %s', BUNDLE,
+                            sorted(p.name for p in BUNDLE.rglob('*.png')))
         tray.icon.icon = Image.new('RGB', (64, 64), (40, 90, 60))
     worker = threading.Thread(target=tray.loop, daemon=True)
     worker.start()

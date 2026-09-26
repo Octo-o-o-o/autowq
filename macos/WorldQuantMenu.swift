@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let historyMenu = NSMenu(title: "轮次历史")
     let submissionsMenu = NSMenu(title: "已提交 Alpha")
     let settingsMenu = NSMenu(title: "设置")
+    let accountMenu = NSMenu(title: "WorldQuant 账号")
     let presetMenu = NSMenu(title: "路由预设")
     let providerMenu = NSMenu(title: "渠道")
     let intervalMenu = NSMenu(title: "运行间隔")
@@ -33,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let nextAt = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     let researchModel = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     let reviewModel = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    let brainRow = NSMenuItem(title: "BRAIN 账号：读取中…", action: nil, keyEquivalent: "")
     let notifyRow = NSMenuItem(title: "系统通知", action: #selector(apply(_:)), keyEquivalent: "")
     var controls: [NSMenuItem] = []
 
@@ -217,6 +219,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.removeAllItems()
         for row in [headline, detail, tick, nextAt, researchModel, reviewModel] { row.isEnabled = false; menu.addItem(row) }
         menu.addItem(.separator())
+        accountMenu.autoenablesItems = false
+        textRow(brainRow, "BRAIN 账号：读取中…")
+        accountMenu.addItem(brainRow)
+        accountMenu.addItem(.separator())
+        for (title, selector, tip) in [
+            ("绑定 / 重新登录…", #selector(brainLogin), "在 Terminal 中打开 BRAIN 登录：按提示输入邮箱与密码，密码不保存。"),
+            ("核验会话（联网检查）", #selector(brainCheck), "用已保存的会话访问 BRAIN 只读预检；不发起模拟或提交。"),
+            ("打开 BRAIN 注册页", #selector(brainRegister), "在浏览器打开官方注册入口。")
+        ] {
+            let row = NSMenuItem(title: title, action: selector, keyEquivalent: "")
+            row.target = self; row.toolTip = tip; accountMenu.addItem(row); controls.append(row)
+        }
+        let accountRow = NSMenuItem(title: "WorldQuant 账号", action: nil, keyEquivalent: "")
+        accountRow.submenu = accountMenu; accountRow.isEnabled = true
+        menu.addItem(accountRow)
+        menu.addItem(.separator())
         for (row, submenu) in [(cycles, historyMenu), (submissions, submissionsMenu)] {
             submenu.autoenablesItems = false; submenu.delegate = self
             submenu.addItem(info("正在读取本地账本…"))
@@ -279,6 +297,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc func start() { perform("start") }
     @objc func pause() { perform("pause") }
     @objc func quit() { perform("quit") }
+    @objc func brainLogin() { perform("brain-login") }
+    @objc func brainCheck() { perform("brain-check") }
+    @objc func brainRegister() { perform("brain-register") }
     @objc func logs() { NSWorkspace.shared.open(URL(fileURLWithPath: root + "/var/run/launchd.out.log")) }
     @objc func apply(_ sender: NSMenuItem) {
         guard let code = sender.representedObject as? String else { return }
@@ -471,6 +492,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     self.cycles.toolTip = response["cycles"] as? String ?? ""
                     self.textRow(self.tick, "最近调度：" + (response["last_tick"] as? String ?? "尚无记录"))
                     self.textRow(self.nextAt, "下一轮：" + (response["next_at"] as? String ?? "待调度检查"))
+                    self.textRow(self.brainRow, "BRAIN 账号：" + ((response["brain_bound"] as? Bool) == true ? "已绑定（本地会话存在）" : "未绑定；用「绑定 / 重新登录」"))
                     let models = response["next_models"] as? [[String: Any]] ?? []
                     for (index, row) in [self.researchModel, self.reviewModel].enumerated() {
                         self.textRow(row, "下轮" + (index < models.count ? models[index]["title"] as? String ?? "未知" : "未知"))
@@ -478,6 +500,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     }
                     self.item.button?.alphaValue = response["paused"] as? Bool == true ? 0.5 : 1
                     self.item.button?.toolTip = self.headline.title + "\n" + self.detail.title
+                } else if action.hasPrefix("brain-") {
+                    if let message = response["message"] as? String, !message.isEmpty {
+                        self.alert("WorldQuant 账号", message)
+                    }
+                    self.refresh()
                 } else {
                     self.fetched.removeAll()
                     self.load("settings")

@@ -64,7 +64,7 @@ Follow the **[complete bilingual onboarding checklist](docs/onboarding.md)**: si
 - Per-candidate submission: research review, fresh platform checks, one POST and verified acceptance.
 - Task progress and token/cost provenance; unknown costs never become zero.
 - Single concurrency, budgets, authorization expiration, rate-limit handling, recovery and deduplication.
-- macOS menu bar / Windows tray (experimental): status, cycle history and submitted Alphas; routing preset, provider and cadence/limit switching; system notifications on accepted submissions or failed tasks.
+- macOS menu bar / Windows tray (experimental): status, cycle history and submitted Alphas; routing preset, provider and cadence/limit switching; bind/verify the BRAIN account (opens a terminal for sign-in; the password is never saved); system notifications on accepted submissions or failed tasks.
 
 ## Common commands
 

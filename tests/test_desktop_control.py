@@ -136,3 +136,45 @@ class SettingsControlTests(unittest.TestCase):
             for bad in ('interval_s=10', 'evil=1', 'interval_s=none', 'max_cycles_per_day=abc'):
                 with self.assertRaises(ValueError):
                     desktop.control('config', bad)
+
+
+class BrainAccountTests(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        self.cfg, self.c = make_env(tmp.name); self.addCleanup(self.c.close)
+
+    def test_brain_bound_follows_session_file(self):
+        with patch.object(desktop, '_cfg', return_value=self.cfg):
+            self.assertFalse(desktop.brain_bound())
+            private = Path(self.cfg.resolve(self.cfg.get('paths', 'private_dir')))
+            private.mkdir(parents=True, exist_ok=True)
+            (private / 'brain-session.cookies').write_text('', encoding='utf-8')
+            self.assertTrue(desktop.brain_bound())
+
+    def test_brain_login_spawns_interactive_terminal(self):
+        with patch.object(desktop.subprocess, 'Popen') as popen:
+            result = desktop.control('brain-login')
+        popen.assert_called_once()
+        flat = ' '.join(popen.call_args.args[0])
+        self.assertIn('brain', flat)
+        self.assertIn('login', flat)
+        self.assertIn('message', result)
+
+    def test_brain_login_without_terminal_raises(self):
+        with patch.object(desktop, 'spawn_login_terminal', return_value=False):
+            with self.assertRaisesRegex(RuntimeError, 'wq brain login'):
+                desktop.control('brain-login')
+
+    def test_brain_check_reports_success_and_failure(self):
+        with patch.object(desktop, 'wq', return_value={'http_status': 200, 'allow': 'POST'}):
+            self.assertIn('核验通过', desktop.control('brain-check')['message'])
+        with patch.object(desktop, 'wq', side_effect=RuntimeError('未登录或会话过期')):
+            message = desktop.control('brain-check')['message']
+            self.assertIn('核验未通过', message)
+            self.assertIn('会话过期', message)
+
+    def test_brain_register_opens_official_page(self):
+        with patch.object(desktop.webbrowser, 'open') as open_url:
+            result = desktop.control('brain-register')
+        open_url.assert_called_once_with(desktop.BRAIN_REGISTER_URL)
+        self.assertIn('注册页', result['message'])

@@ -43,3 +43,5 @@ exports/
 config/workflow*.json
 !config/workflow.example.json
 .wrangler/
+# PyInstaller 运行时生成的 spec（构建参数由 packaging/windows/build_exe.ps1 显式提供）
+WorldQuantTray.spec

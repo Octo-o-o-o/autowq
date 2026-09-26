@@ -5,11 +5,13 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import webbrowser
 
 ROOT = Path(os.getcwd())
 LABEL = 'com.worldquant.wq-runner'
 RUNNER_TASK = 'WorldQuantWQRunner'   # Windows 任务计划程序任务名
 MACOS = sys.platform == 'darwin'
+BRAIN_REGISTER_URL = 'https://platform.worldquantbrain.com/sign-up'
 from wq import desktop, routing, store
 from wq.config import Config
 
@@ -22,17 +24,27 @@ SETTINGS = {
 
 
 def command(argv, check=True):
-    result = subprocess.run(argv, cwd=ROOT, capture_output=True, text=True, timeout=25)
+    # errors='replace'：schtasks 等系统命令输出本机编码（中文 Windows 为 GBK），
+    # 在 UTF-8 模式 Python（PYTHONUTF8=1）下按 UTF-8 解码会崩读线程；这里只关心退出码。
+    result = subprocess.run(argv, cwd=ROOT, capture_output=True, text=True,
+                            errors='replace', timeout=25)
     if check and result.returncode:
         raise RuntimeError((result.stderr or result.stdout or f'退出码 {result.returncode}')[-2000:])
     return result
 
 
 def wq(*args):
-    env = os.environ.copy()
-    env['PYTHONPATH'] = str(ROOT / 'src')
-    result = subprocess.run([sys.executable, '-m', 'wq', *args], cwd=ROOT,
-                            env=env, capture_output=True, text=True, timeout=25)
+    if getattr(sys, 'frozen', False):
+        # PyInstaller 打包：sys.executable 是托盘 exe 自身，不能当解释器用 `-m wq`；
+        # 用 `--engine` 让 exe 重新进入自身分发到内置 CLI（见 scripts/desktop_tray.py）。
+        argv = [sys.executable, '--engine', *args]
+        env = None
+    else:
+        env = os.environ.copy()
+        env['PYTHONPATH'] = str(ROOT / 'src')
+        argv = [sys.executable, '-m', 'wq', *args]
+    result = subprocess.run(argv, cwd=ROOT, env=env, capture_output=True, text=True,
+                            errors='replace', timeout=25)
     if result.returncode:
         raise RuntimeError((result.stderr or result.stdout)[-2000:])
     return json.loads(result.stdout)
@@ -42,6 +54,57 @@ def loaded():
     if MACOS:
         return command(['/bin/launchctl', 'print', f'gui/{os.getuid()}/{LABEL}'], False).returncode == 0
     return command(['schtasks', '/Query', '/TN', RUNNER_TASK], False).returncode == 0
+
+
+def _engine_argv(*args):
+    """菜单栏/托盘进程再次进入 CLI 的命令行；frozen 用 exe --engine 自代理。"""
+    if getattr(sys, 'frozen', False):
+        return [sys.executable, '--engine', *args]
+    return [sys.executable, '-m', 'wq', *args]
+
+
+def _child_env():
+    env = os.environ.copy()
+    src = ROOT / 'src'
+    if (src / 'wq' / '__init__.py').exists():
+        env['PYTHONPATH'] = str(src) + (os.pathsep + env['PYTHONPATH'] if env.get('PYTHONPATH') else '')
+    return env
+
+
+def brain_bound():
+    """本地判定 BRAIN 会话文件是否存在；不代表平台权限，联网核验用 brain-check。"""
+    cfg = _cfg()
+    private = cfg.resolve(cfg.get('paths', 'private_dir', default='~/.worldquant-pilot'))
+    return (Path(private) / 'brain-session.cookies').exists()
+
+
+def spawn_login_terminal():
+    """在独立交互终端窗口运行 `wq brain login`：getpass 需要本人 tty，不能在菜单进程内代输。"""
+    argv = _engine_argv('brain', 'login')
+    env = _child_env()
+    if sys.platform == 'win32':
+        # cmd /k 保持窗口：登录完成后仍可查看结果；GUI 父进程下显式新开控制台。
+        subprocess.Popen(['cmd', '/k', subprocess.list2cmdline(argv)], cwd=ROOT, env=env,
+                         creationflags=getattr(subprocess, 'CREATE_NEW_CONSOLE', 0))
+        return True
+    if sys.platform == 'darwin':
+        import tempfile
+        import uuid
+        q = lambda s: "'" + str(s).replace("'", "'\\''") + "'"
+        script = (f"cd {q(ROOT)} && " + ' '.join(q(a) for a in argv) + "; echo; read -n1\n")
+        path = Path(tempfile.gettempdir()) / f'wq-brain-login-{uuid.uuid4().hex}.command'
+        path.write_text(script, encoding='utf-8')
+        path.chmod(0o755)
+        subprocess.Popen(['open', '-a', 'Terminal', str(path)])
+        return True
+    for terminal in (['x-terminal-emulator', '-e'], ['gnome-terminal', '--'],
+                     ['konsole', '-e'], ['xterm', '-e']):
+        try:
+            subprocess.Popen(terminal + [subprocess.list2cmdline(argv)], cwd=ROOT, env=env)
+            return True
+        except OSError:
+            continue
+    return False
 
 
 def ensure_runner():
@@ -199,6 +262,22 @@ def control(action, arg=None):
             return desktop.history(conn, cfg) if action == 'history' else desktop.submitted(conn)
         finally:
             conn.close()
+    if action == 'brain-login':
+        if not spawn_login_terminal():
+            raise RuntimeError('未找到可用终端；请在终端手动运行 wq brain login')
+        return {'message': '已在终端打开 BRAIN 登录：按提示输入邮箱与密码（密码不保存）。'
+                           '完成后回到菜单用「核验会话」确认。'}
+    if action == 'brain-check':
+        try:
+            result = wq('brain', 'check')
+            return {'message': f"BRAIN 会话核验通过（HTTP {result.get('http_status')}）；"
+                               '模拟选项已缓存到本地私有目录。'}
+        except RuntimeError as exc:
+            return {'message': 'BRAIN 会话核验未通过：' + str(exc)[:160] +
+                               '；可用「绑定 / 重新登录」后重试。'}
+    if action == 'brain-register':
+        webbrowser.open(BRAIN_REGISTER_URL)
+        return {'message': '已在浏览器打开 WorldQuant BRAIN 注册页。'}
     if action != 'status':
         raise ValueError('未知操作')
     state = wq('status')
@@ -223,6 +302,7 @@ def control(action, arg=None):
     finally:
         conn.close()
     return {'title': title, 'paused': state['paused'], 'scheduler': scheduler,
+            'brain_bound': brain_bound(),
             'message': desktop.localize_message(state.get('pause_reason') or auto['message']),
             'next_models': routes, 'next_at': desktop.beijing(auto.get('next_cycle_at'), '待当前任务完成／调度检查'),
             'cycles': f"累计 {auto['total_cycles']} / {auto.get('max_cycles_total') or '不限'} 轮",
