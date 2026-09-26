@@ -24,12 +24,11 @@
 """
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 import re
-import signal
 import subprocess
+import sys
 import time
 import threading
 from dataclasses import dataclass, field
@@ -71,10 +70,19 @@ class CallOutcome:
 
 def _acquire_lock(run_dir: str, name: str):
     util.ensure_dir(run_dir)
-    fd = os.open(os.path.join(run_dir, f"agent-{name}.lock"), os.O_CREAT | os.O_RDWR, 0o600)
+    path = os.path.join(run_dir, f"agent-{name}.lock")
+    fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
+        if sys.platform == 'win32':
+            import msvcrt
+            if os.path.getsize(path) == 0:
+                os.write(fd, b'1')
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (BlockingIOError, PermissionError):
         os.close(fd)
         return None
     return fd  # 调用方持有至结束；进程死亡内核自动释放
@@ -248,17 +256,11 @@ def run_agent(conn, cfg, spec: AgentSpec, prompt_file: str, purpose: str,
         try:
             proc.wait(timeout=spec.timeout_s)
         except subprocess.TimeoutExpired:
-            try:
-                os.killpg(proc.pid, signal.SIGTERM)
-            except (ProcessLookupError, PermissionError):
-                pass
+            util.kill_tree(proc.pid, force=False)
             try:
                 proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(proc.pid, signal.SIGKILL)
-                except (ProcessLookupError, PermissionError):
-                    pass
+                util.kill_tree(proc.pid, force=True)
                 proc.wait()
             store.finish_agent_call(conn, cid, "timeout", proc.returncode,
                                     detail=f"超过 {spec.timeout_s}s，已终止进程组")
@@ -272,11 +274,10 @@ def run_agent(conn, cfg, spec: AgentSpec, prompt_file: str, purpose: str,
                 drain.join(timeout=2)
                 if drain.is_alive():
                     # CLI 已退出但后代仍持有 stdout；清理本次调用的进程组。
-                    for sig in (signal.SIGTERM, signal.SIGKILL):
-                        try:
-                            os.killpg(proc.pid, sig)
-                        except ProcessLookupError:
-                            pass
+                    util.kill_tree(proc.pid, force=False)
+                    drain.join(timeout=1)
+                    if drain.is_alive():
+                        util.kill_tree(proc.pid, force=True)
                         drain.join(timeout=1)
                 proc.stdout.close()
             logf.close()

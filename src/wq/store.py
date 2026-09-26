@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import sys
 import uuid
 import datetime as dt
 
@@ -299,6 +300,16 @@ def live_agent_calls(conn, agent: str | None = None):
 
 
 def pid_alive(pid: int) -> bool:
+    if sys.platform == 'win32':
+        # Windows 没有 sig=0 探活（os.kill(pid,0) 是发 CTRL_C_EVENT）；用 tasklist 查询。
+        import re
+        import subprocess
+        try:
+            out = subprocess.run(['tasklist', '/FI', f'PID eq {pid}', '/NH'],
+                                 capture_output=True, text=True, timeout=10).stdout
+        except (OSError, subprocess.SubprocessError):
+            return True   # 查询失败按存活处理，宁可保守
+        return bool(re.search(rf'(?<!\d){pid}(?!\d)', out))
     # 先回收自己的 zombie 子进程（waitpid 对非子进程抛 ChildProcessError，忽略）
     try:
         wpid, _ = os.waitpid(pid, os.WNOHANG)

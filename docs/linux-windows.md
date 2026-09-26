@@ -1,6 +1,6 @@
 # Ubuntu/Debian 服务器与 Windows WSL2
 
-项目采用两种部署：macOS 使用既有 launchd + sandbox-exec；Ubuntu/Debian 使用 systemd 用户定时器 + Docker 模型容器。Windows 使用 WSL2 Ubuntu 的同一套 Linux 部署，**不是原生 Windows Python/PowerShell 运行版**。
+项目采用两种部署：macOS 使用既有 launchd + sandbox-exec；Ubuntu/Debian 使用 systemd 用户定时器 + Docker 模型容器。Windows 完整研究栈使用 WSL2 Ubuntu 的同一套 Linux 部署；仅托盘/调度控制层可跑原生 Windows（实验性，见下文），Provider 二进制不随项目发布。
 
 Grok、Devin 和 Cursor 官方文档均提供 Linux 安装途径。项目此版实际构建并启动了 Linux arm64 的 Grok 1.0.40、Devin 3000.10.31；Cursor 的 Docker 配置已提供，但本轮未构建验证。ZCode 的当前 macOS bundle 不能直接搬到 Linux，Linux 配置暂不包含 ZCode。各 Provider 仍需用户本人登录，并确认自己的订阅可用于该 CLI。
 
@@ -65,6 +65,20 @@ journalctl --user -u autowq.service -n 50
 Linux 服务器需要管理员为部署用户启用 linger，用户退出 SSH 后用户定时器才可持续运行：`sudo loginctl enable-linger USERNAME`。实际效果用注销重连与重启演练验证。定时器在上一 tick 退出60秒后再触发，不并发派发；空闲时不调用模型。
 
 暂停：`./wq pause --reason "暂停"`；停定时器：`systemctl --user disable --now autowq.timer`。不要把 systemd 的 inactive 当成故障：oneshot 两次触发之间正常为 inactive。
+
+## 原生 Windows 托盘与调度（实验性）
+
+除 WSL2 外，控制层现可直接跑在原生 Windows Python 上：托盘菜单（pystray）、调度（任务计划程序每分钟一次 `run-once`，等价 launchd StartInterval=60）与 macOS 共用同一套 `wq.desktop_control` 动作，功能一致（状态、轮次历史、已提交 Alpha、路由预设/渠道/间隔/上限/通知开关、系统通知）。
+
+```powershell
+python -m pip install pystray Pillow
+python scripts\setup_windows.py            # 注册调度任务与托盘登录自启；移除用 --remove
+```
+
+- 托盘脚本 `scripts/desktop_tray.py`；调度包装器与日志在 `var\run\`（runner.out.log / tray.log）。
+- 队列核心已做 Windows 可移植：单实例锁用 msvcrt，进程树终止用 taskkill，进程探活用 tasklist（`os.kill(pid,0)` 在 Windows 是发 CTRL_C_EVENT，不可用）。
+- **Provider 仍需自行解决**：profiles.json 里的 grok/devin/cursor 启动器是按部署生成的 macOS/Linux 路径；原生 Windows 需要本机可用的各 CLI 并自行配置 profiles.json，本项目不发布 Windows 版 Provider 二进制。要开箱即用的完整研究栈仍推荐 WSL2/Linux 路线。
+- 本轮没有 Windows 实机可用：已验证自动化测试、pystray 菜单构建/回调冒烟与参数生成，**未经 Windows 实机验收**；首次运行请在暂停状态下核对菜单与日志再启用自动研究。
 
 ## Windows 朋友
 

@@ -65,5 +65,22 @@ def ensure_dir(path: str, mode: int | None = None) -> str:
     return path
 
 
+def kill_tree(pid: int, force: bool) -> None:
+    """终止一次本地调用所在的进程组：POSIX 用 killpg，Windows 用 taskkill 结束进程树。"""
+    if sys.platform == 'win32':
+        import subprocess
+        try:
+            subprocess.run(['taskkill', '/PID', str(pid), '/T'] + (['/F'] if force else []),
+                           capture_output=True, timeout=15)
+        except (OSError, subprocess.SubprocessError):
+            pass   # 与 POSIX 分支一致：终止失败只记录现场，不中断调用方流程
+        return
+    import signal
+    try:
+        os.killpg(pid, signal.SIGKILL if force else signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
 def eprint(*args) -> None:
     print(*args, file=sys.stderr)

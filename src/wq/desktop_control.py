@@ -8,6 +8,8 @@ import sys
 
 ROOT = Path(os.getcwd())
 LABEL = 'com.worldquant.wq-runner'
+RUNNER_TASK = 'WorldQuantWQRunner'   # Windows 任务计划程序任务名
+MACOS = sys.platform == 'darwin'
 from wq import desktop, routing, store
 from wq.config import Config
 
@@ -37,7 +39,30 @@ def wq(*args):
 
 
 def loaded():
-    return command(['/bin/launchctl', 'print', f'gui/{os.getuid()}/{LABEL}'], False).returncode == 0
+    if MACOS:
+        return command(['/bin/launchctl', 'print', f'gui/{os.getuid()}/{LABEL}'], False).returncode == 0
+    return command(['schtasks', '/Query', '/TN', RUNNER_TASK], False).returncode == 0
+
+
+def ensure_runner():
+    """start 前置：macOS 加载 LaunchAgent；Windows 只认 setup_windows.py 注册的任务。"""
+    if MACOS:
+        plist = Path.home() / 'Library/LaunchAgents' / (LABEL + '.plist')
+        command(['/bin/launchctl', 'bootstrap', f'gui/{os.getuid()}', str(plist)])
+        return
+    raise RuntimeError('Windows 调度任务未注册；请先运行 python scripts/setup_windows.py')
+
+
+def kick_runner():
+    """立即触发一次 runner（run-next 请求后让调度器马上领取）。"""
+    if MACOS:
+        command(['/bin/launchctl', 'kickstart', f'gui/{os.getuid()}/{LABEL}'])
+    else:
+        command(['schtasks', '/Run', '/TN', RUNNER_TASK])
+
+
+def runner_log():
+    return ROOT / ('var/run/launchd.out.log' if MACOS else 'var/run/runner.out.log')
 
 
 def _cfg():
@@ -82,11 +107,10 @@ def control(action, arg=None):
         if wq('status')['unknown_pending']:
             raise RuntimeError('存在 UNKNOWN 待对账，请先运行 ./wq reconcile；没有强制恢复。')
         if not loaded():
-            plist = Path.home() / 'Library/LaunchAgents' / (LABEL + '.plist')
-            command(['/bin/launchctl', 'bootstrap', f'gui/{os.getuid()}', str(plist)])
+            ensure_runner()
         if action == 'run-next':
             wq('autopilot', 'run-next', '--json')
-            command(['/bin/launchctl', 'kickstart', f'gui/{os.getuid()}/{LABEL}'])
+            kick_runner()
             return {'message': '已请求运行下一轮；仍受队列、授权与额度限制，不改变自动运行开关'}
         wq('autopilot', 'start', '--json')
         wq('resume')

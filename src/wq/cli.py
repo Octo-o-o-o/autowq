@@ -4,7 +4,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import signal
 import sys
 import time
 
@@ -241,23 +240,17 @@ def cmd_pause(args) -> int:
         _out({"paused": True, "draining": True,
               "note": "不再领取新任务；当前已领取任务允许收尾，远端请求不会被取消"})
         return OK
-    # 在途任务清理：本地活调用整组 SIGTERM，2s 宽限后 SIGKILL；远端未知项留 UNKNOWN 待对账。
+    # 在途任务清理：本地活调用整组终止，2s 宽限后强杀；远端未知项留 UNKNOWN 待对账。
     live = [r for r in store.live_agent_calls(conn) if r["pid"] and store.pid_alive(r["pid"])]
     aborted = [{"call_id": r["call_id"], "pid": r["pid"]} for r in live]
     for r in live:
-        try:
-            os.killpg(r["pid"], signal.SIGTERM)
-        except (ProcessLookupError, PermissionError):
-            pass
+        util.kill_tree(r["pid"], force=False)
     deadline = time.time() + 2
     for r in live:
         while store.pid_alive(r["pid"]) and time.time() < deadline:
             time.sleep(0.05)
         if store.pid_alive(r["pid"]):
-            try:
-                os.killpg(r["pid"], signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
-                pass
+            util.kill_tree(r["pid"], force=True)
         store.finish_agent_call(conn, r["call_id"], "aborted", None, detail="pause 终止")
     conn.commit()
     unk = store.unknown_items(conn)

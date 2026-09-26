@@ -186,3 +186,5 @@ UNKNOWN 对账先查官方历史，并保留核实依据。以下命令中的 ID
 开机并登录后自动显示图标和加载调度；休眠、注销期间不运行。手动暂停/退出状态跨重启保留，需要点“开始”恢复。退出后可从 `~/Applications/WorldQuant.app` 再次打开；单实例文件锁防止多个图标。原命令 `wq pause` 仍会终止本地模型，温和暂停用 `wq pause --graceful`。
 
 取消图标自启：`launchctl bootout gui/$(id -u)/com.worldquant.wq-menu`，再移除 `~/Library/LaunchAgents/com.worldquant.wq-menu.plist`。这不取消研究调度；若要停止研究，先执行 `./wq pause --graceful`。关闭 Codex 不影响已安装的应用和调度器。
+
+同一套菜单功能在原生 Windows 上由 `scripts/desktop_tray.py`（pystray 托盘）提供，安装与调度见 [跨平台部署](linux-windows.md) 的原生 Windows 章节。

@@ -83,3 +83,13 @@ Added all-closed-cycle diagnostic snapshots, manual/idle periodic review, resear
 - 研究质量仍有大量收益效率、时间分段和年度稳定性缺口；本次不放宽研究质量门槛、不改自动提交权限，也不把账本接收状态当作收益。
 
 最终本机验证：378项 unittest，376通过、2项可选Docker集成跳过，退出0；wheel构建与 `git diff --check` 退出0。原生应用构建、签名与安装退出0；实际菜单进程计数为1，暂停/恢复后 paused=false、调度已加载、UNKNOWN=0。最终检查时原队列全历史复盘模型任务仍在运行，其独立复核及后续研究效果尚未验收。测试证据：`var/run/desktop-final-20260926.log` 和对应summary；原生构建证据：`var/run/desktop-verify-20260926.log`。本轮未commit、未push。
+
+## 原生 Windows 托盘与队列可移植 — 2026-09-26
+
+本轮新增原生 Windows 托盘支持并移除队列核心的 POSIX 硬依赖；macOS 行为不变，未做 Windows 实机验收。
+
+- `scripts/desktop_tray.py`（pystray）复用 `wq.desktop_control` 动作，与 macOS 菜单同功能：状态/轮次历史（最近30轮，★标已提交）/已提交 Alpha/设置（系统通知、路由预设、渠道、运行间隔、每日/累计上限）/控制与系统通知轮询；单实例锁、15秒状态与60秒数据+通知刷新，控制动作后立即回读设置。
+- `scripts/setup_windows.py` + `wq.windows_setup`：任务计划程序每分钟一次 `run-once`（pythonw 包装器无控制台，日志在 var/run）与 HKCU Run 键托盘自启；`--remove` 移除。Provider 二进制仍不随项目发布，原生 Windows 需自行配置 profiles.json；完整研究栈仍推荐 WSL2/Linux。
+- `desktop_control` 调度操作按平台分流（launchctl vs schtasks）；Windows 未注册任务时 start 明确报错要求先跑 setup。
+- 队列核心可移植化：顶层 `import fcntl` 改平台分支（msvcrt.locking）；三处 `os.killpg` 统一为 `util.kill_tree`（Windows taskkill /T，异常不再中断 pause/超时流程）；`store.pid_alive` 在 Windows 用 tasklist（`os.kill(pid,0)` 在 Windows 是发 CTRL_C_EVENT，不能用于探活）。
+- 验证：全量 pytest 489 通过、2 项可选 Docker 跳过（test_onboarding 1 项失败为既有环境问题，已在 HEAD 工作树复现同样失败）；pystray 菜单构建/模拟点击/勾选求值在临时 venv 冒烟通过；macOS 控制桥实测 status/settings 正常、菜单栏应用持续运行。无 Windows 实机：schtasks/注册表/通知实测未做，文档已标注实验性与首次运行建议。
