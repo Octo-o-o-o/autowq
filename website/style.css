@@ -241,29 +241,15 @@ h2 .no { color: var(--amber); margin-right: 12px; font-size: 15px; vertical-alig
 .chart-head .lg i { width: 10px; height: 10px; border-radius: 3px; flex: none; }
 .chart-head .lg.acc i { background: linear-gradient(180deg, var(--amber-hot), var(--amber)); box-shadow: 0 0 8px rgba(255, 176, 0, 0.45); }
 .chart-head .lg.acc { color: var(--amber-hot); }
-.chart-head .lg.plain i { background: rgba(255, 176, 0, 0.14); border: 1px solid rgba(255, 176, 0, 0.28); }
 .chart-head .note { margin-left: auto; color: #5c6355; font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; }
 
 .bars {
-  display: grid; grid-template-columns: repeat(7, 1fr); grid-template-rows: auto 1fr;
-  gap: 12px; align-items: end; border-bottom: 1px solid var(--line); padding: 0 2px;
+  display: grid; grid-template-columns: repeat(4, 96px); justify-content: center;
+  gap: clamp(16px, 4vw, 40px); align-items: end;
+  border-bottom: 1px solid var(--line); padding: 0 2px;
 }
-.bars .streak {
-  grid-row: 1; grid-column: 3 / 7; justify-self: stretch; align-self: end;
-  margin: 0 6px 12px; padding: 6px 8px 8px; position: relative;
-  border: 1px solid rgba(255, 176, 0, 0.42); border-bottom: none;
-  border-radius: 8px 8px 0 0; background: var(--amber-soft);
-  color: var(--amber-hot); text-align: center;
-  font-family: ui-monospace, Menlo, monospace; font-size: 12px; letter-spacing: 0.06em;
-}
-.bars .streak::before, .bars .streak::after {
-  content: ""; position: absolute; top: 100%; width: 1px; height: 10px;
-  background: rgba(255, 176, 0, 0.42);
-}
-.bars .streak::before { left: 0; }
-.bars .streak::after { right: 0; }
 .bars .bar {
-  grid-row: 2; height: 230px;
+  height: 230px;
   display: flex; flex-direction: column; justify-content: flex-end;
   background: repeating-linear-gradient(to top, transparent 0 43px, rgba(255, 176, 0, 0.07) 43px 44px);
 }
@@ -280,22 +266,20 @@ h2 .no { color: var(--amber); margin-right: 12px; font-size: 15px; vertical-alig
   border-top: none; box-shadow: 0 0 20px rgba(255, 176, 0, 0.32);
 }
 .bars .bar em {
-  font-style: normal; font-family: ui-monospace, Menlo, monospace; font-size: 11px;
-  color: var(--dim); text-align: center; margin-top: 8px;
+  font-style: normal; font-family: ui-monospace, Menlo, monospace; font-size: 11.5px;
+  color: var(--amber-hot); text-align: center; margin-top: 8px; white-space: nowrap;
 }
-.bars .bar.accepted em { color: var(--amber-hot); }
 .bars .bar b {
-  font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--paper);
+  font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--paper);
   text-align: center; display: block; margin-bottom: 6px; font-weight: 600;
 }
 @keyframes grow { to { transform: scaleY(1); } }
 @media (max-width: 640px) {
   .chart { padding: 16px 14px 12px; }
-  .bars { gap: 6px; }
+  .bars { grid-template-columns: repeat(4, 1fr); gap: 8px; }
   .bars .bar { height: 200px; }
-  .bars .bar b { font-size: 10px; }
+  .bars .bar b { font-size: 10.5px; }
   .bars .bar em { font-size: 9.5px; margin-top: 6px; }
-  .bars .streak { font-size: 10.5px; padding: 5px 4px 7px; margin: 0 2px 10px; letter-spacing: 0.02em; }
 }
 .fineprint { color: #5c6355; font-size: 12.5px; margin-top: 14px; }
 
