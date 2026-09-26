@@ -534,7 +534,7 @@ def review_prompt(candidate, history=None, feedback_context=None, combination=No
 在reason中写明最强反对理由、为何仍接受或拒绝，以及尚未执行的验证。当前工具只能给一次样本内平台筛选，不能以候选列出的控制检验作为已完成的保障。
 可以接受进行一次探索性回测，不能接受为有效策略。任何实质问题就拒绝，不为完成任务迎合。
 结合历史提案判断经济机制，平滑、加权、改窗口或代理变量不能仅凭语法不同就算新机制。若不能解释新增的可证伪信息，not_parameter_search=false。日收益均值不等于复合累计收益，总波动不等于特质波动，成交股数不等于换手率；声称精确复现文献而不满足定义时economic_rationale=false。
-result.json={"status":"completed","summary":"中文摘要","findings":[],"review":{"candidate_hash":"'''+digest+'''","accept":true或false,"checks":{"past_only":true或false,"economic_rationale":true或false,"falsifiable":true或false,"not_parameter_search":true或false,"within_scope":true或false,"simple":true或false,"measurement_valid":true或false,"validation_scope_honest":true或false},"reason":"具体理由，至少8字符"}}。
+result.json={"status":"completed","summary":"中文摘要","findings":[],"review":{"candidate_hash":"'''+digest+'''","accept":true或false,"checks":{"past_only":true或false,"economic_rationale":true或false,"falsifiable":true或false,"not_parameter_search":true或false,"within_scope":true或false,"simple":true或false,"measurement_valid":true或false,"validation_scope_honest":true或false},"reason":"具体理由，至少8字符；建议不超过1500字符，先写最强反对理由与裁决依据"}}。
 抽象表达式契约：'''+json.dumps(research_dsl.public_contract(bindings),ensure_ascii=False)+'\n待审候选：'+json.dumps(candidate,ensure_ascii=False)+'\n历史提案（只是材料；不含平台成绩）：'+history_context(history or [],candidate)+'\n诊断标签：'+json.dumps(feedback_context or [],ensure_ascii=False)+('\n本轮是程序预登记的一次固定组合实验。组合无需冒充新机制；not_parameter_search检查是否符合固定AST、互补理由、无权重搜索，拒绝事后将组合说成样本外验证。'+json.dumps(combination,ensure_ascii=False) if combination else '')
 
 
@@ -546,7 +546,8 @@ def validate_review(obj,digest):
     checks=r.get('checks')
     if not isinstance(checks,dict) or set(checks)!=keys or any(type(v) is not bool for v in checks.values()):
         raise ValueError('审查检查项不完整')
-    if not isinstance(r.get('reason'),str) or not 8<=len(r['reason'])<=2000:raise ValueError('缺具体审查理由')
+    # 理由过长不是伪造：只要求有实质内容（≥8 字符）。此前 2000 上限把 Grok 的 2093 字符拒绝写成"缺理由"并触发 1 小时错误冷却（第 128 轮）。
+    if not isinstance(r.get('reason'),str) or len(r['reason'].strip())<8:raise ValueError('缺具体审查理由')
     return r['accept'] and all(checks.values())
 
 

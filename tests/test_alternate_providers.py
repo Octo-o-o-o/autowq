@@ -71,3 +71,13 @@ class AlternateCycleTests(AutopilotTests):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ReviewReasonLengthTests(unittest.TestCase):
+    def test_long_reason_is_a_valid_rejection_not_an_input_error(self):
+        checks = {k: True for k in autopilot.REVIEW_CHECKS}; checks['measurement_valid'] = False
+        obj = {'review': {'candidate_hash': 'd', 'accept': False, 'checks': checks, 'reason': '理' * 2093}}
+        self.assertFalse(autopilot.validate_review(obj, 'd'))
+        obj['review']['reason'] = '   短  '
+        with self.assertRaisesRegex(ValueError, '缺具体审查理由'):
+            autopilot.validate_review(obj, 'd')
