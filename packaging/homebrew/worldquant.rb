@@ -16,7 +16,7 @@ cask "worldquant" do
   desc "Menu-bar companion for local WorldQuant BRAIN research orchestration"
   homepage "https://github.com/Octo-o-o-o/autowq"
 
-  depends_on macos: ">= :monterey"
+  depends_on macos: :monterey
 
   app "WorldQuant.app"
 
