@@ -11,6 +11,9 @@
   --line: #252b21;
   --grid: rgba(255, 176, 0, 0.045);
   --good: #7dd87d;
+  /* 单一容器基准：顶栏、正文、走马灯、页脚全部对齐这一组变量 */
+  --container: 1152px;
+  --gutter: clamp(20px, 4vw, 44px);
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html { scroll-behavior: smooth; }
@@ -19,7 +22,6 @@ body {
   color: var(--paper);
   font: 15px/1.75 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   -webkit-font-smoothing: antialiased;
-  overflow-x: hidden;
 }
 body::before {
   /* 示波器网格底纹 */
@@ -41,7 +43,7 @@ nav {
   border-bottom: 1px solid var(--line);
 }
 nav .inner {
-  max-width: 1040px; margin: 0 auto; padding: 12px 24px;
+  max-width: var(--container); margin-inline: auto; padding: 12px var(--gutter);
   display: flex; align-items: center; gap: 22px;
 }
 nav .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 17px; color: var(--paper); letter-spacing: 0.02em; }
@@ -53,9 +55,9 @@ nav .links a:hover { color: var(--amber); }
 nav .lang { border: 1px solid var(--line); border-radius: 6px; padding: 3px 10px; color: var(--dim); }
 nav .lang:hover { color: var(--amber); border-color: var(--amber); }
 
-.wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; position: relative; z-index: 1; }
+.wrap { max-width: var(--container); margin-inline: auto; padding-inline: var(--gutter); position: relative; z-index: 1; }
 section { padding: 84px 0 12px; }
-section:target { scroll-margin-top: 72px; }
+section[id] { scroll-margin-top: 72px; }
 
 /* ── Hero ── */
 .hero { padding: 72px 0 28px; display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 40px; align-items: center; }
@@ -91,24 +93,29 @@ section:target { scroll-margin-top: 72px; }
 .loopmark .trace.d2 { animation-delay: 0.9s; }
 .loopmark .halo {
   fill: none; stroke: var(--amber); stroke-width: 2; opacity: 0.25;
-  stroke-dasharray: 6 10; animation: spin 40s linear infinite; transform-origin: center;
+  stroke-dasharray: 6 10;
+  /* 用 dashoffset 爬行代替 rotate：虚线环绕效果相同，且不产生 transform 外溢 */
+  animation: crawl 40s linear infinite;
 }
 @keyframes draw { to { stroke-dashoffset: 0; } }
-@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes crawl { to { stroke-dashoffset: -592; } } /* 592 = 37 × (6+10)，恰好整圈无缝 */
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
 
-/* ── 数据走马灯（ contained LED 读数条，超宽屏不再撑满） ── */
+/* ── 数据走马灯（与正文同宽的 LED 读数条；双份内容 + 半程平移 = 无缝循环） ── */
 .tape {
   border: 1px solid var(--line); border-radius: 6px;
-  background: var(--panel); overflow: hidden; white-space: nowrap; position: relative; z-index: 1;
+  background: var(--panel); overflow: hidden; position: relative; z-index: 1;
 }
+.tape .track {
+  display: flex; width: max-content;
+  animation: tape 52s linear infinite;
+}
+.tape:hover .track { animation-play-state: paused; }
 .tape .run {
-  display: inline-block; padding: 12px 0;
+  display: flex; align-items: center; flex-shrink: 0; padding: 12px 0;
   font-family: ui-monospace, Menlo, monospace; font-size: 13px;
-  animation: tape 46s linear infinite;
 }
-.tape:hover .run { animation-play-state: paused; }
-.tape .run span { color: var(--dim); margin: 0 26px; }
+.tape .run span { color: var(--dim); margin: 0 26px; white-space: nowrap; }
 .tape .run b { color: var(--paper); font-weight: 600; }
 .tape .run .star { color: var(--amber); }
 @keyframes tape { to { transform: translateX(-50%); } }
@@ -135,6 +142,9 @@ h2 .no { color: var(--amber); margin-right: 12px; font-size: 15px; vertical-alig
 @media (max-width: 900px) {
   .pillars { grid-template-columns: repeat(2, 1fr); }
   .pillar { border-top: 1px solid var(--line); }
+  .pillar:nth-child(-n+2) { border-top: none; }   /* 首行不与容器边框叠线 */
+  .pillar:nth-child(odd) { border-left: none; }   /* 第一列不与容器左边框叠线 */
+  .pillar:last-child { grid-column: 1 / -1; }     /* 第 7 项独占一行，避免留空洞 */
 }
 
 /* ── 三原则 ── */
@@ -235,7 +245,14 @@ h2 .no { color: var(--amber); margin-right: 12px; font-size: 15px; vertical-alig
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
 th, td { text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--line); }
 th { color: var(--dim); font-weight: 600; font-size: 12px; font-family: ui-monospace, Menlo, monospace; letter-spacing: 0.08em; }
-td code { background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; padding: 1px 7px; font-size: 12.5px; color: var(--amber-hot); }
+td code {
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px;
+  padding: 1px 7px; font-size: 12.5px; color: var(--amber-hot);
+  white-space: normal; overflow-wrap: anywhere;   /* 长命令在窄屏折行，不再撑出横向滚动 */
+}
+@media (max-width: 640px) {
+  table { display: block; overflow-x: auto; }      /* 兜底：极端字号下表格自身滚动，不影响页面 */
+}
 
 /* ── FAQ ── */
 details { border: 1px solid var(--line); background: var(--panel); border-radius: 4px; padding: 2px 18px; margin-bottom: 10px; }
@@ -245,13 +262,28 @@ details[open] summary::before { content: "–"; }
 details p { color: var(--dim); font-size: 14px; padding: 0 0 15px 20px; }
 
 footer {
-  margin-top: 90px; border-top: 1px solid var(--line); padding: 34px 26px;
-  color: #5c6355; font-size: 12.5px; font-family: ui-monospace, Menlo, monospace;
-  display: flex; gap: 20px; flex-wrap: wrap; justify-content: space-between;
+  margin-top: 90px; border-top: 1px solid var(--line);
   position: relative; z-index: 1;
+}
+footer .inner {
+  max-width: var(--container); margin-inline: auto; padding: 34px var(--gutter) 44px;
+  color: #5c6355; font-size: 12.5px; font-family: ui-monospace, Menlo, monospace;
+  display: flex; gap: 12px 24px; flex-wrap: wrap; justify-content: space-between; align-items: center;
 }
 footer a { color: var(--dim); }
 footer a:hover { color: var(--amber); }
+
+@media (max-width: 640px) {
+  nav .inner { gap: 12px; }
+  nav .links { gap: 12px; }
+  footer .inner { justify-content: center; text-align: center; }
+}
+
+/* 无障碍：用户偏好减少动效时，仅停掉无限循环的装饰动画 */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .tape .track, .loopmark .halo, .kicker::before, .osbar .dot { animation: none; }
+}
 
 /* 进入视口时的上浮 */
 .rise { opacity: 0; transform: translateY(18px); transition: opacity 0.7s ease, transform 0.7s ease; }
