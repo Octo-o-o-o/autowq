@@ -1,0 +1,173 @@
+{
+  "default": "steady",
+  "providers": {
+    "grok": {
+      "label": "Grok Build",
+      "argv": [
+        "{launcher_dir}/grok",
+        "--cwd",
+        "{cwd}",
+        "--no-subagents",
+        "--max-turns",
+        "12",
+        "--output-format",
+        "json",
+        "--verbatim",
+        "--always-approve",
+        "--prompt-file",
+        "{prompt}"
+      ],
+      "timeout_s": 900,
+      "terminal_protocol": "grok"
+    },
+    "devin": {
+      "label": "Devin",
+      "argv": [
+        "{launcher_dir}/devin",
+        "-p",
+        "--prompt-file",
+        "{prompt}",
+        "--permission-mode",
+        "dangerous",
+        "--respect-workspace-trust",
+        "false"
+      ],
+      "timeout_s": 1800
+    },
+    "cursor": {
+      "label": "Cursor / Grok 4.6",
+      "argv": [
+        "{launcher_dir}/cursor",
+        "{cwd}",
+        "{prompt}",
+        "{model}"
+      ],
+      "model": "cursor-grok-4.6-high",
+      "timeout_s": 900,
+      "terminal_protocol": "cursor"
+    },
+    "zcode": {
+      "label": "ZCode / Z.ai v1 Lite",
+      "argv": [
+        "{launcher_dir}/zcode",
+        "{cwd}",
+        "{prompt}",
+        "{model}"
+      ],
+      "model": "ZCode current configured model",
+      "timeout_s": 1200
+    }
+  },
+  "presets": {
+    "steady": {
+      "description": "默认稳定：Grok 做研究，Devin 做工程和审查，其他渠道备用",
+      "routes": {
+        "research": [
+          "grok",
+          "cursor",
+          "zcode",
+          "devin"
+        ],
+        "engineering": [
+          "devin",
+          "zcode",
+          "cursor",
+          "grok"
+        ],
+        "review": [
+          "devin",
+          "zcode",
+          "cursor",
+          "grok"
+        ]
+      },
+      "retries": 3,
+      "retry_delays_s": [
+        30,
+        60,
+        120
+      ]
+    },
+    "cursor-rich": {
+      "description": "Cursor 额度充足：优先 Cursor，审查先用不同模型渠道",
+      "routes": {
+        "research": [
+          "cursor",
+          "grok",
+          "zcode",
+          "devin"
+        ],
+        "engineering": [
+          "cursor",
+          "devin",
+          "zcode",
+          "grok"
+        ],
+        "review": [
+          "zcode",
+          "devin",
+          "cursor",
+          "grok"
+        ]
+      },
+      "retries": 3,
+      "retry_delays_s": [
+        30,
+        60,
+        120
+      ]
+    },
+    "zcode-rich": {
+      "description": "Z.ai 额度充足：ZCode 优先工程与审查，Grok 优先研究",
+      "routes": {
+        "research": [
+          "grok",
+          "zcode",
+          "cursor",
+          "devin"
+        ],
+        "engineering": [
+          "zcode",
+          "devin",
+          "cursor",
+          "grok"
+        ],
+        "review": [
+          "zcode",
+          "devin",
+          "cursor",
+          "grok"
+        ]
+      },
+      "retries": 3,
+      "retry_delays_s": [
+        30,
+        60,
+        120
+      ]
+    },
+    "core-only": {
+      "description": "保留 Cursor / ZCode 额度：只使用 Grok Build 和 Devin",
+      "routes": {
+        "research": [
+          "grok",
+          "devin"
+        ],
+        "engineering": [
+          "devin",
+          "grok"
+        ],
+        "review": [
+          "devin",
+          "grok"
+        ]
+      },
+      "retries": 3,
+      "retry_delays_s": [
+        30,
+        60,
+        120
+      ]
+    }
+  }
+}

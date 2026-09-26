@@ -6,9 +6,26 @@ A local WorldQuant BRAIN research workflow: propose a hypothesis → review thro
 
 **A research tool, not a promise of income.** Passing a screen, an accepted submission, consultant eligibility and actual payment are separate states. Research automation does not automatically authorize submissions.
 
-## First run
+## Install
 
-Requirements: Python 3.11+, Git, and your own CLI subscription accounts or API keys. Runtime dependencies are Python standard library only. macOS is supported; Linux and Windows WSL2 use Docker-isolated providers. Native Windows is not supported.
+Requirements: Python 3.11+ and your own CLI subscription accounts or API keys. Runtime dependencies are Python standard library only. macOS is supported; Linux and Windows WSL2 use Docker-isolated providers. Native Windows is not supported.
+
+```sh
+# Option 1: pipx (recommended; see https://pipx.pypa.io)
+pipx install wq-pilot
+mkdir ~/autowq && cd ~/autowq   # any directory becomes your workspace
+wq onboard
+```
+
+```sh
+# Option 2: Homebrew (macOS)
+brew tap Octo-o-o-o/autowq && brew install wq-pilot
+brew install --cask Octo-o-o-o/autowq/worldquant   # optional menu-bar app
+```
+
+Option 3: macOS menu-bar app. Download `WorldQuant-<version>.dmg` from [Releases](https://github.com/Octo-o-o-o/autowq/releases), drag it into Applications and double-click; the first-launch wizard picks a workspace, prepares the runtime and starts onboarding. If the build is not notarized, install via `brew install --cask` (which removes quarantine) or right-click Open once.
+
+Option 4: source checkout (development):
 
 ```sh
 git clone https://github.com/Octo-o-o-o/autowq.git
@@ -90,6 +107,6 @@ PYTHONPATH=src python3 -m unittest discover -s tests
 
 Configuration, cookies, real Alphas, databases, model outputs, logs and personal research stay outside Git. Fixtures are synthetic and do not establish real research performance. A source backup is not a runtime-state backup.
 
-This is not an official WorldQuant product. No open-source LICENSE has been selected yet; publishing source on GitHub does not itself grant an open-source license. Repository visibility and an eventual open-source release are separate maintainer decisions.
+This is not an official WorldQuant product. The project is open source under the Apache License 2.0 (see LICENSE and NOTICE.md); the maintainer reviews the full Git history and third-party content before publishing.
 
 All-cycle review supports manual and automatic runs: `./wq auto-research report` and `./wq auto-research run`. See [Auto Research](docs/auto-research.md) for cadence and independent review. Accepted fixed guidance enters future prompts without changing budgets or quality gates.

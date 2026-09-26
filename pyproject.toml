@@ -1,9 +1,23 @@
 [project]
 name = "wq-pilot"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local research orchestration with gated providers and recoverable simulations"
+readme = "README.en.md"
+license = {text = "Apache-2.0"}
 requires-python = ">=3.11"
 dependencies = []
+classifiers = [
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+]
+
+[project.urls]
+Homepage = "https://github.com/Octo-o-o-o/autowq"
+Repository = "https://github.com/Octo-o-o-o/autowq"
 
 [project.scripts]
 wq = "wq.cli:main"
@@ -14,4 +28,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
-packages = ["wq", "wq.adapters", "wq.wrappers"]
+packages = ["wq", "wq.adapters", "wq.wrappers", "wq.assets"]
+
+[tool.setuptools.package-data]
+"wq.assets" = ["*.json", "*.py"]

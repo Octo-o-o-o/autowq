@@ -1,0 +1,122 @@
+{
+  "account_alias": "default",
+  "paths": {
+    "db": "var/wq.db",
+    "run_dir": "var/run",
+    "private_dir": "~/.worldquant-pilot"
+  },
+  "limits": {
+    "sims_per_week": 24,
+    "sim_concurrency": 1,
+    "grok_calls_per_week": 3,
+    "devin_tickets_per_week": 1,
+    "max_repair_attempts_per_incident": 2,
+    "families_max": 3,
+    "configs_per_family_max": 4,
+    "rate_limit_max_wait_s": 900
+  },
+  "budgets": {
+    "simulation": {
+      "enabled": false,
+      "remaining": null,
+      "unit": "unknown"
+    },
+    "grok": {
+      "enabled": false,
+      "remaining": null,
+      "unit": "unknown"
+    },
+    "devin": {
+      "enabled": false,
+      "remaining": null,
+      "unit": "unknown"
+    },
+    "cursor": {
+      "enabled": false,
+      "remaining": null,
+      "unit": "calls"
+    },
+    "zcode": {
+      "enabled": false,
+      "remaining": null,
+      "unit": "calls"
+    }
+  },
+  "adapters": {
+    "brain": {
+      "mode": "manual",
+      "endpoint": null,
+      "verified": false
+    }
+  },
+  "models": {
+    "grok": {
+      "bin": "~/.grok/bin/grok",
+      "enabled": false,
+      "timeout_s": 900,
+      "workdir": null,
+      "extra_args": []
+    },
+    "devin": {
+      "bin": "~/.local/bin/devin",
+      "enabled": false,
+      "timeout_s": 1800,
+      "workdir": null,
+      "extra_args": []
+    },
+    "cursor": {
+      "enabled": false,
+      "timeout_s": 900
+    },
+    "zcode": {
+      "enabled": false,
+      "timeout_s": 900
+    }
+  },
+  "debug_authorization": {
+    "enabled": false,
+    "starts_at": null,
+    "expires_at": null,
+    "agents": [],
+    "unlimited": false,
+    "evidence": ""
+  },
+  "brain_api": {
+    "enabled": false,
+    "authorized_until": null,
+    "max_posts_per_24h": 4,
+    "min_post_interval_s": 60,
+    "auto_login": false,
+    "auto_login_email": null,
+    "keychain_service": "com.worldquant.wq.brain"
+  },
+  "routing": {
+    "profiles_file": "config/profiles.json",
+    "work_root": "{runtime}/jobs",
+    "authorized_until": null
+  },
+  "autopilot": {
+    "enabled": false,
+    "policy_file": "config/autopilot-policy.json",
+    "interval_s": 3600,
+    "error_cooldown_s": 3600,
+    "max_cycles_per_day": 4,
+    "max_simulations_per_week": 24,
+    "max_cycles_total": null,
+    "sign_flip_rescue_sharpe": -0.8
+  },
+  "brain_submission": {
+    "enabled": false,
+    "authorized_until": null
+  },
+  "research_feedback": {
+    "enabled": false,
+    "max_combination_plans": 2,
+    "segment_rules": {
+      "min_sharpe": 1.25,
+      "min_fitness": 1.0,
+      "min_years": 3,
+      "max_negative_years": 0
+    }
+  }
+}

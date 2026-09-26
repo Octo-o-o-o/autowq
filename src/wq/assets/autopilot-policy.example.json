@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "scope": "exploratory_only_no_submission",
+  "verified_at": null,
+  "valid_until": null,
+  "source": "REPLACE_WITH_VERIFIED_SOURCE",
+  "bindings": {
+    "daily_return": {
+      "expression": "",
+      "fields": [],
+      "source": "",
+      "description": "Model-visible description: what the role measures and what it does NOT mean. Never put platform field IDs here.",
+      "cluster": "pv"
+    },
+    "activity_rank": {
+      "expression": "",
+      "fields": [],
+      "source": ""
+    },
+    "cashflow_strength": {
+      "expression": "",
+      "fields": [],
+      "source": ""
+    },
+    "market_cap_rank": {
+      "expression": "",
+      "fields": [],
+      "source": ""
+    },
+    "price_vwap_gap": {
+      "expression": "",
+      "fields": [],
+      "source": ""
+    }
+  },
+  "evidence_files": [],
+  "settings": {},
+  "limits": "Only exploratory screens. No automatic submission. Register more roles with `wq policy add-role`; setting_variants are preregistered per cycle (max 2, decay/neutralization/truncation only).",
+  "setting_variants": [
+    {
+      "label": "decay8",
+      "decay": 8
+    },
+    {
+      "label": "subindustry",
+      "neutralization": "SUBINDUSTRY"
+    }
+  ]
+}

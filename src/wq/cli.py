@@ -236,6 +236,11 @@ def cmd_pause(args) -> int:
     store.set_flag(conn, "paused", "1")
     store.set_flag(conn, "pause_origin", "manual")
     store.set_flag(conn, "pause_reason", args.reason or "manual pause")
+    conn.commit()
+    if getattr(args, "graceful", False):
+        _out({"paused": True, "draining": True,
+              "note": "不再领取新任务；当前已领取任务允许收尾，远端请求不会被取消"})
+        return OK
     # 在途任务清理：本地活调用整组 SIGTERM，2s 宽限后 SIGKILL；远端未知项留 UNKNOWN 待对账。
     live = [r for r in store.live_agent_calls(conn) if r["pid"] and store.pid_alive(r["pid"])]
     aborted = [{"call_id": r["call_id"], "pid": r["pid"]} for r in live]
@@ -444,6 +449,12 @@ def cmd_brain(args):
             util.write_json(os.path.join(cfg.private_dir,'brain-simulation-options.json'),data)
             _out({'http_status':code,'allow':headers.get('allow'),'metadata_saved_locally':True})
             return OK
+        if args.action == 'account':
+            from .brain_jobs import get_with_reauth
+            from . import account
+            snapshot = account.snapshot(get_with_reauth, BrainClient(cfg.private_dir), cfg)
+            _out(account.summary(snapshot))
+            return OK
         if args.action in ('submit-check', 'submit', 'reconcile-submit'):
             from . import brain_submission
             if args.action == 'submit-check':
@@ -550,6 +561,17 @@ def cmd_autopilot(args):
                 for pair in result['pairs']:
                     if pair['worth_combination_review']:
                         print('互补候选 '+ ' + '.join(pair['parents'])+f"：日PnL相关性 {pair['value']:.3f}，共同观测 {pair['observations']}；仍须预登记与模型审查")
+                if result.get('submission_order'):
+                    print('提交排序建议（先提对已提交池相关最低者；官方 /check 仍是唯一放行条件）：')
+                    for i,item in enumerate(result['submission_order'],1):
+                        corr='未知' if item['local_corr_max'] is None else f"{item['local_corr_max']:.2f}"
+                        print(f"  {i}. {item['alpha_id']}：本地相关 {corr}；{item['correlation_state']}；依据 {item['basis']}")
+                shadow=result.get('shadow') or {}
+                if shadow.get('dead_zones'):
+                    print('影子死区（角色集合 ≥3 次真实结果全部无信号；不自动拒绝）：'+'；'.join('+'.join(g['roles'])+f"×{g['observations']}" for g in shadow['dead_zones']))
+                early=shadow.get('early_stop') or {}
+                if early.get('checkpoint'):
+                    print(f"早停检查点：最近5个基础轮 {early['recent_cycles']} 全部失败，主诊断“{early['dominant_diagnosis']}”出现 {early['dominant_count']} 次；请人工复核，不自动暂停数据簇")
         return OK
     if args.action == 'refine-check':
         from .refinement import report
@@ -564,9 +586,24 @@ def cmd_autopilot(args):
                 print(f"Alpha {item['alpha_id']}（轮次 {item['cycle_id'] or '直接实验'}）：{decision}；"+'；'.join(item['blockers']+item['pending']))
             if not result['candidates']: print('暂无真实自动研究回测。')
         return OK
+    if args.action == 'run-next':
+        lock = agent_runner._acquire_lock(cfg.run_dir, 'runner')
+        if lock is None:
+            raise ValueError('调度器正在处理任务；请等待当前任务完成后再请求下一轮')
+        try:
+            conn.execute('BEGIN IMMEDIATE')
+            autopilot.request_run_next(conn, cfg)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            os.close(lock)
     if args.action in ('start','stop'):
         if args.action == 'start':
             autopilot.policy(cfg)
+        else:
+            store.set_flag(conn,'autopilot_run_next','0')
         store.set_flag(conn,'autopilot_enabled','1' if args.action=='start' else '0')
         autopilot.message(conn,'自动补充任务已启用，等待本地调度' if args.action=='start' else '已停止创建新轮次；现有任务继续执行，全部暂停用 wq pause')
     result=autopilot.status(conn,cfg)
@@ -602,13 +639,8 @@ def cmd_evidence(args):
 # ---------- parser ----------
 
 def cmd_onboard(args):
-    import subprocess, sys
-    from pathlib import Path
-    script=Path(__file__).resolve().parents[2]/'scripts/onboard.py'
-    if not script.exists():
-        print('Onboarding requires a source checkout; run python3 scripts/onboard.py there.')
-        return 2
-    return subprocess.call([sys.executable,str(script),*args.onboard_args])
+    from . import onboard
+    return onboard.main(args.onboard_args)
 
 
 def cmd_export(args):
@@ -626,7 +658,7 @@ def build_parser(lang=None) -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="wq", description="WorldQuant 研究试点本地工具（离线优先）")
     lang=lang or default_language()
     p.add_argument("--lang",choices=["zh","en"],default=lang,help="界面语言 / Interface language")
-    p.add_argument("--version",action="version",version="wq 0.1.0")
+    p.add_argument("--version",action="version",version="wq 0.2.0")
     p.add_argument("--config", help="config.json 路径，默认 ./config/config.json")
     p.add_argument("--db", help="覆盖 SQLite 路径（测试用）")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -653,13 +685,14 @@ def build_parser(lang=None) -> argparse.ArgumentParser:
     s = sub.add_parser('brain', help='BRAIN本地会话、接口核验与单次模拟队列')
     bs=s.add_subparsers(dest='action',required=True)
     ap = sub.add_parser('autopilot', help='持续研究：状态/启动/停止补充任务')
-    ap.add_argument('action',choices=['status','start','stop','refine-check','feedback','collect-feedback'],nargs='?',default='status')
+    ap.add_argument('action',choices=['status','start','stop','run-next','refine-check','feedback','collect-feedback'],nargs='?',default='status')
     ap.add_argument('--json',action='store_true')
     ap.add_argument('--local-only',action='store_true',help='collect-feedback：只用已有资料本地重算，不入队')
     ap.set_defaults(fn=cmd_autopilot)
     bs.add_parser('login').set_defaults(fn=cmd_brain)
     bs.add_parser('keychain-save').set_defaults(fn=cmd_brain)
     bs.add_parser('check').set_defaults(fn=cmd_brain)
+    bs.add_parser('account',help='只读账户快照：等级、pyramid 乘数/数量、连击；写私有目录，不含凭证').set_defaults(fn=cmd_brain)
     for action in ('submit-check', 'submit', 'reconcile-submit'):
         b = bs.add_parser(action)
         b.add_argument('alpha_id')
@@ -750,6 +783,7 @@ def build_parser(lang=None) -> argparse.ArgumentParser:
 
     s = sub.add_parser("pause", help="暂停：禁止新任务并终止在途本地调用")
     s.add_argument("--reason")
+    s.add_argument("--graceful", action="store_true", help="停止领取新任务，允许当前任务收尾")
     s.set_defaults(fn=cmd_pause)
 
     s = sub.add_parser("resume", help="恢复（存在 UNKNOWN 需先对账或 --force）")

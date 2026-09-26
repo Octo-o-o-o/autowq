@@ -6,9 +6,26 @@
 
 **研究工具，不是收益承诺。** 平台筛选通过、正式提交接收、顾问资格和实际到账是不同状态。自动研究不自动授予正式提交权限。
 
-## 第一次使用
+## 安装
 
-需要 Python 3.11+、Git，以及你自己的模型 CLI 订阅账号或 API Key。运行时只使用 Python 标准库。支持 macOS；Linux/Windows WSL2 使用 Docker 隔离模型进程。原生 Windows 暂不支持。
+需要 Python 3.11+，以及你自己的模型 CLI 订阅账号或 API Key。运行时只使用 Python 标准库。支持 macOS；Linux/Windows WSL2 使用 Docker 隔离模型进程。原生 Windows 暂不支持。
+
+```sh
+# 方式一：pipx（推荐；pipx 本身见 https://pipx.pypa.io）
+pipx install wq-pilot
+mkdir ~/autowq && cd ~/autowq   # 任选目录作为工作区
+wq onboard
+```
+
+```sh
+# 方式二：Homebrew（macOS）
+brew tap Octo-o-o-o/autowq && brew install wq-pilot
+brew install --cask Octo-o-o-o/autowq/worldquant   # 可选：菜单栏 App
+```
+
+方式三：macOS 菜单栏 App。从 [Releases](https://github.com/Octo-o-o-o/autowq/releases) 下载 `WorldQuant-<版本>.dmg`，拖入"应用程序"后双击；首启向导引导选择工作区、准备运行时并调起 onboard，完成后菜单栏常驻。未公证版本可用 `brew install --cask` 安装（自动去除隔离属性），或首次右键打开。
+
+方式四：源码（开发）：
 
 ```sh
 git clone https://github.com/Octo-o-o-o/autowq.git
@@ -90,6 +107,6 @@ PYTHONPATH=src python3 -m unittest discover -s tests
 
 配置、Cookie、真实 Alpha、数据库、模型输出、运行日志和个人研究档案不进入 Git。`fixtures/` 仅含合成数据，不能作为真实研究成绩。源码备份不等于运行状态备份。
 
-本项目非 WorldQuant 官方产品。目前尚未选择开源 LICENSE；上传 GitHub 不等于已经授予开源许可。仓库可见性和正式开源由维护者另行决定。
+本项目非 WorldQuant 官方产品。本项目以 Apache License 2.0 开源（见 LICENSE 与 NOTICE.md）；公开发布前需由维护者核查完整 Git 历史与第三方内容。
 
 全历史复盘支持手动与自动触发：`./wq auto-research report`、`./wq auto-research run`；设置周期见[Auto Research说明](docs/auto-research.md)。不同渠道复核后，固定指导语进入后续研究与审查Prompt，预算和质量门槛不变。
