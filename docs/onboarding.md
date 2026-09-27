@@ -41,9 +41,9 @@ Use `--binary grok=/absolute/path/to/grok` for a custom executable and `--runtim
 
 ## 语言与登录 / Language and login
 
-第一次启动按 `LC_ALL` → `LC_MESSAGES` → `LANGUAGE` → `LANG` 的首个有效值判断；没有环境值时使用Python系统locale。`zh`开头默认中文，其余（包括C/POSIX）默认英文。交互第一步可选zh/en；`--lang`优先于默认值。选择保存在忽略的本机 `ui.language`，后续CLI帮助及登录沿用，仍可临时覆盖。内置CLI帮助、向导步骤、登录提示和新命令均有英文；旧业务报告仍有中文内容，可用支持的JSON输出及英文README查看结构。
+语言规则（CLI 与菜单栏/托盘一致）：`--lang zh|en|auto` 会话内覆盖 → config.json 的 `ui.language` 持久偏好 → 环境自动检测（`LC_ALL` → `LC_MESSAGES` → `LANGUAGE` → `LANG`，无环境值时用系统 locale；`zh` 开头中文，其余含 C/POSIX 一律英文）。`auto` 表示跟随系统检测。首次向导交互第一步选择并保存；此后用 `wq config language zh|en|auto` 查看/切换（写入 `ui.language`），菜单栏/托盘在「设置 → 界面语言」切换同一份配置。CLI 帮助、向导、登录提示及高频命令输出（doctor/tasks/preset/autopilot status 等）均双语；账本里调度器写入的中文消息与轮次结局、以及各模块抛出的常见校验错误，在英文界面按已知文案表于显示层翻译（CLI 的 `invalid:`/`error:` 前缀与 App 弹窗同样生效）；深层反馈报告（feedback/refine 的人类可读版）与自由文本模型输出仍为中文，可用 `--json` 取结构化数据。
 
-On first run, locale precedence is LC_ALL → LC_MESSAGES → LANGUAGE → LANG, then Python's system locale. Chinese locales default to Chinese; all others, including C/POSIX, default to English. The first interactive prompt lets you choose zh/en. An explicit --lang wins. The choice is saved locally in ui.language and reused by CLI help/login. Wizard steps and built-in command help have English copy; some legacy operational reports remain Chinese, with structured JSON available where supported.
+Language rules (identical for the CLI and the menu-bar/tray apps): `--lang zh|en|auto` overrides per invocation → the persisted `ui.language` preference in config.json → automatic detection (LC_ALL → LC_MESSAGES → LANGUAGE → LANG, then the system locale; zh* means Chinese, everything else including C/POSIX means English). `auto` follows that detection. The first-run wizard saves your choice; afterwards `wq config language zh|en|auto` shows or switches it (writing ui.language), and the menu-bar/tray Settings → Interface language submenu switches the same file. CLI help, the wizard, login prompts and high-frequency command output (doctor/tasks/preset/autopilot status, …) are bilingual; ledger messages, cycle outcomes and common validation errors raised in Chinese are translated through a known-string table at the display boundary (CLI invalid:/error: prefixes and app alerts included); deep feedback reports (human-readable feedback/refine) and free-form model output remain Chinese — use --json for structured data.
 
 官方注册 / Official registration: https://platform.worldquantbrain.com/sign-up
 
@@ -55,6 +55,8 @@ After configuration, the wizard offers to run each selected CLI's login command,
 ./wq onboard --skip-login          # 配置后保留登录待办 / Configure, leave login pending
 ./wq onboard --login-only          # 不覆盖配置，继续登录 / Resume login only
 ./wq login --lang en               # 单独登录BRAIN / BRAIN login only
+./wq config language en            # 持久切换界面语言 / Persist the interface language
+./wq config language auto          # 跟随系统（zh* 中文，其余英文）/ Follow the system locale
 ```
 
 非交互初始化自动跳过登录，不接收密码参数；需要本人另开交互终端。拒绝/失败的登录保留pending/failed，不能称为就绪。Linux登录使用生成runtime中的containers.json，需先构建所选镜像。未安装的模型CLI不能由向导伪造登录成功。

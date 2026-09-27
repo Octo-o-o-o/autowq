@@ -68,6 +68,9 @@ def main():
     if os.getuid()==0:p.exit(1,'Run as a dedicated non-root user.\n')
     try:r=render(a.root,a.runtime)
     except (ValueError,OSError) as exc:p.exit(1,str(exc)+'\n')
-    print(f'Generated disabled Docker configuration and systemd units: {r}. Nothing installed or started.')
+    from .i18n import default_language, text
+    lang = default_language()
+    print(text(lang, f'已生成默认关闭的 Docker 配置与 systemd 单元：{r}；未安装、未启动任何服务。',
+                 f'Generated disabled Docker configuration and systemd units: {r}. Nothing installed or started.'))
 
 if __name__=='__main__':main()

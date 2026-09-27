@@ -158,6 +158,8 @@ class AutopilotTests(unittest.TestCase):
     def job(self,conn,cfg,role,prompt_file,input_dir=None,title=None):
         self.counter+=1;path=self.root/f'job-{self.counter}';path.mkdir()
         (path/'prompt.txt').write_text(Path(prompt_file).read_text())
+        (path/'packet').mkdir()
+        (path/'packet'/'request.md').write_text(Path(prompt_file).read_text())
         payload={'job_dir':str(path),'role':role,'routing':True}
         return store.enqueue_task(conn,'agent_call',payload)[0],str(path)
     def dispatch(self,conn,cfg,t):
@@ -165,10 +167,23 @@ class AutopilotTests(unittest.TestCase):
         payload=json.loads(t['payload_json']);role=payload['role']
         row=conn.execute("SELECT * FROM research_cycles WHERE state!='closed'").fetchone()
         if role=='research':obj={'status':'completed','candidate':proposal('mean' if row['cycle_id']==1 else 'std')}
-        else:obj={'status':'completed','review':{'candidate_hash':row['candidate_hash'],'accept':not self.reject_review,'checks':{k:True for k in autopilot.REVIEW_CHECKS},'reason':'这是明确受限的探索，不能当作经济机制已获证明。'}}
+        else:
+            checks = {k: True for k in autopilot.REVIEW_CHECKS}
+            evidence = []
+            if self.reject_review:
+                checks['economic_rationale'] = False
+                evidence = [{'check':'economic_rationale', 'field':'hypothesis',
+                             'quote':json.loads(row['candidate_json'])['hypothesis'],
+                             'explanation':'测试夹具中的否决理由，不代表真实模型质量判断。'}]
+            obj={'status':'completed','review':{'candidate_hash':row['candidate_hash'],'accept':not self.reject_review,
+                 'checks':checks,'reason':'这是明确受限的探索，不能当作经济机制已获证明。','blocking_evidence':evidence}}
+            if payload.get('fallback_objections'):
+                obj['review']['resolutions'] = [{'check':key,'disposition':'uphold' if self.reject_review else 'overturn',
+                    'field':'hypothesis','quote':json.loads(row['candidate_json'])['hypothesis'],
+                    'explanation':'测试夹具明确回应首次裁决，不代表真实模型复核。'} for key in payload['fallback_objections']]
         util.write_json(str(Path(payload['job_dir'])/'result.json'),obj)
         name='a' if role=='research' or self.same_provider else 'b'
-        conn.execute('INSERT INTO task_routes(task_id,snapshot_json,phase,updated_at) VALUES(?,?,?,?)',(t['task_id'],json.dumps({'chain':[name],'preset':'steady'}),'complete',util.now_iso()))
+        conn.execute('INSERT OR IGNORE INTO task_routes(task_id,snapshot_json,phase,updated_at) VALUES(?,?,?,?)',(t['task_id'],json.dumps({'chain':[name],'preset':'steady'}),'complete',util.now_iso()))
         return 'succeeded',{},None
     def api(self,method,path,body=None):
         if method=='POST':
@@ -199,7 +214,7 @@ class AutopilotTests(unittest.TestCase):
 
     def test_reviewer_rejects_without_platform_call(self):
         self.reject_review=True
-        for _ in range(3):self.tick()
+        for _ in range(4):self.tick()
         self.assertEqual(self.cycle()['state'],'closed');self.assertEqual(self.posts,0)
 
     def test_same_provider_cannot_approve_itself(self):
@@ -257,11 +272,11 @@ class AutopilotTests(unittest.TestCase):
     def test_daily_limit_resumes_without_codex_next_day(self):
         self.cfg.data['autopilot']['max_cycles_per_day']=1
         self.reject_review=True
-        for _ in range(3):self.tick()
+        for _ in range(4):self.tick()
         store.set_flag(self.c,'autopilot_next_at','2000-01-01T00:00:00Z')
-        self.tick();self.assertEqual(self.counter,2)
+        self.tick();self.assertEqual(self.counter,3)
         with patch('wq.util.now',return_value=util.now()+dt.timedelta(days=1)):self.tick()
-        self.assertEqual(self.counter,3)
+        self.assertEqual(self.counter,4)
 
     def test_unavailable_providers_wait_then_auto_resume(self):
         with patch('wq.routing._unavailable',return_value='quota'):

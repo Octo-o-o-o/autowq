@@ -85,6 +85,8 @@ def read_document(path):
 
 
 def command(args):
+    from .i18n import text
+    lang = getattr(args, 'lang', 'zh')
     from .config import Config
     from . import routing, db
     cfg = Config.load(args.config, os.getcwd())
@@ -92,7 +94,7 @@ def command(args):
     if args.action == 'init':
         doc = template(profiles['presets'][profiles['default']]['routes'])
         write_new(args.output, doc)
-        print('Created / 已创建: ' + args.output); return 0
+        print(text(lang, '已创建：', 'Created: ') + args.output); return 0
     if args.action == 'show':
         print(json.dumps(load(cfg) or template(profiles['presets'][profiles['default']]['routes']), ensure_ascii=False, indent=2)); return 0
     if args.action == 'ai-edit':
@@ -115,7 +117,7 @@ def command(args):
     doc = read_document(args.file)
     validate(doc, profiles['providers'])
     if args.action == 'validate':
-        print('Valid / 校验通过'); return 0
+        print(text(lang, '校验通过', 'Valid')); return 0
     if args.action == 'edit':
         if not sys.stdin.isatty(): raise ValueError('Interactive terminal required / 需要交互终端')
         zh = args.lang == 'zh'
@@ -140,10 +142,10 @@ def command(args):
         value = ask('组合上限 0..20（回车保留）：', 'Combination limit 0..20 (Enter keeps current): ')
         if value: doc['combinations']['max_plans'] = int(value)
         validate(doc, profiles['providers']); write_new(args.output, doc)
-        print('Draft saved; apply separately / 草稿已保存，使用apply生效'); return 0
+        print(text(lang, '草稿已保存，使用 apply 生效', 'Draft saved; apply separately')); return 0
     current = load(cfg) or template(profiles['presets'][profiles['default']]['routes'])
     diff = ''.join(difflib.unified_diff(json.dumps(current, ensure_ascii=False, indent=2).splitlines(True), json.dumps(doc, ensure_ascii=False, indent=2).splitlines(True), fromfile='current', tofile='proposed'))
-    print(diff or 'No change / 无变化')
+    print(diff or text(lang, '无变化', 'No change'))
     if args.action == 'diff': return 0
     from .wrappers.agent import _acquire_lock
     lock = _acquire_lock(cfg.run_dir, 'runner')
@@ -166,7 +168,8 @@ def command(args):
         original = json.loads(Path(cfg.path).read_text())
         original['workflow'] = {'file': str(path)}
         util.write_json(cfg.path, original)
-        print('Applied for future tasks; budgets and execution gates unchanged / 已应用于后续任务，预算与执行授权未改变')
+        print(text(lang, '已应用于后续任务，预算与执行授权未改变',
+                     'Applied for future tasks; budgets and execution gates unchanged'))
         return 0
     finally:
         os.close(lock)
@@ -188,8 +191,9 @@ def schema():
                                  'properties': {'enabled': {'type': 'boolean'}, 'max_plans': {'type': 'integer', 'minimum': 0, 'maximum': 20}}}}}
 
 
-def add_parser(sub):
-    p = sub.add_parser('workflow', help='高级流程JSON / Advanced workflow JSON')
+def add_parser(sub, lang='zh'):
+    from .i18n import text
+    p = sub.add_parser('workflow', help=text(lang, '高级流程 JSON', 'Advanced workflow JSON'))
     s = p.add_subparsers(dest='action', required=True)
     m = s.add_parser('init'); m.add_argument('--output', default='config/workflow.draft.json'); m.set_defaults(fn=command)
     s.add_parser('show').set_defaults(fn=command)

@@ -12,6 +12,20 @@ import subprocess
 import sys
 
 RESOURCES = Path(__file__).resolve().parent
+
+
+def _lang():
+    """引擎安装前按环境选择：zh* 中文，其余英文。"""
+    import locale as _locale
+    value = next((os.environ[k] for k in ('LC_ALL', 'LC_MESSAGES', 'LANGUAGE', 'LANG') if os.environ.get(k)), None)
+    if value is None:
+        try: value = _locale.getlocale()[0] or ''
+        except (ValueError, _locale.Error): value = ''
+    return 'zh' if value.split(':')[0].lower().replace('-', '_').startswith('zh') else 'en'
+
+
+def _t(zh, en):
+    return zh if _lang() == 'zh' else en
 APP_SUPPORT = Path.home() / 'Library/Application Support/WorldQuant'
 VENV = APP_SUPPORT / 'venv'
 PYTHON_CANDIDATES = ('/usr/bin/python3', '/opt/homebrew/bin/python3', '/usr/local/bin/python3')
@@ -32,7 +46,7 @@ def fail(message):
 def run(argv, timeout=300):
     result = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
     if result.returncode:
-        raise RuntimeError((result.stderr or result.stdout or f'退出码 {result.returncode}')[-1500:])
+        raise RuntimeError((result.stderr or result.stdout or _t(f'退出码 {result.returncode}', f'exit code {result.returncode}'))[-1500:])
     return result
 
 
@@ -72,7 +86,8 @@ def ensure_venv(base_python):
 def check_python():
     python = find_python()
     if not python:
-        fail('未找到 Python ≥ 3.11；请先安装 Xcode Command Line Tools：xcode-select --install')
+        fail(_t('未找到 Python ≥ 3.11；请先安装 Xcode Command Line Tools：xcode-select --install',
+               'Python >= 3.11 not found; install Xcode Command Line Tools: xcode-select --install'))
     emit({'python': python})
 
 
@@ -80,10 +95,11 @@ def setup(workspace):
     workspace = Path(workspace).expanduser().resolve()
     base = find_python()
     if not base:
-        fail('未找到 Python ≥ 3.11；请先安装 Xcode Command Line Tools：xcode-select --install')
+        fail(_t('未找到 Python ≥ 3.11；请先安装 Xcode Command Line Tools：xcode-select --install',
+               'Python >= 3.11 not found; install Xcode Command Line Tools: xcode-select --install'))
     wheels = list(RESOURCES.glob('wq_pilot-*.whl'))
     if len(wheels) != 1:
-        fail('应用包必须包含一个引擎 wheel，安装包不完整')
+        fail(_t('应用包必须包含一个引擎 wheel，安装包不完整', 'The app bundle must contain exactly one engine wheel; the installer is incomplete'))
     wheel = wheels[0]
     digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
     marker = APP_SUPPORT / 'engine-wheel.sha256'
@@ -99,7 +115,8 @@ def setup(workspace):
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
-                fail('研究任务仍在运行；等待本轮收尾后重新打开应用完成引擎更新，不会中断任务')
+                fail(_t('研究任务仍在运行；等待本轮收尾后重新打开应用完成引擎更新，不会中断任务',
+                       'Research tasks are still running; reopen the app after this cycle finishes to update the engine. Nothing is interrupted.'))
             venv_python = ensure_venv(base)
             run([str(venv_python), '-m', 'pip', 'install', '--no-index', '--no-deps',
                  '--force-reinstall', str(wheel)])
@@ -128,10 +145,10 @@ def activate(workspace, app):
     workspace = Path(workspace).expanduser().resolve()
     binary = Path(app).resolve() / 'Contents/MacOS/WorldQuantMenu'
     if not binary.exists():
-        fail(f'应用二进制不存在：{binary}')
+        fail(_t(f'应用二进制不存在：{binary}', f'App binary not found: {binary}'))
     venv_python = VENV / 'bin/python'
     if not usable(venv_python):
-        fail('运行时未安装，请先完成首次设置')
+        fail(_t('运行时未安装，请先完成首次设置', 'Runtime not installed; complete first-time setup first'))
     (workspace / 'var/run').mkdir(parents=True, exist_ok=True)
     agents = Path.home() / 'Library/LaunchAgents'
     agents.mkdir(parents=True, exist_ok=True)
@@ -139,8 +156,8 @@ def activate(workspace, app):
     if runner.exists():
         existing = plistlib.loads(runner.read_bytes())
         if existing.get('WorkingDirectory') != str(workspace):
-            fail('现有 runner 属于另一工作区，拒绝加载第二份研究调度；'
-                 '如需迁移请先运行 deactivate')
+            fail(_t('现有 runner 属于另一工作区，拒绝加载第二份研究调度；如需迁移请先运行 deactivate',
+                   'The existing runner belongs to another workspace; refusing to load a second research scheduler. Run deactivate first to migrate.'))
     runner.write_bytes(plistlib.dumps({
         'Label': RUNNER_LABEL,
         'ProgramArguments': [str(venv_python), '-m', 'wq', 'run-once', '--lease', '3600'],
@@ -153,7 +170,8 @@ def activate(workspace, app):
     if menu_plist.exists():
         old = plistlib.loads(menu_plist.read_bytes())
         if old.get('ProgramArguments') != [str(binary)]:
-            fail('菜单栏 LaunchAgent 指向另一应用，拒绝覆盖；如需迁移请先运行 deactivate')
+            fail(_t('菜单栏 LaunchAgent 指向另一应用，拒绝覆盖；如需迁移请先运行 deactivate',
+                   'The menu-bar LaunchAgent points to another app; refusing to overwrite. Run deactivate first to migrate.'))
     menu_plist.write_bytes(plistlib.dumps({
         'Label': MENU_LABEL, 'ProgramArguments': [str(binary)],
         'RunAtLoad': True, 'ProcessType': 'Interactive', 'WorkingDirectory': str(workspace),

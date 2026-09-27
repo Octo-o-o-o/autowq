@@ -80,7 +80,9 @@ class OnboardingTests(unittest.TestCase):
         self.assertEqual(before,(self.root/'config/config.json').read_bytes())
 
     def test_cli_help_forwards_options(self):
-        r=subprocess.run([sys.executable,'-m','wq','onboard','--help'],capture_output=True,text=True,timeout=10)
+        import os
+        env={**os.environ,'PYTHONPATH':str(SCRIPTS.parent/'src')}
+        r=subprocess.run([sys.executable,'-m','wq','onboard','--help'],capture_output=True,text=True,timeout=10,env=env)
         self.assertEqual(r.returncode,0,r.stderr);self.assertIn('--reasoning-effort',r.stdout)
 
     def test_login_flow_records_pending_and_resume_without_overwrite(self):

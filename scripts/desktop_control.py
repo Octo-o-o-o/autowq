@@ -18,5 +18,10 @@ if _ran_as_script:
     try:
         print(json.dumps(control(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else None), ensure_ascii=False))
     except Exception as exc:
-        print(json.dumps({'error': str(exc)}, ensure_ascii=False))
+        # 子进程错误按界面语言在显示层翻译（菜单栏/托盘弹窗直接展示该文本）。
+        try:
+            _lang = ui_language(_cfg())
+        except Exception:
+            _lang = 'zh'
+        print(json.dumps({'error': translate(str(exc), _lang)}, ensure_ascii=False))
         sys.exit(1)

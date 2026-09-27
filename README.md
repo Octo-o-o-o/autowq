@@ -40,7 +40,7 @@ cd autowq
 ```
 
 
-向导检测宿主 CLI，让你选择渠道、模型 ID、研究/审查/工程角色及可选思考强度。它生成本机配置与隔离运行入口，**不覆盖已有部署、不启动付费推理、不安装调度器**。默认语言按环境判断：中文环境用中文，其余用英文；第一步可以切换，也可用 `--lang zh/en` 显式指定。向导包含供应商CLI与BRAIN登录，并提供[官方注册链接](https://platform.worldquantbrain.com/sign-up)。可以跳过登录，随后用 `./wq onboard --login-only` 继续。模型是否能用取决于你自己的账号；登录命令成功不等于验证了模型权限。
+向导检测宿主 CLI，让你选择渠道、模型 ID、研究/审查/工程角色及可选思考强度。它生成本机配置与隔离运行入口，**不覆盖已有部署、不启动付费推理、不安装调度器**。默认语言按环境判断：中文环境用中文，其余用英文；第一步可以切换，也可用 `--lang zh/en/auto` 显式指定，之后用 `wq config language` 持久切换（菜单栏/托盘在「设置 → 界面语言」）。向导包含供应商CLI与BRAIN登录，并提供[官方注册链接](https://platform.worldquantbrain.com/sign-up)。可以跳过登录，随后用 `./wq onboard --login-only` 继续。模型是否能用取决于你自己的账号；登录命令成功不等于验证了模型权限。
 
 支持 Grok Build、Devin、Cursor、ZCode，以及新增 Claude Code、Codex、Gemini CLI、GitHub Copilot CLI、Qwen Code、OpenCode。支持 OpenAI Chat Completions/Responses 和 Anthropic Messages API，可手动配置 Base URL、Key 和模型。不同渠道的模型列举、平台支持与核验范围见 **[Provider与高级流程指南（中英）](docs/providers-workflow.md)**。持续自动研究仍要求不同渠道审查。
 
@@ -61,7 +61,7 @@ cd autowq
 - 真实模拟、GET 轮询和结果入账；POST 结果未知时停止重发。
 - 失败原因反馈、时间分段资料、日 PnL 相关性与有限组合实验。
 - 逐候选正式提交：研究验收、最新平台检查、单次 POST、真实接收状态核验。
-- 中文任务进度、token 及费用来源；未知费用不记作零。
+- 中英双语任务进度、token 及费用来源；未知费用不记作零。
 - 单并发、预算、授权期限、平台限流、崩溃恢复与去重。
 - macOS 菜单栏 / Windows 托盘（实验性）：状态、轮次历史与已提交 Alpha，切换路由预设、渠道与频率上限，绑定/核验 BRAIN 账号（拉起终端完成登录，密码不保存），提交成功或任务失败时系统通知。
 

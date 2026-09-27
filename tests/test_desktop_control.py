@@ -56,9 +56,15 @@ class SettingsControlTests(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
         self.cfg, self.c = make_env(tmp.name); self.addCleanup(self.c.close)
+        self.pin_language('zh')   # 文案断言固定中文，避免依赖测试机的系统语言
         self.data = {'default': 'p', 'providers': {'a': {'model': 'A'}, 'b': {'model': 'B'}},
                      'presets': {'p': {'routes': {'research': ['a', 'b'], 'review': ['b', 'a'], 'engineering': ['a']}},
                                  'q': {'routes': {'research': ['b'], 'review': ['a'], 'engineering': ['a']}}}}
+
+    def pin_language(self, value):
+        data = json.loads(Path(self.cfg.path).read_text())
+        data.setdefault('ui', {})['language'] = value
+        Path(self.cfg.path).write_text(json.dumps(data, ensure_ascii=False))
 
     def test_settings_snapshot_reports_routing_and_limits(self):
         with patch.object(desktop, '_cfg', return_value=self.cfg), \
@@ -142,6 +148,9 @@ class BrainAccountTests(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
         self.cfg, self.c = make_env(tmp.name); self.addCleanup(self.c.close)
+        data = json.loads(Path(self.cfg.path).read_text())
+        data.setdefault('ui', {})['language'] = 'zh'   # 文案断言固定中文
+        Path(self.cfg.path).write_text(json.dumps(data, ensure_ascii=False))
 
     def test_brain_bound_follows_session_file(self):
         with patch.object(desktop, '_cfg', return_value=self.cfg):
@@ -166,15 +175,80 @@ class BrainAccountTests(unittest.TestCase):
                 desktop.control('brain-login')
 
     def test_brain_check_reports_success_and_failure(self):
-        with patch.object(desktop, 'wq', return_value={'http_status': 200, 'allow': 'POST'}):
+        with patch.object(desktop, '_cfg', return_value=self.cfg), \
+             patch.object(desktop, 'wq', return_value={'http_status': 200, 'allow': 'POST'}):
             self.assertIn('核验通过', desktop.control('brain-check')['message'])
-        with patch.object(desktop, 'wq', side_effect=RuntimeError('未登录或会话过期')):
+        with patch.object(desktop, '_cfg', return_value=self.cfg), \
+             patch.object(desktop, 'wq', side_effect=RuntimeError('未登录或会话过期')):
             message = desktop.control('brain-check')['message']
             self.assertIn('核验未通过', message)
             self.assertIn('会话过期', message)
 
     def test_brain_register_opens_official_page(self):
-        with patch.object(desktop.webbrowser, 'open') as open_url:
+        with patch.object(desktop, '_cfg', return_value=self.cfg), \
+             patch.object(desktop.webbrowser, 'open') as open_url:
             result = desktop.control('brain-register')
         open_url.assert_called_once_with(desktop.BRAIN_REGISTER_URL)
         self.assertIn('注册页', result['message'])
+
+
+class LanguageTests(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        self.cfg, self.c = make_env(tmp.name); self.addCleanup(self.c.close)
+        self.data = {'default': 'p', 'providers': {'a': {'model': 'A'}},
+                     'presets': {'p': {'routes': {'research': ['a'], 'review': ['a'], 'engineering': ['a']}}}}
+
+    def fresh_cfg(self):
+        from wq.config import Config
+        return Config.load(self.cfg.path, os.path.dirname(os.path.dirname(self.cfg.path)))
+
+    def settings(self):
+        with patch.object(desktop, '_cfg', side_effect=self.fresh_cfg), \
+             patch('wq.routing.catalog', return_value=self.data), \
+             patch('wq.routing._unavailable', return_value=None):
+            return desktop.control('settings')
+
+    def set_language(self, value):
+        with patch.object(desktop, '_cfg', side_effect=self.fresh_cfg):
+            return desktop.control('config', f'language={value}')
+
+    def test_settings_report_language_fields(self):
+        snapshot = self.settings()
+        self.assertEqual(snapshot['language_setting'], 'auto')
+        self.assertIn(snapshot['language'], ('zh', 'en'))
+
+    def test_language_switch_persists_and_renders(self):
+        self.assertEqual(self.set_language('en')['language_setting'], 'en')
+        with patch.object(desktop, '_cfg', side_effect=self.fresh_cfg), \
+             patch.object(desktop, 'wq', return_value={'unknown_pending': 0}), \
+             patch.object(desktop, 'loaded', return_value=True):
+            self.assertIn('Automatic research started', desktop.control('start')['message'])
+        self.assertEqual(self.settings()['language_setting'], 'en')
+        self.set_language('zh')
+        with patch.object(desktop, '_cfg', side_effect=self.fresh_cfg), \
+             patch.object(desktop, 'wq', return_value={'unknown_pending': 0}), \
+             patch.object(desktop, 'loaded', return_value=True):
+            self.assertIn('已开始自动运行', desktop.control('start')['message'])
+        self.set_language('auto')
+        self.assertEqual(self.settings()['language_setting'], 'auto')
+
+    def test_language_rejects_unknown_values(self):
+        with patch.object(desktop, '_cfg', side_effect=self.fresh_cfg):
+            with self.assertRaises(ValueError):
+                desktop.control('config', 'language=fr')
+
+    def test_status_message_translates_known_ledger_text(self):
+        auto = {'enabled': True, 'message': '等待现有任务完成', 'next_cycle_at': None,
+                'last_tick_at': None, 'total_cycles': 1, 'max_cycles_total': None}
+        self.set_language('en')
+        with patch.object(desktop, '_cfg', side_effect=self.fresh_cfg), \
+             patch.object(desktop, 'wq', side_effect=[{'paused': False, 'unknown_pending': 0}, auto]), \
+             patch.object(desktop, 'loaded', return_value=True), \
+             patch('wq.desktop.connect_readonly', return_value=self.c), \
+             patch('wq.routing.catalog', return_value=self.data), \
+             patch('wq.routing.active_preset', return_value='p'), \
+             patch('wq.routing._unavailable', return_value=None):
+            result = desktop.control('status')
+        self.assertIn('Waiting for existing tasks', result['message'])
+        self.assertEqual(result['language'], 'en')

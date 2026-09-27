@@ -160,22 +160,32 @@ def zero() -> dict:
             "cost_label": "未调用", "source": "本地队列"}
 
 
-def display(value: dict | None, running: bool = False) -> str:
+def display(value: dict | None, running: bool = False, lang: str = 'zh') -> str:
+    from .i18n import text, translate
     if value is None:
         if running:
-            return "消耗：token 暂未获得实时计量；折合 $：未知（供应商尚未写出可核对数据）"
-        return "消耗：token 未取到；折合 $：未知（没有可核对的调用计量）"
+            return text(lang, "消耗：token 暂未获得实时计量；折合金额：未知（供应商尚未写出可核对数据）",
+                        "Cost: no live token metering yet; equivalent amount unknown (no verifiable data from the provider)")
+        return text(lang, "消耗：token 未取到；折合金额：未知（没有可核对的调用计量）",
+                    "Cost: no tokens retrieved; equivalent amount unknown (no verifiable call metering)")
     total = value.get("total_tokens")
     inp = value.get("input_tokens")
     cache = value.get("cache_read_tokens")
     out = value.get("output_tokens")
-    fmt = lambda n: f"{n:,}" if isinstance(n, int) and n >= 0 else "未知"
-    parts = f"总 {fmt(total)}（输入 {fmt(inp)}，缓存读 {fmt(cache)}，输出 {fmt(out)}）"
+    unknown = text(lang, "未知", "unknown")
+    fmt = lambda n: f"{n:,}" if isinstance(n, int) and n >= 0 else unknown
+    if lang == 'zh':
+        parts = f"总 {fmt(total)}（输入 {fmt(inp)}，缓存读 {fmt(cache)}，输出 {fmt(out)}）"
+    else:
+        parts = f"total {fmt(total)} (input {fmt(inp)}, cache read {fmt(cache)}, output {fmt(out)})"
     cost = value.get("cost_usd")
     if isinstance(cost, (int, float)):
         money = f"${cost:.4f}"
         if value.get("cost_label"):
-            money += f"，{value['cost_label']}"
+            money += text(lang, f"，{value['cost_label']}", f", {translate(value['cost_label'], lang)}")
     else:
-        money = value.get("cost_label") or "未知"
-    return f"消耗：{parts} token；折合 {money}"
+        money = translate(value.get("cost_label"), lang) or unknown
+    sep = '；' if lang == 'zh' else '; '
+    head = text(lang, "消耗：", "Cost: ")
+    unit = " token" if lang == 'zh' else ""
+    return f"{head}{parts}{unit}{sep}{text(lang, '折合', 'equivalent')} {money}"

@@ -132,6 +132,8 @@ def install_runtime(runtime):
 def command(args):
     from .config import Config
     from . import util
+    from .i18n import text
+    lang = getattr(args, 'lang', 'zh')
     cfg = Config.load(args.config, os.getcwd())
     if args.action == 'list':
         print(json.dumps(inventory(), ensure_ascii=False, indent=2)); return 0
@@ -139,7 +141,8 @@ def command(args):
     profiles = json.loads(pp.read_text()) if pp.exists() else {'providers':{}}
     if args.action not in ('models',) and not pp.exists(): raise ValueError('Run wq onboard first / 请先初始化')
     if args.action == 'refresh-runtime':
-        install_runtime(cfg.get('onboarding', 'runtime')); print('Runtime updated / 运行适配器已更新'); return 0
+        install_runtime(cfg.get('onboarding', 'runtime'))
+        print(text(lang, '运行适配器已更新', 'Runtime adapters updated')); return 0
     if args.action == 'models':
         d = profiles.get('providers', {}).get(args.provider, {})
         item = d.get('transport')
@@ -185,12 +188,13 @@ def command(args):
             util.write_json(cfg.path,cfg.data)
         d['label'] = args.provider + ' / ' + args.model
     util.write_json(str(pp), profiles); pp.chmod(0o600)
-    print('Saved; no inference started / 已保存，未启动推理')
+    print(text(lang, '已保存，未启动推理', 'Saved; no inference started'))
     return 0
 
 
-def add_parser(sub):
-    p = sub.add_parser('providers', help='检测渠道、模型与API / Discover providers, models and API setup')
+def add_parser(sub, lang='zh'):
+    from .i18n import text
+    p = sub.add_parser('providers', help=text(lang, '检测渠道、模型与 API', 'Discover providers, models and API setup'))
     s = p.add_subparsers(dest='action', required=True)
     for name in ('list', 'refresh-runtime'):
         s.add_parser(name).set_defaults(fn=command)

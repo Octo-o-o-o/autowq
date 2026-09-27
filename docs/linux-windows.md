@@ -68,7 +68,7 @@ Linux 服务器需要管理员为部署用户启用 linger，用户退出 SSH �
 
 ## 原生 Windows 托盘与调度（实验性）
 
-除 WSL2 外，控制层现可直接跑在原生 Windows Python 上：托盘菜单（pystray）、调度（任务计划程序每分钟一次 `run-once`，等价 launchd StartInterval=60）与 macOS 共用同一套 `wq.desktop_control` 动作，功能一致（状态、轮次历史、已提交 Alpha、路由预设/渠道/间隔/上限/通知开关、系统通知）。
+除 WSL2 外，控制层现可直接跑在原生 Windows Python 上：托盘菜单（pystray）、调度（任务计划程序每分钟一次 `run-once`，等价 launchd StartInterval=60）与 macOS 共用同一套 `wq.desktop_control` 动作，功能一致（状态、轮次历史、已提交 Alpha、路由预设/渠道/间隔/上限/通知开关、界面语言、系统通知）。语言与 macOS 菜单栏一致：「设置 → 界面语言」可选跟随系统/中文/English，写入 config.json 的 `ui.language`。
 
 ```powershell
 python -m pip install pystray Pillow

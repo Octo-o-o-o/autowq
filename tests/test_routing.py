@@ -56,6 +56,27 @@ class RoutingTests(unittest.TestCase):
         self.assertEqual(self.status(tid),'succeeded')
         self.assertEqual(json.loads((Path(path)/'result.json').read_text())['status'],'completed')
 
+    def test_single_attempt_does_not_expand_into_retries_or_provider_fallback(self):
+        tid, path = self.enqueue()
+        row = self.conn.execute('SELECT payload_json FROM tasks WHERE task_id=?',(tid,)).fetchone()
+        payload = json.loads(row[0]); payload['single_attempt'] = True
+        self.conn.execute('UPDATE tasks SET payload_json=? WHERE task_id=?',(json.dumps(payload),tid))
+        self.tick()
+        self.assertEqual(self.status(tid),'failed')
+        self.assertEqual(self.conn.execute('SELECT COUNT(*) FROM agent_calls').fetchone()[0],1)
+        self.assertEqual(self.conn.execute('SELECT max_attempts FROM tasks WHERE task_id=?',(tid,)).fetchone()[0],1)
+        self.assertEqual(len(list(Path(path).glob('*-attempt-*'))),1)
+        self.tick()
+        self.assertEqual(self.conn.execute('SELECT COUNT(*) FROM agent_calls').fetchone()[0],1)
+
+    def test_invalid_envelope_records_actual_validation_failure(self):
+        self.script.write_text("from pathlib import Path\nPath('result.json').write_text('{\"status\":\"completed\"}')\n")
+        tid, _ = self.enqueue()
+        for _ in range(4): self.tick()
+        self.assertEqual(self.status(tid),'failed')
+        row=self.conn.execute("SELECT detail_json FROM attempts WHERE task_id=? AND event='artifact_validation' ORDER BY attempt_id DESC LIMIT 1",(tid,)).fetchone()
+        self.assertEqual(json.loads(row[0])['call_status'],'artifact_invalid')
+
     def test_profile_switch_does_not_change_existing_retry_chain(self):
         tid,_=self.enqueue();self.tick()
         routing.choose_preset(self.conn,self.cfg,'second')

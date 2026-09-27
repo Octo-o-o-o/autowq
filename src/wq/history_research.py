@@ -158,6 +158,7 @@ def context(conn,cfg):
 
 
 def command(args):
+    from .i18n import text
     from .config import Config
     from . import db,autopilot
     cfg=Config.load(args.config,str(Path.cwd()));conn=db.connect(cfg.db_path)
@@ -178,12 +179,13 @@ def command(args):
             print(json.dumps(original['history_research']));return 0
         conn.execute('BEGIN IMMEDIATE')
         result,created=enqueue(conn,cfg);conn.commit()
-        print(json.dumps({'created':created,**result,'note':'由现有队列执行；每次复盘至少2次模型调用，使用原预算，未自动增加研究轮数'},ensure_ascii=False,indent=2));return 0
+        print(json.dumps({'created':created,**result,'note':text(getattr(args,'lang','zh'),'由现有队列执行；每次复盘至少2次模型调用，使用原预算，未自动增加研究轮数','Executed by the existing queue; each review uses at least 2 model calls on the original budget, adding no extra research cycles')},ensure_ascii=False,indent=2));return 0
     finally:conn.close()
 
 
-def add_parser(sub):
-    p=sub.add_parser('auto-research',help='全历史研究复盘 / Review all research cycles')
+def add_parser(sub, lang='zh'):
+    from .i18n import text
+    p=sub.add_parser('auto-research',help=text(lang, '全历史研究复盘', 'Review all research cycles'))
     p.add_argument('action',choices=['report','run','enable','disable'],nargs='?',default='report')
     p.add_argument('--every-cycles',type=int,default=5)
     p.add_argument('--min-hours',type=float,default=24)

@@ -1,4 +1,7 @@
 import copy
+import argparse
+import contextlib
+import io
 import json
 from pathlib import Path
 import tempfile
@@ -8,6 +11,12 @@ from helpers import make_env
 from wq import autopilot,history_research as h,util,store
 
 class HistoryResearchTests(unittest.TestCase):
+    def test_run_command_reports_enqueued_review_in_selected_language(self):
+        args=argparse.Namespace(config=self.cfg.path,action='run',lang='en')
+        with patch('wq.history_research.enqueue',return_value=({'review_id':'fixture'},True)), contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(h.command(args),0)
+        self.assertIn('Executed by the existing queue',out.getvalue())
+
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
         self.cfg,self.conn=make_env(self.tmp.name)

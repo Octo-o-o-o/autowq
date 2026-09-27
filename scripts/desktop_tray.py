@@ -2,7 +2,8 @@
 """pystray 托盘菜单：与 macOS 菜单栏同源（复用 wq.desktop_control 动作），面向 Windows/Linux。
 
 依赖：python -m pip install pystray Pillow。菜单模型（menu_model）与渲染（render_menu）分离，
-前者无第三方依赖、可单测；pystray 仅在真正运行时导入。
+前者无第三方依赖、可单测；pystray 仅在真正运行时导入。文案语言取 settings.language
+（config.json 的 ui.language；auto 跟随系统），切换入口在「设置 → 界面语言」。
 """
 import logging
 import os
@@ -40,120 +41,144 @@ else:
     sys.path.insert(0, str(ROOT / 'src'))
 
 from wq import desktop_control as bridge  # noqa: E402
+from wq.i18n import text  # noqa: E402
 
 HISTORY_CAP = 30
-INTERVALS = [(300, '5 分钟'), (900, '15 分钟'), (1800, '30 分钟'), (3600, '1 小时'), (7200, '2 小时'), (21600, '6 小时')]
-DAILIES = [(10, '10 轮'), (20, '20 轮'), (40, '40 轮'), (80, '80 轮')]
-TOTALS = [(50, '50 轮'), (100, '100 轮'), (150, '150 轮'), (300, '300 轮')]
+INTERVALS = [(300, ('5 分钟', '5 min')), (900, ('15 分钟', '15 min')), (1800, ('30 分钟', '30 min')),
+             (3600, ('1 小时', '1 hour')), (7200, ('2 小时', '2 hours')), (21600, ('6 小时', '6 hours'))]
+DAILIES = [(10, ('10 轮', '10 cycles')), (20, ('20 轮', '20 cycles')), (40, ('40 轮', '40 cycles')), (80, ('80 轮', '80 cycles'))]
+TOTALS = [(50, ('50 轮', '50 cycles')), (100, ('100 轮', '100 cycles')), (150, ('150 轮', '150 cycles')), (300, ('300 轮', '300 cycles'))]
+LANGUAGES = [('auto', ('跟随系统（自动）', 'Follow system (auto)')),
+             ('zh', ('中文', '中文')), ('en', ('English', 'English'))]
 BADGE_PREFIX = {'submitted': '★ '}
 
 
 # ---------- 菜单模型（纯数据，无 pystray 依赖） ----------
 
-def info(text):
-    return {'kind': 'info', 'text': str(text)}
+def info(message):
+    return {'kind': 'info', 'text': str(message)}
 
 
 def sep():
     return {'kind': 'sep'}
 
 
-def action(text, act, arg=None):
-    return {'kind': 'action', 'text': text, 'action': act, 'arg': arg}
+def action(label, act, arg=None):
+    return {'kind': 'action', 'text': str(label), 'action': act, 'arg': arg}
 
 
-def check(text, act, arg, checked):
-    return {'kind': 'check', 'text': text, 'action': act, 'arg': arg, 'checked': bool(checked)}
+def check(label, act, arg, checked):
+    return {'kind': 'check', 'text': str(label), 'action': act, 'arg': arg, 'checked': bool(checked)}
 
 
-def radio(text, act, arg, checked):
-    return {'kind': 'radio', 'text': text, 'action': act, 'arg': arg, 'checked': bool(checked)}
+def radio(label, act, arg, checked):
+    return {'kind': 'radio', 'text': str(label), 'action': act, 'arg': arg, 'checked': bool(checked)}
 
 
-def submenu(text, items):
-    return {'kind': 'submenu', 'text': text, 'items': items}
+def submenu(label, items):
+    return {'kind': 'submenu', 'text': str(label), 'items': items}
 
 
-def history_items(hist):
+def history_items(hist, lang):
+    import textwrap
     entries = (hist.get('entries') or [])[:HISTORY_CAP]
     if not entries:
-        return [info('暂无记录')]
-    rows = [info(f"共 {hist.get('count', len(entries))} 轮 · 北京时间")]
+        return [info(text(lang, '暂无记录', 'No records'))]
+    rows = [info(text(lang, f"共 {hist.get('count', len(entries))} 轮 · 北京时间",
+                          f"{hist.get('count', len(entries))} cycles · Beijing time"))]
     for entry in entries:
         prefix = BADGE_PREFIX.get(entry.get('badge') or '', '')
-        rows.append(info(prefix + str(entry.get('title', ''))))
+        details = entry.get('detail') or entry.get('lines') or []
+        title = prefix + str(entry.get('title', ''))
+        rows.append(submenu(title, [info(part) for line in details for part in textwrap.wrap(str(line), 90)]) if details else info(title))
     return rows
 
 
-def submission_items(subs):
+def submission_items(subs, lang):
     entries = subs.get('entries') or []
     if not entries:
-        return [info('暂无记录')]
+        return [info(text(lang, '暂无记录', 'No records'))]
     return [info(('★ ' if e.get('badge') == 'submitted' else '') + str(e.get('title', ''))) for e in entries]
 
 
-def _current_note(pairs, value, unit):
+def _current_note(pairs, value, unit, lang):
     if value is not None and value not in dict(pairs):
-        return [info(f'当前值 {value} {unit}')]
+        return [info(text(lang, f'当前值 {value} {unit}', f'Current: {value} {unit}'))]
     return []
 
 
-def settings_items(se):
+def settings_items(se, lang):
     if not se:
-        return [info('正在读取设置…')]
+        return [info(text(lang, '正在读取设置…', 'Loading settings…'))]
     notifications = se.get('notifications', True)
     preset_rows = [radio(p['name'], 'preset', p['name'], p['name'] == se.get('active_preset'))
                    for p in se.get('presets') or []]
-    provider_rows = [check(p['name'] + ('（不可用）' if p.get('reason') else ''),
+    provider_rows = [check(p['name'] + (text(lang, '（不可用）', ' (unavailable)') if p.get('reason') else ''),
                            'provider', p['name'], not p.get('disabled'))
                      for p in se.get('providers') or []]
+    language_rows = [radio(text(lang, zh, en), 'config', f'language={value}',
+                           se.get('language_setting', 'auto') == value)
+                     for value, (zh, en) in LANGUAGES]
     return [
-        check('系统通知（提交成功/任务失败）', 'config',
-              'notifications=' + ('off' if notifications else 'on'), notifications),
-        submenu('路由预设', preset_rows or [info('暂无预设')]),
-        submenu('渠道', [info('勾选表示参与路由，点击切换')] + provider_rows),
-        submenu('运行间隔', [radio(text, 'config', f'interval_s={value}', se.get('interval_s') == value)
-                          for value, text in INTERVALS] + _current_note(INTERVALS, se.get('interval_s'), '秒')),
-        submenu('每日轮数上限', [radio(text, 'config', f'max_cycles_per_day={value}', se.get('max_cycles_per_day') == value)
-                             for value, text in DAILIES] + _current_note(DAILIES, se.get('max_cycles_per_day'), '轮')),
-        submenu('累计轮数上限', [radio(text, 'config', f'max_cycles_total={value}', se.get('max_cycles_total') == value)
-                             for value, text in TOTALS]
-                + [radio('不限', 'config', 'max_cycles_total=none', se.get('max_cycles_total') is None)]
-                + _current_note(TOTALS, se.get('max_cycles_total'), '轮')),
+        check(text(lang, '系统通知（提交成功/任务失败）', 'System notifications (submission accepted / task failed)'),
+              'config', 'notifications=' + ('off' if notifications else 'on'), notifications),
+        submenu(text(lang, '界面语言', 'Interface language'), language_rows),
+        submenu(text(lang, '路由预设', 'Routing presets'),
+                preset_rows or [info(text(lang, '暂无预设', 'No presets'))]),
+        submenu(text(lang, '渠道', 'Providers'),
+                [info(text(lang, '勾选表示参与路由，点击切换', 'Checked = used for routing; click to toggle'))] + provider_rows),
+        submenu(text(lang, '运行间隔', 'Run interval'),
+                [radio(text(lang, zh, en), 'config', f'interval_s={value}', se.get('interval_s') == value)
+                 for value, (zh, en) in INTERVALS]
+                + _current_note([(v, 0) for v, _ in INTERVALS], se.get('interval_s'), text(lang, '秒', 's'), lang)),
+        submenu(text(lang, '每日轮数上限', 'Daily cycle limit'),
+                [radio(text(lang, zh, en), 'config', f'max_cycles_per_day={value}', se.get('max_cycles_per_day') == value)
+                 for value, (zh, en) in DAILIES]
+                + _current_note([(v, 0) for v, _ in DAILIES], se.get('max_cycles_per_day'), text(lang, '轮', 'cycles'), lang)),
+        submenu(text(lang, '累计轮数上限', 'Total cycle limit'),
+                [radio(text(lang, zh, en), 'config', f'max_cycles_total={value}', se.get('max_cycles_total') == value)
+                 for value, (zh, en) in TOTALS]
+                + [radio(text(lang, '不限', 'Unlimited'), 'config', 'max_cycles_total=none', se.get('max_cycles_total') is None)]
+                + _current_note([(v, 0) for v, _ in TOTALS], se.get('max_cycles_total'), text(lang, '轮', 'cycles'), lang)),
     ]
 
 
 def menu_model(state):
+    settings = state.get('settings') or {}
+    lang = settings.get('language') or 'zh'
     st = state.get('status') or {}
     hist = state.get('history') or {}
     subs = state.get('submissions') or {}
     items = [
-        info(st.get('title') or '读取状态…'),
+        info(st.get('title') or text(lang, '读取状态…', 'Reading status…')),
         info((st.get('message') or ' ')[:80] or ' '),
-        info('最近调度：' + (st.get('last_tick') or '尚无记录')),
-        info('下一轮：' + (st.get('next_at') or '待调度检查')),
+        info(text(lang, '最近调度：', 'Last tick: ') + (st.get('last_tick') or text(lang, '尚无记录', 'No records yet'))),
+        info(text(lang, '下一轮：', 'Next cycle: ') + (st.get('next_at') or text(lang, '待当前任务完成／调度检查', 'awaiting current task / scheduler check'))),
     ]
-    items += [info('下轮' + str(m.get('title', '未知'))) for m in st.get('next_models') or []]
+    items += [info(text(lang, '下轮', 'Next: ') + str(m.get('title', text(lang, '未知', 'unknown')))) for m in st.get('next_models') or []]
     items += [
         sep(),
-        submenu('WorldQuant 账号', [
-            info('BRAIN 账号：' + ('已绑定（本地会话存在）' if st.get('brain_bound')
-                                   else '未绑定；用下方「绑定 / 重新登录」')),
-            action('绑定 / 重新登录…', 'brain-login'),
-            action('核验会话（联网检查）', 'brain-check'),
-            action('打开 BRAIN 注册页', 'brain-register'),
+        submenu(text(lang, 'WorldQuant 账号', 'WorldQuant account'), [
+            info(text(lang, 'BRAIN 账号：', 'BRAIN account: ') +
+                 (text(lang, '已绑定（本地会话存在）', 'bound (local session present)') if st.get('brain_bound')
+                  else text(lang, '未绑定；用下方「绑定 / 重新登录」', 'not bound; use "Bind / re-login" below'))),
+            action(text(lang, '绑定 / 重新登录…', 'Bind / re-login…'), 'brain-login'),
+            action(text(lang, '核验会话（联网检查）', 'Verify session (online check)'), 'brain-check'),
+            action(text(lang, '打开 BRAIN 注册页', 'Open BRAIN registration page'), 'brain-register'),
         ]),
         sep(),
-        submenu(f"轮次历史（{hist.get('count', '…')}）", history_items(hist)),
-        submenu(f"已提交 Alpha（{subs.get('count', '…')}）", submission_items(subs)),
+        submenu(text(lang, f"轮次历史（{hist.get('count', '…')}）", f"Cycle history ({hist.get('count', '…')})"),
+                history_items(hist, lang)),
+        submenu(text(lang, f"已提交 Alpha（{subs.get('count', '…')}）", f"Submitted Alphas ({subs.get('count', '…')})"),
+                submission_items(subs, lang)),
         sep(),
-        submenu('设置', settings_items(state.get('settings'))),
+        submenu(text(lang, '设置', 'Settings'), settings_items(settings, lang)),
         sep(),
-        action('立刻运行下一轮', 'run-next'),
-        action('开始自动运行', 'start'),
-        action('暂停（当前任务完成后）', 'pause'),
-        action('打开运行日志', 'logs'),
-        action('退出（暂停自动运行）', 'quit'),
+        action(text(lang, '立刻运行下一轮', 'Run next cycle now'), 'run-next'),
+        action(text(lang, '开始自动运行', 'Start automatic research'), 'start'),
+        action(text(lang, '暂停（当前任务完成后）', 'Pause (after current task finishes)'), 'pause'),
+        action(text(lang, '打开运行日志', 'Open run log'), 'logs'),
+        action(text(lang, '退出（暂停自动运行）', 'Quit (pauses automatic research)'), 'quit'),
     ]
     return items
 
@@ -229,7 +254,8 @@ class Tray:
         except Exception as exc:
             logging.exception('动作失败 %s', act)
             if not quiet:
-                self.notify('操作未完成', str(exc)[:200])
+                lang = (self.state.get('settings') or {}).get('language') or 'zh'
+                self.notify(text(lang, '操作未完成', 'Action failed'), str(exc)[:200])
             return None
 
     def notify(self, title, body):
@@ -274,6 +300,7 @@ class Tray:
 
     def loop(self):
         self.call('status', quiet=True)
+        self.call('settings', quiet=True)
         self.refresh()
         ticks = 0
         while not self.stop.wait(15):
@@ -302,7 +329,7 @@ def main():
         logging.error('已有托盘实例在运行，退出')
         return 0
     tray = Tray()
-    tray.icon = pystray.Icon('WorldQuant', title='WorldQuant 自动研究',
+    tray.icon = pystray.Icon('WorldQuant', title='WorldQuant',
                              menu=render_menu(menu_model({}), tray.on_action))
     candidates = [ROOT / 'packaging/assets/tray-icon.png']
     if BUNDLE is not None:

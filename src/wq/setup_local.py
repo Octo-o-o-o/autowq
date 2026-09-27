@@ -81,6 +81,9 @@ def main():
     args=p.parse_args()
     try:dest=render(args.root,args.runtime)
     except (ValueError,OSError) as exc:p.exit(1,str(exc)+'\n')
-    print(f'Generated disabled config and launchers in {dest}. Nothing installed or started.')
+    from .i18n import default_language, text
+    lang = default_language()
+    print(text(lang, f'已在 {dest} 生成默认关闭的配置与启动入口；未安装、未启动任何服务。',
+                 f'Generated disabled config and launchers in {dest}. Nothing installed or started.'))
 
 if __name__=='__main__':main()

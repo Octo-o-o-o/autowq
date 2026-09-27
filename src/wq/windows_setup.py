@@ -12,6 +12,14 @@ RUN_KEY = r'HKCU\Software\Microsoft\Windows\CurrentVersion\Run'
 TRAY_VALUE = 'WorldQuantTray'
 
 
+def _t(zh, en):
+    try:
+        from .i18n import default_language, text
+    except ImportError:                      # 被 scripts/ 以文件方式加载时无包上下文
+        from wq.i18n import default_language, text
+    return text(default_language(), zh, en)
+
+
 def pythonw_exe(python):
     """优先用 pythonw.exe（无控制台窗口）；找不到就退回原解释器。"""
     guess = Path(python).with_name('pythonw.exe')
@@ -65,13 +73,15 @@ def main(argv=None):
     parser.add_argument('--remove', action='store_true', help='移除调度任务与自启；不动队列与账本')
     args = parser.parse_args(argv)
     if sys.platform != 'win32':
-        raise SystemExit('此脚本仅用于 Windows；macOS 用 scripts/install_menubar.py，Linux 用 scripts/setup_linux.py')
+        raise SystemExit(_t('此脚本仅用于 Windows；macOS 用 scripts/install_menubar.py，Linux 用 scripts/setup_linux.py',
+                            'Windows only; use scripts/install_menubar.py on macOS and scripts/setup_linux.py on Linux.'))
     root = Path(args.root).resolve()
     validate(root, args.python)
     if args.remove:
         subprocess.run(['schtasks', '/Delete', '/TN', TASK, '/F'], check=False)
         subprocess.run(['reg', 'delete', RUN_KEY, '/v', TRAY_VALUE, '/f'], check=False)
-        print('已移除：调度任务与托盘自启；研究队列与账本保持原状')
+        print(_t('已移除：调度任务与托盘自启；研究队列与账本保持原状',
+                'Removed: the scheduler task and tray auto-start; the research queue and ledger are unchanged.'))
         return 0
     run_dir = root / 'var' / 'run'
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -79,15 +89,18 @@ def main(argv=None):
     subprocess.run(runner_task_args(root, args.python), check=True)
     subprocess.run(['reg', 'add', RUN_KEY, '/v', TRAY_VALUE, '/t', 'REG_SZ',
                     '/d', tray_run_value(root, args.python), '/f'], check=True)
-    print(f'已注册调度任务 {TASK}（每分钟一次）与托盘登录自启；日志在 {run_dir}')
+    print(_t(f'已注册调度任务 {TASK}（每分钟一次）与托盘登录自启；日志在 {run_dir}',
+             f'Registered scheduler task {TASK} (every minute) and tray auto-start; logs in {run_dir}'))
     missing = [m for m in ('pystray', 'PIL') if not _importable(m)]
     if missing:
-        print(f'缺少托盘依赖 {", ".join(missing)}；请先运行 {args.python} -m pip install pystray Pillow，'
-              f'然后运行 {pythonw_exe(args.python)} scripts\\desktop_tray.py')
+        print(_t(f'缺少托盘依赖 {", ".join(missing)}；请先运行 {args.python} -m pip install pystray Pillow，'
+                   f'然后运行 {pythonw_exe(args.python)} scripts\\desktop_tray.py',
+                 f'Missing tray dependencies {", ".join(missing)}; run {args.python} -m pip install pystray Pillow first, '
+                 f'then {pythonw_exe(args.python)} scripts\\desktop_tray.py'))
         return 0
     subprocess.Popen([pythonw_exe(args.python), str(root / 'scripts' / 'desktop_tray.py')],
                      cwd=str(root), close_fds=True)
-    print('托盘已启动')
+    print(_t('托盘已启动', 'Tray started'))
     return 0
 
 

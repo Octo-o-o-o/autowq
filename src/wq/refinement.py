@@ -27,7 +27,7 @@ def assess(checks):
         elif result != 'PASS':
             blockers.append(str(name) + ': ' + str(result))
     if not any(c.get('result') == 'FAIL' for c in checks):
-        blockers.append('没有明确FAIL；先补齐检查或走提交验收，不做参数救活')
+        blockers.append('没有明确FAIL；先补齐检查或走提交验收，不做参数挖掘式挽救')
     return {'worth_reviewing': not blockers, 'ratios': ratios, 'blockers': blockers, 'pending': pending}
 
 

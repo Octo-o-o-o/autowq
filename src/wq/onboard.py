@@ -102,7 +102,7 @@ PROVIDER_URLS = {'grok':'https://grok.com/', 'devin':'https://app.devin.ai/',
                  'qwen':'https://qwenlm.github.io/qwen-code-docs/', 'opencode':'https://opencode.ai/'}
 
 
-def login_flow(root, lang):
+def login_flow(root, lang, persist=None):
     root=Path(root).resolve();path=root/'config/config.json'
     cfg=json.loads(path.read_text());info=cfg.get('onboarding',{})
     providers=info.get('providers',list(cfg.get('models',{})))
@@ -144,7 +144,7 @@ def login_flow(root, lang):
     cfg['onboarding']['brain_authentication_verified']=status.get('brain')=='authenticated'
     cfg['onboarding']['authentication_verified']=False
     cfg['onboarding']['model_access_verified']=False
-    cfg.setdefault('ui',{})['language']=lang
+    cfg.setdefault('ui',{})['language']=persist or lang   # 允许持久化 'auto'（跟随系统）
     path.write_text(json.dumps(cfg,ensure_ascii=False,indent=2)+'\n');path.chmod(0o600)
     say('登录进度已保存；未完成项可用 wq onboard --login-only 继续。','Login progress saved. Resume unfinished steps with wq onboard --login-only.')
     print(json.dumps(status,ensure_ascii=False,indent=2))
@@ -153,7 +153,7 @@ def login_flow(root, lang):
 
 def main(argv=None):
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--lang',choices=['zh','en'],default=None)
+    p.add_argument('--lang',choices=['zh','en','auto'],default=None)
     p.add_argument('--root',type=Path,default=Path.cwd())
     p.add_argument('--runtime',type=Path,default=Path.home()/'.local/share/autowq-runtime')
     p.add_argument('--login-only',action='store_true',help='Resume login without regenerating config')
@@ -171,9 +171,11 @@ def main(argv=None):
     if a.lang is None:
         a.lang=preferred_language(a.root/'config/config.json') if a.login_only else default_language()
         if not a.non_interactive and not a.list and sys.stdin.isatty():
-            choice=input(f'语言 / Language [zh/en] ({a.lang}): ').strip().lower()
-            if choice not in ('','zh','en'): p.exit(2,'请选择 zh/en / Choose zh or en\n')
+            choice=input(f'语言 / Language [zh/en/auto] ({a.lang}): ').strip().lower()
+            if choice not in ('','zh','en','auto'): p.exit(2,'请选择 zh/en/auto / Choose zh, en or auto\n')
             a.lang=choice or a.lang
+    a.lang_pref=a.lang                                  # 持久化原值，'auto' 表示跟随系统
+    a.lang=default_language() if a.lang=='auto' else a.lang
     zh=a.lang=='zh'
     say=lambda cn,en: print(cn if zh else en)
     ask=lambda cn,en: input(cn if zh else en).strip()
@@ -181,7 +183,7 @@ def main(argv=None):
     try:
         if a.login_only:
             if a.non_interactive or not sys.stdin.isatty(): raise ValueError('Login requires an interactive terminal / 登录需要交互终端')
-            return login_flow(a.root,a.lang)
+            return login_flow(a.root,a.lang,a.lang_pref)
         if (a.root/'config/config.json').exists(): raise ValueError('Existing deployment: refusing to overwrite config/config.json. See docs/onboarding.md.')
         if not a.non_interactive and not sys.stdin.isatty(): raise ValueError('Interactive terminal required, or use --non-interactive with explicit choices.')
         say('步骤：选择模型渠道。BRAIN注册入口：'+BRAIN_REGISTER_URL,'Step: select model providers. BRAIN registration: '+BRAIN_REGISTER_URL)
@@ -210,7 +212,7 @@ def main(argv=None):
                     key_envs[name]=key_envs.get(name) or ask(name+' Key环境变量名（回车默认）：',name+' key environment variable (Enter for default): ')
                 apis[name]=api_definition(name,models.get(name,''),urls.get(name),key_envs.get(name))
         if 'grok' in selected and 'grok' not in efforts and not a.non_interactive:
-            value=ask('Grok思考强度 low/medium/high/xhigh（回车使用CLI默认）：','Grok effort low/medium/high/xhigh (Enter for CLI default): ')
+            value=ask('Grok 思考强度 low/medium/high/xhigh（回车使用 CLI 默认）：','Grok effort low/medium/high/xhigh (Enter for CLI default): ')
             if value:efforts['grok']=value
         roles={}
         for role in ('research','review','engineering'):
@@ -232,12 +234,12 @@ def main(argv=None):
                     key_path=save_key(cfg['paths']['private_dir'],name,getpass.getpass('API key: '))
                     profiles['providers'][name]['transport']['api_key_file']=key_path
             pp.write_text(json.dumps(profiles,ensure_ascii=False,indent=2)+'\n')
-        cfg['ui']={'language':a.lang}
+        cfg['ui']={'language':a.lang_pref}
         (a.root/'config/config.json').write_text(json.dumps(cfg,ensure_ascii=False,indent=2)+'\n')
         say('WorldQuant BRAIN 注册：'+BRAIN_REGISTER_URL,'WorldQuant BRAIN registration: '+BRAIN_REGISTER_URL)
         login_code=0
         if not a.non_interactive and not a.skip_login:
-            login_code=login_flow(a.root,a.lang)
+            login_code=login_flow(a.root,a.lang,a.lang_pref)
         else:
             say('登录待完成：wq onboard --login-only','Login pending: wq onboard --login-only')
         say('配置已保存。下一步：完成待办登录 → doctor → 离线导入 → 预算/授权 → 真实单轮核验 → 开启调度。','Configuration saved. Next: finish pending logins → doctor → offline import → budgets/authorization → verify one real cycle → enable scheduling.')

@@ -77,7 +77,9 @@ def install(destination, activate):
     if not loaded('com.worldquant.wq-runner'):
         subprocess.run(['/bin/launchctl', 'bootstrap', domain, str(runner)], check=True, timeout=20)
     subprocess.run(['/bin/launchctl', 'bootstrap', domain, str(menu_plist)], check=True, timeout=20)
-    print(f'已安装并启用登录自启：{app}')
+    _env = next((os.environ[k] for k in ('LC_ALL','LC_MESSAGES','LANGUAGE','LANG') if os.environ.get(k)), '')
+    _zh = _env.lower().replace('-', '_').startswith('zh')
+    print(('已安装并启用登录自启：' if _zh else 'Installed and login auto-start enabled: ') + str(app))
 
 
 if __name__ == '__main__':

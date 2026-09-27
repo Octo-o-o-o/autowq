@@ -55,6 +55,12 @@ class WindowsSetupTests(unittest.TestCase):
 
 
 class TrayMenuModelTests(unittest.TestCase):
+    def test_history_exposes_full_review_in_submenu(self):
+        rows=tray.history_items({'count':1,'entries':[{'title':'Cycle 1','detail':['Review evidence: '+('reason '*40)]}]},'en')
+        self.assertEqual(rows[1]['kind'],'submenu')
+        self.assertIn('Review evidence:',rows[1]['items'][0]['text'])
+        self.assertGreater(len(rows[1]['items']),1)
+
     def test_empty_state_shows_placeholder_and_disabled_rows(self):
         entries = tray.menu_model({})
         self.assertEqual(entries[0], {'kind': 'info', 'text': '读取状态…'})
@@ -117,6 +123,26 @@ class TrayMenuModelTests(unittest.TestCase):
         notify = settings['items'][0]
         self.assertEqual(notify['arg'], 'notifications=on')
         self.assertFalse(notify['checked'])
+
+    def test_language_submenu_switches_and_renders_english(self):
+        state = {'settings': {'language': 'en', 'language_setting': 'en', 'notifications': True}}
+        entries = tray.menu_model(state)
+        texts = [e.get('text', '') for e in entries]
+        self.assertIn('Settings', texts)
+        self.assertIn('Start automatic research', texts)
+        settings = next(e for e in entries if e.get('text') == 'Settings')
+        language = next(e for e in settings['items'] if e.get('text') == 'Interface language')
+        rows = {row['arg']: row for row in language['items']}
+        self.assertEqual(set(rows), {'language=auto', 'language=zh', 'language=en'})
+        self.assertTrue(rows['language=en']['checked'])
+        self.assertFalse(rows['language=auto']['checked'])
+
+        entries = tray.menu_model({'settings': {'language': 'zh', 'language_setting': 'auto', 'notifications': True}})
+        settings = next(e for e in entries if e.get('text') == '设置')
+        language = next(e for e in settings['items'] if e.get('text') == '界面语言')
+        rows = {row['arg']: row for row in language['items']}
+        self.assertTrue(rows['language=auto']['checked'])
+        self.assertIn('跟随系统（自动）', [row['text'] for row in language['items']])
 
 
 class SchedulerBackendTests(unittest.TestCase):
