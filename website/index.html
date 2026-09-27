@@ -16,7 +16,7 @@
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://autowq.octoooo.com/">
 <meta property="og:image" content="https://autowq.octoooo.com/assets/og.png">
-<link rel="stylesheet" href="/style.css?v=2">
+<link rel="stylesheet" href="/style.css?v=3">
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -110,10 +110,10 @@
 
 <section id="tray">
   <h2><span class="no">03</span>住在系统托盘里</h2>
-  <p class="lead">状态、BRAIN 账号绑定、历史、提交、预算开关——都在菜单栏 / 托盘完成，不用开浏览器。两个平台共享同一个受控桥接，能力完全一致。</p>
+  <p class="lead">状态、BRAIN 账号绑定、历史、提交、预算开关——都在菜单栏 / 托盘完成，不用开浏览器。两个平台共享同一个受控桥接：同一份菜单，在 macOS 菜单栏和 Windows 托盘长一个样。</p>
   <div class="trays rise">
     <div class="oscard">
-      <div class="osbar"><img src="/favicon-32.png" alt="">macOS 菜单栏<span class="dot"></span></div>
+      <div class="osbar"><img src="/favicon-32.png" alt="">macOS 菜单栏 · Windows 托盘<span class="dot"></span></div>
       <div class="osbody"><div class="menu">
         <div class="mi head">自动研究已启用<span class="r">●</span></div>
         <div class="mi dim">下轮：研究 grok → 审查 cursor</div>
@@ -127,27 +127,12 @@
         <div class="mi">暂停（当前任务完成后）</div>
       </div></div>
     </div>
-    <div class="oscard">
-      <div class="osbar"><img src="/favicon-32.png" alt="">Windows 托盘<span class="dot"></span></div>
-      <div class="osbody"><div class="menu">
-        <div class="mi head">调度器运行中<span class="r">●</span></div>
-        <div class="mi dim">任务计划每分钟唤醒一次</div>
-        <hr>
-        <div class="mi">WorldQuant 账号<span class="r">BRAIN 未绑定 ▸</span></div>
-        <div class="mi">轮次历史<span class="r">▸</span></div>
-        <div class="mi">已提交 Alpha<span class="r">▸</span></div>
-        <div class="mi">设置<span class="r">通知 · 上限 ▸</span></div>
-        <hr>
-        <div class="mi hot">开始自动运行</div>
-        <div class="mi">退出（暂停自动运行）</div>
-      </div></div>
-    </div>
   </div>
 </section>
 
 <section id="case">
   <h2><span class="no">04</span>真实账本，不是效果图</h2>
-  <p class="lead">作者个人实测：研究只消耗订阅 token 的富余量，每天都有一枚 Alpha 成功提交并获平台回执。</p>
+  <p class="lead">作者个人实测：研究只消耗订阅 token 的富余量，连续 4 天每天提交 1 枚 Alpha、平台状态全部 ACTIVE；约第 2 天升到银牌，第 5 天升到金牌，顾问身份也可以较快达成。</p>
   <div class="stats rise">
     <div class="stat"><div class="n" data-count="123">0</div><div class="l">研究轮次</div></div>
     <div class="stat"><div class="n" data-count="160">0</div><div class="l">真实模拟</div></div>
@@ -156,17 +141,18 @@
   </div>
   <div class="chart rise">
     <div class="chart-head">
-      <span class="lg acc"><i></i>当天有 Alpha 获得正式提交回执</span>
-      <span class="note">作者个人实测 · 连续每天都有回执</span>
+      <span class="lg acc"><i></i>累计提交的 Alpha · 每天都在变多</span>
+      <span class="note">🥈 约第 2 天银牌 · 🥇 第 5 天金牌 · 顾问可较快达成</span>
     </div>
     <div class="bars">
-      <div class="bar accepted"><b>✓</b><i style="height:56%;animation-delay:.1s"></i><em>第 1 天 ★</em></div>
-      <div class="bar accepted"><b>✓</b><i style="height:56%;animation-delay:.2s"></i><em>第 2 天 ★</em></div>
-      <div class="bar accepted"><b>✓</b><i style="height:56%;animation-delay:.3s"></i><em>第 3 天 ★</em></div>
-      <div class="bar accepted"><b>✓</b><i style="height:56%;animation-delay:.4s"></i><em>第 4 天 ★</em></div>
+      <div class="bar accepted"><b>1</b><i style="height:25%;animation-delay:.1s"></i><em>第 1 天 ★</em></div>
+      <div class="bar accepted"><b>2</b><i style="height:50%;animation-delay:.2s"></i><em>第 2 天 ★🥈</em></div>
+      <div class="bar accepted"><b>3</b><i style="height:75%;animation-delay:.3s"></i><em>第 3 天 ★</em></div>
+      <div class="bar accepted"><b>4</b><i style="height:100%;animation-delay:.4s"></i><em>第 4 天 ★</em></div>
+      <div class="bar accepted"><b>🥇</b><i style="height:100%;animation-delay:.5s"></i><em>第 5 天 · 金牌</em></div>
     </div>
   </div>
-  <p class="fineprint">★ = 当天有 Alpha 获得平台正式提交回执（作者个人实测）。模型用量都在已付订阅的富余额度内，没有额外按量 API 开销；"被接收"不代表筛选通过或收益——研究工具，不是收益承诺。</p>
+  <p class="fineprint">柱高 = 累计已提交 Alpha 数（第 1–4 天每天 +1，平台状态均为 ACTIVE；★ = 当天有新回执）。🥈 约第 2 天升银牌、🥇 第 5 天升金牌；等级与积分由 WorldQuant 平台按 Alpha 与 OS 表现持续累计，顾问身份获取时间因人而异。模型用量都在已付订阅的富余额度内；"被接收"不代表筛选通过或收益——研究工具，不是收益承诺。</p>
 </section>
 
 <section id="install">

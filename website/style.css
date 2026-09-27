@@ -191,7 +191,7 @@ h2 .no { color: var(--amber); margin-right: 12px; font-size: 15px; vertical-alig
 .bullets li b { color: var(--paper); font-weight: 600; }
 
 /* ── 托盘可视化 ── */
-.trays { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+.trays { display: grid; grid-template-columns: minmax(0, 480px); justify-content: center; }
 @media (max-width: 860px) { .trays { grid-template-columns: 1fr; } }
 .oscard { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); overflow: hidden; }
 .osbar {
@@ -244,7 +244,7 @@ h2 .no { color: var(--amber); margin-right: 12px; font-size: 15px; vertical-alig
 .chart-head .note { margin-left: auto; color: #5c6355; font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; }
 
 .bars {
-  display: grid; grid-template-columns: repeat(4, 96px); justify-content: center;
+  display: grid; grid-template-columns: repeat(5, minmax(52px, 96px)); justify-content: center;
   gap: clamp(16px, 4vw, 40px); align-items: end;
   border-bottom: 1px solid var(--line); padding: 0 2px;
 }
