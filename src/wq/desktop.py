@@ -137,6 +137,12 @@ def history(conn, cfg):
             short += ' + 未知'
         start = conn.execute("SELECT MIN(created_at) FROM attempts WHERE task_id=? AND event='provider_start'", (cycle['research_task'],)).fetchone()[0]
         badge, badge_text = cycle_badge(conn, cycle)
+        outcome = cycle['outcome'] or '进行中'
+        if outcome.startswith('任务未完成'):
+            reasons = [t['last_error'] for t in members if t['status'] in ('failed', 'blocked', 'aborted') and t['last_error']]
+            for reason in reasons:
+                if reason not in outcome:
+                    outcome += '；' + reason
         title = f"第 {cycle['cycle_id']} 轮 · {cycle_directive(conn, cycle)}" + (f" · {badge_text}" if badge_text else '')
         if cycle['state'] == 'closed':
             time_line = beijing(cycle['updated_at'], '—', '%m-%d %H:%M') + ' 完成'
@@ -146,13 +152,13 @@ def history(conn, cfg):
                 time_line,
                 '研究 ' + task_model(conn, cycle['research_task'], compact=True) + ' · 审查 ' + task_model(conn, cycle['review_task'], compact=True),
                 short,
-                '结果 ' + (cycle['outcome'] or '进行中')],
+                '结果 ' + outcome],
             'detail': ['创建：' + beijing(cycle['created_at']),
                        '开始：' + beijing(start, '无模型启动记录'),
                        '完成：' + (beijing(cycle['updated_at']) if cycle['state'] == 'closed' else '尚未完成'),
                        '研究：' + task_model(conn, cycle['research_task']),
                        '审查：' + task_model(conn, cycle['review_task']),
-                       *cost.split('；'), '结果：' + (cycle['outcome'] or '进行中')]})
+                       *cost.split('；'), '结果：' + outcome]})
     return {'entries': entries, 'count': len(entries), 'note': '时间均为北京时间（UTC+8）。'}
 
 

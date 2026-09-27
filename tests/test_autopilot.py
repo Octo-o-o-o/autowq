@@ -89,6 +89,30 @@ class AutopilotTests(unittest.TestCase):
         self.assertIn('hypothesis和counterexample各不超过2000字符', autopilot.generate_prompt(self.c))
 
 
+    def test_prompt_limits_follow_compiler_profile_for_research_and_review(self):
+        for plan, profile in ((None, 'proposal'), ({'ast': proposal()['ast']}, 'combination')):
+            contract = research_dsl.public_contract(self.p['bindings'], profile)
+            research = autopilot.generate_prompt(self.c, combination=plan, bindings=self.p['bindings'])
+            review = autopilot.review_prompt(proposal(), combination=plan, bindings=self.p['bindings'])
+            for prompt in (research, review):
+                self.assertIn(contract['limits'], prompt)
+                self.assertNotIn('最多2个时间序列操作和2个组合操作', prompt)
+            if plan:
+                self.assertIn('允许复用父信号的角色和机制', research)
+                self.assertNotIn('最多24节点', research)
+                self.assertNotIn('最多24节点', review)
+
+    def test_blocked_research_keeps_reason_and_never_enqueues_review(self):
+        self.tick()
+        row = self.cycle()
+        self.c.execute("UPDATE tasks SET status='blocked',last_error=? WHERE task_id=?",
+                       ('固定AST与提示词复杂度限制冲突', row['research_task']))
+        self.tick()
+        self.assertEqual(self.cycle()['state'], 'closed')
+        self.assertIn('固定AST与提示词复杂度限制冲突', self.cycle()['outcome'])
+        self.assertIsNone(self.cycle()['review_task'])
+        self.assertEqual(self.posts, 0)
+
     def test_invalid_candidate_survives_rollback_for_future_history(self):
         self.tick()
         row=self.cycle()

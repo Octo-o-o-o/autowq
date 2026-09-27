@@ -145,7 +145,8 @@ def roles_used(ast):
     return sorted(x for x in out if isinstance(x, str))
 
 
-def public_contract(bindings=None):
+def public_contract(bindings=None, profile='proposal'):
+    limits = LIMITS[profile]
     roles = role_catalog(bindings) if bindings else dict(CORE_DESCRIPTIONS)
     groups = [g for g in GROUPS if bindings and bindings.get(g, {}).get('group_field')] if bindings else []
     return {'roles': roles,
@@ -158,4 +159,4 @@ def public_contract(bindings=None):
                 'past_only':'op=mean/delta/std/time_rank/time_zscore/decay/sum/backfill/delay/av_diff, arg=AST, window=5/10/20/60/120/252（decay=线性衰减加权均值，用于降低换手；backfill=用过去窗口内最近有效值填充缺失，适合季度基本面；delay=取window日前的值；av_diff=当前值减过去窗口均值）',
                 'pair':'op=corr, left=AST, right=AST, window=…（过去窗口内两个序列的相关系数）',
                 'group':'op=group_rank/group_zscore/group_neutralize, arg=AST, group=' + ('/'.join(groups) if groups else '（本策略未核验分组字段）')},
-        'limits':f'最多24节点、深度6，最多{MAX_TIMESERIES}个时间操作、{MAX_BINARY}个组合操作、{MAX_GROUP}个分组操作、{MAX_ROLES}个字段角色。文字字段上限为title 100、hypothesis 2000、counterexample 2000字符；禁止单字段及仅用rank/neg包裹的单字段（例如neg(rank(daily_return))）；不得为绕过此规则机械添加算子。单个提案；不得通过改窗口、改符号、加rank救活旧候选。禁止原始代码、API、平台字段名。'}
+        'limits':f"最多{limits['nodes']}节点、深度{limits['depth']}（根节点深度为0，每条父子边加1；重复子树按每次出现计数），最多{limits['timeseries']}个时间操作、{limits['binary']}个组合操作、{limits['group']}个分组操作、{limits['roles']}个字段角色。文字字段上限为title 100、hypothesis 2000、counterexample 2000字符；禁止单字段及仅用rank/neg包裹的单字段（例如neg(rank(daily_return))）；不得为绕过此规则机械添加算子。单个提案；不得通过改窗口、改符号、加rank救活旧候选。禁止原始代码、API、平台字段名。"}

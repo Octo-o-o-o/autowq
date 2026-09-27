@@ -126,6 +126,19 @@ class DesktopDataTests(unittest.TestCase):
         entry = desktop.history(self.c, self.cfg)['entries'][0]
         self.assertIsNone(entry['badge'])
 
+    def test_old_blocked_history_shows_task_reason_without_rewriting_ledger(self):
+        cid = self.cycle(outcome='任务未完成：blocked')
+        tid, _ = store.enqueue_task(self.c, 'agent_call', {})
+        self.c.execute("UPDATE tasks SET status='blocked',last_error=? WHERE task_id=?",
+                       ('固定组合与复杂度说明冲突', tid))
+        self.c.execute('UPDATE research_cycles SET research_task=? WHERE cycle_id=?', (tid, cid))
+        entry = desktop.history(self.c, self.cfg)['entries'][0]
+        self.assertEqual(entry['badge'], 'failed')
+        self.assertIn('固定组合与复杂度说明冲突', entry['lines'][-1])
+        self.assertIn('固定组合与复杂度说明冲突', entry['detail'][-1])
+        self.assertEqual(self.c.execute('SELECT outcome FROM research_cycles WHERE cycle_id=?', (cid,)).fetchone()[0],
+                         '任务未完成：blocked')
+
     def test_history_all_cycles_and_compact_lines(self):
         for i in range(46):
             self.cycle(state='researching' if i == 45 else 'closed')

@@ -74,6 +74,17 @@ class WideDslTests(unittest.TestCase):
 
 
 class CombinationProfileTests(unittest.TestCase):
+    def test_combination_depth_is_zero_based_and_still_bounded(self):
+        ast = {'op': 'mean', 'window': 20, 'arg': F('daily_return')}
+        for _ in range(8):
+            ast = {'op': 'rank', 'arg': ast}
+        research_dsl.compile_ast(ast, bindings(), 'combination')  # 10 levels, depth 9.
+        with self.assertRaises(ValueError):
+            research_dsl.compile_ast(ast, bindings(), 'proposal')
+        with self.assertRaisesRegex(ValueError, '深度9'):
+            research_dsl.compile_ast({'op': 'rank', 'arg': ast}, bindings(), 'combination')
+        self.assertIn('根节点深度为0', research_dsl.public_contract(bindings(), 'combination')['limits'])
+
     def test_combination_profile_allows_blend_of_blends_but_not_proposals(self):
         b = bindings()
         leaf = lambda n: {'op': 'rank', 'arg': {'op': 'mean', 'arg': F(n), 'window': 20}}
