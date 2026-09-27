@@ -94,7 +94,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.autoenablesItems = false
         menu.delegate = self
         item.menu = menu
-        if configured { enterMainMode() } else { buildFirstRunMenu() }
+        if configured {
+            menu.addItem(info("正在检查内置引擎更新…"))
+            runSetup(["setup", "--workspace", root]) { result in
+                if let error = result["error"] as? String {
+                    self.alert("引擎更新未完成", error)
+                    NSApp.terminate(nil)
+                    return
+                }
+                if let python = result["python"] as? String {
+                    UserDefaults.standard.set(python, forKey: "WQPython")
+                }
+                self.enterMainMode()
+            }
+        } else { buildFirstRunMenu() }
     }
     func buildFirstRunMenu() {
         menu.removeAllItems()

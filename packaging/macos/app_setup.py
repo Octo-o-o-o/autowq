@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """First-run helper bundled inside WorldQuant.app (stdlib only, bounded JSON on stdout)."""
 import argparse
+import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -79,12 +81,30 @@ def setup(workspace):
     base = find_python()
     if not base:
         fail('未找到 Python ≥ 3.11；请先安装 Xcode Command Line Tools：xcode-select --install')
-    if not list(RESOURCES.glob('wq_pilot-*.whl')):
-        fail('应用包缺少引擎 wheel（wq_pilot-*.whl），安装包不完整')
-    venv_python = ensure_venv(base)
-    run([str(venv_python), '-m', 'pip', 'install', '--no-index', '--find-links', str(RESOURCES),
-         '--upgrade', 'wq-pilot'])
-    run([str(venv_python), '-c', 'import wq'])
+    wheels = list(RESOURCES.glob('wq_pilot-*.whl'))
+    if len(wheels) != 1:
+        fail('应用包必须包含一个引擎 wheel，安装包不完整')
+    wheel = wheels[0]
+    digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
+    marker = APP_SUPPORT / 'engine-wheel.sha256'
+    venv_python = VENV / 'bin/python'
+    if not (marker.exists() and marker.read_text().strip() == digest and usable(venv_python)):
+        config_path = workspace / 'config/config.json'
+        config = json.loads(config_path.read_text()) if config_path.exists() else {}
+        run_dir = Path(config.get('paths', {}).get('run_dir', 'var/run')).expanduser()
+        if not run_dir.is_absolute():
+            run_dir = workspace / run_dir
+        run_dir.mkdir(parents=True, exist_ok=True)
+        with (run_dir / 'agent-runner.lock').open('a') as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                fail('研究任务仍在运行；等待本轮收尾后重新打开应用完成引擎更新，不会中断任务')
+            venv_python = ensure_venv(base)
+            run([str(venv_python), '-m', 'pip', 'install', '--no-index', '--no-deps',
+                 '--force-reinstall', str(wheel)])
+            run([str(venv_python), '-c', 'import wq.desktop_control, wq.autopilot'])
+            marker.write_text(digest + '\n')
     (workspace / 'var/run').mkdir(parents=True, exist_ok=True)
     emit({'python': str(venv_python), 'workspace': str(workspace)})
 
@@ -140,8 +160,8 @@ def activate(workspace, app):
         'StandardOutPath': str(workspace / 'var/run/menubar.out.log'),
         'StandardErrorPath': str(workspace / 'var/run/menubar.err.log')}))
     for label, plist in ((RUNNER_LABEL, runner), (MENU_LABEL, menu_plist)):
-        bootout(label)
-        run(['/bin/launchctl', 'bootstrap', domain(), str(plist)], timeout=20)
+        if not loaded(label):
+            run(['/bin/launchctl', 'bootstrap', domain(), str(plist)], timeout=20)
     emit({'runner': str(runner), 'menubar': str(menu_plist)})
 
 

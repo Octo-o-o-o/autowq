@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import shlex
 import sys
 import tempfile
 import threading
@@ -18,6 +19,12 @@ from wq.config import Config
 
 
 RESULT = {'status': 'completed', 'summary': 'fixture result', 'findings': []}
+
+
+def write_fake_cli(path, code):
+    # Application Support 等含空格的解释器路径不能直接用作 shebang。
+    path.write_text('#!/bin/sh\nexec ' + shlex.quote(sys.executable) + ' -c ' + shlex.quote(code) + ' "$@"\n')
+    path.chmod(0o700)
 
 
 class ProviderWorkflowTests(unittest.TestCase):
@@ -180,8 +187,7 @@ class ProviderWorkflowTests(unittest.TestCase):
                 elif kind=='opencode': output=json.dumps({'type':'text','part':{'text':text}})
                 else: output=json.dumps({'result' if kind=='claude' else 'response':text})
                 binary=work/'fake-cli'
-                binary.write_text('#!'+sys.executable+'\nimport sys\nassert "chosen" in sys.argv\nprint('+repr(output)+')\n')
-                binary.chmod(0o700)
+                write_fake_cli(binary, 'import sys\nassert "chosen" in sys.argv\nprint('+repr(output)+')\n')
                 import subprocess
                 r=subprocess.run([sys.executable,runtime.__file__,json.dumps({'kind':kind,'model':'chosen','binary':str(binary)}),str(prompt)],cwd=work,capture_output=True,text=True,timeout=5)
                 self.assertEqual(r.returncode,0,r.stderr)
@@ -214,8 +220,7 @@ class ProviderWorkflowTests(unittest.TestCase):
         shutil.copytree(source/'config',root/'config',ignore=shutil.ignore_patterns('config.json','profiles.json','autopilot-policy.json'))
         shutil.copytree(source/'scripts',root/'scripts',ignore=shutil.ignore_patterns('__pycache__'))
         binary=self.root/'fake-claude'
-        binary.write_text('#!'+sys.executable+'\nfrom pathlib import Path\nimport json\ntry:\n Path('+repr(str(root/'config/config.json'))+').read_text()\n raise SystemExit("sandbox failed")\nexcept PermissionError: pass\nprint('+repr(json.dumps({'result':json.dumps(RESULT)}))+')\n')
-        binary.chmod(0o700)
+        write_fake_cli(binary, 'from pathlib import Path\nimport json\ntry:\n Path('+repr(str(root/'config/config.json'))+').read_text()\n raise SystemExit("sandbox failed")\nexcept PermissionError: pass\nprint('+repr(json.dumps({'result':json.dumps(RESULT)}))+')\n')
         run=self.root/'mac-runtime'
         onboard.configure(root,run,['claude','codex'],{'claude':'fixture','codex':'fixture'},{'claude':str(binary),'codex':str(binary)},
             {'research':'claude','review':'codex','engineering':'codex'}, {}, 'darwin')

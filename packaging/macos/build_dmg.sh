@@ -5,7 +5,16 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
 VERSION="$(python3 -c "import re; print(re.search(r'^version = \"(.+?)\"', open('pyproject.toml').read(), re.M).group(1))")"
-DIST="$ROOT/dist"
+DIST="${WQ_DIST_DIR:-$ROOT/dist}"
+if [ "${REQUIRE_NOTARIZATION:-0}" = 1 ]; then
+    test -n "${MACOS_SIGN_IDENTITY:-}" || { echo "Developer ID identity required" >&2; exit 1; }
+    test -n "${NOTARY_KEYCHAIN_PROFILE:-}" || { echo "NOTARY_KEYCHAIN_PROFILE required" >&2; exit 1; }
+fi
+notarize() {
+    xcrun notarytool submit "$1" --keychain-profile "$NOTARY_KEYCHAIN_PROFILE" --wait --timeout 30m
+    xcrun stapler staple "$1"
+    xcrun stapler validate "$1"
+}
 BUILD="$DIST/build"
 APP="$DIST/WorldQuant.app"
 WHEELS="$BUILD/wheels"
@@ -64,6 +73,14 @@ else
     codesign --force --sign - "$APP"
 fi
 
+if [ -n "${NOTARY_KEYCHAIN_PROFILE:-}" ]; then
+    ditto -c -k --keepParent "$APP" "$BUILD/WorldQuant.zip"
+    xcrun notarytool submit "$BUILD/WorldQuant.zip" --keychain-profile "$NOTARY_KEYCHAIN_PROFILE" --wait --timeout 30m
+    xcrun stapler staple "$APP"
+    xcrun stapler validate "$APP"
+    spctl --assess --type execute --verbose=2 "$APP"
+fi
+
 DMG="$DIST/WorldQuant-${VERSION}.dmg"
 RW="$BUILD/rw.dmg"
 MOUNT="$BUILD/mount"
@@ -73,12 +90,17 @@ mkdir -p "$MOUNT"
 echo "==> Creating DMG"
 hdiutil create -size 100m -fs HFS+ -volname "WorldQuant" "$RW" >/dev/null
 hdiutil attach "$RW" -mountpoint "$MOUNT" >/dev/null
+trap 'hdiutil detach "$MOUNT" >/dev/null 2>&1 || true' EXIT
 cp -R "$APP" "$MOUNT/WorldQuant.app"
 ln -s /Applications "$MOUNT/Applications"
 hdiutil detach "$MOUNT" >/dev/null
 hdiutil convert "$RW" -format UDZO -o "$DMG" >/dev/null
 
-if [ -n "${NOTARIZE_APPLE_ID:-}" ] && [ -n "${NOTARIZE_PASSWORD:-}" ] && [ -n "${NOTARIZE_TEAM_ID:-}" ]; then
+if [ -n "${NOTARY_KEYCHAIN_PROFILE:-}" ]; then
+    codesign --force --timestamp --sign "$MACOS_SIGN_IDENTITY" "$DMG"
+    notarize "$DMG"
+    spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG"
+elif [ -n "${NOTARIZE_APPLE_ID:-}" ] && [ -n "${NOTARIZE_PASSWORD:-}" ] && [ -n "${NOTARIZE_TEAM_ID:-}" ]; then
     echo "==> Notarizing"
     xcrun notarytool submit "$DMG" --apple-id "$NOTARIZE_APPLE_ID" \
         --password "$NOTARIZE_PASSWORD" --team-id "$NOTARIZE_TEAM_ID" --wait
