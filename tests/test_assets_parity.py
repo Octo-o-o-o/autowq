@@ -19,9 +19,15 @@ class AssetsParityTests(unittest.TestCase):
     def test_cli_version_matches_pyproject(self):
         import re
         pyproject = (ROOT / 'pyproject.toml').read_text()
-        cli = (ROOT / 'src/wq/cli.py').read_text()
         version = re.search(r'^version = "(.+?)"', pyproject, re.M).group(1)
-        self.assertIn(f'wq {version}', cli)
+        from wq import cli, __version__
+        import contextlib
+        import io
+        self.assertEqual(__version__, version)
+        with contextlib.redirect_stdout(io.StringIO()) as out, self.assertRaises(SystemExit) as done:
+            cli.main(['--version'])
+        self.assertEqual(done.exception.code, 0)
+        self.assertEqual(out.getvalue().strip(), 'wq ' + version)
 
 
 if __name__ == '__main__':

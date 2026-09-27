@@ -25,15 +25,6 @@ class LanguagePreferenceTests(unittest.TestCase):
             self.assertEqual(cli.main(['--lang','auto','onboard','--skip-login']),0)
             self.assertEqual(onboard.call_args.args[0],['--lang','auto','--skip-login'])
 
-    def test_version_matches_distribution_source(self):
-        import tomllib
-        from wq import __version__
-        root=Path(__file__).resolve().parents[1]
-        self.assertEqual(__version__,tomllib.loads((root/'pyproject.toml').read_text())['project']['version'])
-        with contextlib.redirect_stdout(io.StringIO()) as out, self.assertRaises(SystemExit) as done:
-            cli.main(['--version'])
-        self.assertEqual(done.exception.code,0)
-        self.assertEqual(out.getvalue().strip(),'wq '+__version__)
     def test_config_language_roundtrip_and_auto(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg, c = make_env(tmp); c.close()
