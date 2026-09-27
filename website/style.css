@@ -247,8 +247,8 @@ h2 .no { color: var(--amber); margin-right: 12px; font-size: 15px; vertical-alig
 }
 .stat .l { color: var(--dim); font-size: 12.5px; margin-top: 4px; }
 
-.chart { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); padding: 20px 22px 16px; }
-.chart-head { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; margin-bottom: 18px; }
+.chart { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); padding: 20px 22px 34px; }
+.chart-head { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; margin-bottom: 46px; }
 .chart-head .lg {
   display: flex; align-items: center; gap: 7px;
   font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--dim);
@@ -263,14 +263,16 @@ h2 .no { color: var(--amber); margin-right: 12px; font-size: 15px; vertical-alig
   gap: clamp(16px, 4vw, 40px); align-items: end;
   border-bottom: 1px solid var(--line); padding: 0 2px;
 }
+/* .bar = 纯绘图区（230px，轴线在底边）。高度比例写在柱子的 --v 上；
+   b 值标签绝对定位骑在柱顶、em 日期标签排在轴线下方，都不参与柱子的盒模型——
+   两行日期不再把柱底抬离轴线，100% 柱的标签上浮进 chart-head 预留的 46px 头部空间。 */
 .bars .bar {
-  height: 230px;
-  display: flex; flex-direction: column; justify-content: flex-end;
+  height: 230px; position: relative;
   background: repeating-linear-gradient(to top, transparent 0 43px, var(--bar-grid) 43px 44px);
 }
 .bars .bar i {
-  display: block; border-radius: 4px 4px 0 0; min-height: 6px;
-  flex-shrink: 0;   /* 高度百分比以整根柱区为基准；标签不参与收缩，100% 柱不再被压到 ~76% */
+  position: absolute; left: 0; right: 0; bottom: 0; height: var(--v, 100%);
+  border-radius: 4px 4px 0 0; min-height: 6px;
   background: rgba(255, 176, 0, 0.14); border-top: 1px solid rgba(255, 176, 0, 0.3);
   transform-origin: bottom; transform: scaleY(0);
   animation: grow 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
@@ -282,20 +284,22 @@ h2 .no { color: var(--amber); margin-right: 12px; font-size: 15px; vertical-alig
   border-top: none; box-shadow: 0 0 20px rgba(255, 176, 0, 0.32);
 }
 .bars .bar em {
+  position: absolute; top: 100%; left: 0; right: 0; margin-top: 8px;
   font-style: normal; font-family: ui-monospace, Menlo, monospace; font-size: 11.5px;
-  color: var(--amber-hot); text-align: center; margin-top: 8px; white-space: nowrap;
+  color: var(--amber-hot); text-align: center; white-space: nowrap;
 }
 .bars .bar b {
+  position: absolute; left: 0; right: 0; bottom: calc(var(--v, 100%) + 7px);
   font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--paper);
-  text-align: center; display: block; margin-bottom: 6px; font-weight: 600;
+  text-align: center; font-weight: 600;
 }
 @keyframes grow { to { transform: scaleY(1); } }
 @media (max-width: 640px) {
-  .chart { padding: 16px 14px 12px; }
+  .chart { padding: 16px 14px 40px; }
   .bars { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
   .bars .bar { height: 190px; }
   .bars .bar b { font-size: 10.5px; }
-  .bars .bar em { font-size: 9.5px; margin-top: 6px; white-space: normal; line-height: 1.4; }
+  .bars .bar em { font-size: 9.5px; white-space: normal; line-height: 1.4; }
 }
 .fineprint { color: var(--faint); font-size: 12.5px; margin-top: 14px; }
 
