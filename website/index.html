@@ -8,27 +8,69 @@
 <link rel="canonical" href="https://autowq.octoooo.com/">
 <link rel="alternate" hreflang="zh-CN" href="https://autowq.octoooo.com/">
 <link rel="alternate" hreflang="en" href="https://autowq.octoooo.com/en/">
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="alternate" hreflang="x-default" href="https://autowq.octoooo.com/">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" sizes="any">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#0b0e0c">
+<meta name="color-scheme" content="dark">
+<meta property="og:site_name" content="autowq">
 <meta property="og:title" content="autowq — 本地 BRAIN 研究回路">
 <meta property="og:description" content="异渠道审查 · 预算闸门 · 提交前验收 · 数据不出本机">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://autowq.octoooo.com/">
 <meta property="og:image" content="https://autowq.octoooo.com/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="autowq — 开箱即用的 WorldQuant BRAIN 全自动研究工具">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:locale:alternate" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="autowq — 本地 BRAIN 研究回路">
+<meta name="twitter:description" content="异渠道审查 · 预算闸门 · 提交前验收 · 数据不出本机">
+<meta name="twitter:image" content="https://autowq.octoooo.com/assets/og.png">
 <link rel="stylesheet" href="/style.css?v=3">
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
-  "@type": "SoftwareApplication",
-  "name": "autowq",
-  "applicationCategory": "DeveloperApplication",
-  "operatingSystem": "macOS, Windows, Linux",
-  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
-  "license": "https://www.apache.org/licenses/LICENSE-2.0",
-  "url": "https://autowq.octoooo.com/",
-  "codeRepository": "https://github.com/Octo-o-o-o/autowq",
-  "description": "本地运行的 WorldQuant BRAIN 研究回路：假设、异渠道审查、有限回测、诊断与提交前验收，预算与授权由用户控制。"
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      "name": "autowq",
+      "applicationCategory": "DeveloperApplication",
+      "operatingSystem": "macOS, Windows, Linux",
+      "softwareVersion": "0.2.4",
+      "isAccessibleForFree": true,
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "license": "https://www.apache.org/licenses/LICENSE-2.0",
+      "url": "https://autowq.octoooo.com/",
+      "downloadUrl": "https://github.com/Octo-o-o-o/autowq/releases",
+      "codeRepository": "https://github.com/Octo-o-o-o/autowq",
+      "image": "https://autowq.octoooo.com/assets/og.png",
+      "inLanguage": "zh-CN",
+      "softwareRequirements": "Python 3.11+（运行时零第三方依赖）；本地已订阅的 Agent CLI 或 OpenAI / Anthropic API Key",
+      "featureList": [
+        "异渠道审查：研究与审查渠道强制分离",
+        "逐渠道预算与授权闸门，默认全关",
+        "本地 SQLite 账本与真实结果诊断",
+        "提交前独立验收门禁",
+        "macOS 菜单栏 / Windows 托盘常驻，BRAIN 账号绑定",
+        "运行时零第三方依赖，数据不出本机"
+      ],
+      "author": { "@type": "Organization", "name": "OctoLab", "url": "https://www.octoooo.com", "sameAs": ["https://github.com/Octo-o-o-o"] },
+      "description": "本地运行的 WorldQuant BRAIN 研究回路：假设、异渠道审查、有限回测、诊断与提交前验收，预算与授权由用户控制。"
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        { "@type": "Question", "name": "是 WorldQuant 官方产品吗？", "acceptedAnswer": { "@type": "Answer", "text": "不是。autowq 是独立开源项目（Apache-2.0），与 WorldQuant 无隶属关系；BRAIN 商标、平台与数据归其权利人。" } },
+        { "@type": "Question", "name": "autowq 收费吗？", "acceptedAnswer": { "@type": "Answer", "text": "项目本身免费开源。它编排的是你自己的模型订阅 / API Key 和你自己的 BRAIN 账号，费用由你与供应商结算；向导不会发起任何付费推理。" } },
+        { "@type": "Question", "name": "自动研究 = 自动提交 = 收益吗？", "acceptedAnswer": { "@type": "Answer", "text": "不等于。平台筛选通过、提交接收、顾问资格、实际到账是四种不同状态，提交有独立验收门禁。" } },
+        { "@type": "Question", "name": "我的凭证和研究会上传吗？", "acceptedAnswer": { "@type": "Answer", "text": "不会。一切状态存本地 SQLite 账本；导出不包含 Cookie、密码与任务输入；模型请求只发给你显式选择的渠道。" } },
+        { "@type": "Question", "name": "Windows 支持到什么程度？", "acceptedAnswer": { "@type": "Answer", "text": "原生托盘与任务计划调度已可用（实验性）；模型进程的沙箱隔离仍以 macOS sandbox-exec 与 Linux/WSL2 Docker 为最成熟路径。" } }
+      ]
+    }
+  ]
 }
 </script>
 </head>

@@ -3,12 +3,16 @@
         xmlns:xhtml="http://www.w3.org/1999/xhtml">
   <url>
     <loc>https://autowq.octoooo.com/</loc>
+    <lastmod>2026-09-27</lastmod>
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://autowq.octoooo.com/"/>
     <xhtml:link rel="alternate" hreflang="en" href="https://autowq.octoooo.com/en/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autowq.octoooo.com/"/>
   </url>
   <url>
     <loc>https://autowq.octoooo.com/en/</loc>
+    <lastmod>2026-09-27</lastmod>
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://autowq.octoooo.com/"/>
     <xhtml:link rel="alternate" hreflang="en" href="https://autowq.octoooo.com/en/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autowq.octoooo.com/"/>
   </url>
 </urlset>

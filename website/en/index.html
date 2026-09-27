@@ -8,27 +8,69 @@
 <link rel="canonical" href="https://autowq.octoooo.com/en/">
 <link rel="alternate" hreflang="zh-CN" href="https://autowq.octoooo.com/">
 <link rel="alternate" hreflang="en" href="https://autowq.octoooo.com/en/">
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="alternate" hreflang="x-default" href="https://autowq.octoooo.com/">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" sizes="any">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#0b0e0c">
+<meta name="color-scheme" content="dark">
+<meta property="og:site_name" content="autowq">
 <meta property="og:title" content="autowq — a local BRAIN research loop">
 <meta property="og:description" content="Cross-provider review · budget gates · pre-submission acceptance · your data never leaves the machine">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://autowq.octoooo.com/en/">
 <meta property="og:image" content="https://autowq.octoooo.com/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="autowq — WorldQuant BRAIN research on autopilot, out of the box">
+<meta property="og:locale" content="en_US">
+<meta property="og:locale:alternate" content="zh_CN">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="autowq — a local BRAIN research loop">
+<meta name="twitter:description" content="Cross-provider review · budget gates · pre-submission acceptance · your data never leaves the machine">
+<meta name="twitter:image" content="https://autowq.octoooo.com/assets/og.png">
 <link rel="stylesheet" href="/style.css?v=3">
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
-  "@type": "SoftwareApplication",
-  "name": "autowq",
-  "applicationCategory": "DeveloperApplication",
-  "operatingSystem": "macOS, Windows, Linux",
-  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
-  "license": "https://www.apache.org/licenses/LICENSE-2.0",
-  "url": "https://autowq.octoooo.com/en/",
-  "codeRepository": "https://github.com/Octo-o-o-o/autowq",
-  "description": "A local research loop for WorldQuant BRAIN: hypothesis, cross-provider review, bounded simulation, diagnosis and gated submission — budgets and authorization stay under your control."
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      "name": "autowq",
+      "applicationCategory": "DeveloperApplication",
+      "operatingSystem": "macOS, Windows, Linux",
+      "softwareVersion": "0.2.4",
+      "isAccessibleForFree": true,
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "license": "https://www.apache.org/licenses/LICENSE-2.0",
+      "url": "https://autowq.octoooo.com/en/",
+      "downloadUrl": "https://github.com/Octo-o-o-o/autowq/releases",
+      "codeRepository": "https://github.com/Octo-o-o-o/autowq",
+      "image": "https://autowq.octoooo.com/assets/og.png",
+      "inLanguage": "en",
+      "softwareRequirements": "Python 3.11+ (zero third-party runtime dependencies); an agent CLI you already subscribe to, or an OpenAI / Anthropic API key",
+      "featureList": [
+        "Cross-provider review: research and review channels are forced apart",
+        "Per-provider budget and authorization gates, all off by default",
+        "Local SQLite ledger with real-outcome diagnostics",
+        "Independent pre-submission acceptance gates",
+        "macOS menu bar / Windows tray resident app with BRAIN account binding",
+        "Zero third-party runtime dependencies; your data never leaves the machine"
+      ],
+      "author": { "@type": "Organization", "name": "OctoLab", "url": "https://www.octoooo.com", "sameAs": ["https://github.com/Octo-o-o-o"] },
+      "description": "A local research loop for WorldQuant BRAIN: hypothesis, cross-provider review, bounded simulation, diagnosis and gated submission — budgets and authorization stay under your control."
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        { "@type": "Question", "name": "Is this an official WorldQuant product?", "acceptedAnswer": { "@type": "Answer", "text": "No. autowq is an independent open-source project (Apache-2.0), unaffiliated with WorldQuant; BRAIN trademarks, platform and data belong to their owners." } },
+        { "@type": "Question", "name": "Does autowq itself cost anything?", "acceptedAnswer": { "@type": "Answer", "text": "No — it's free and open source. It orchestrates your own model subscriptions / API keys and your own BRAIN account; those costs are between you and the vendors. The wizard never starts paid inference." } },
+        { "@type": "Question", "name": "Does automation mean submissions and income?", "acceptedAnswer": { "@type": "Answer", "text": "No. Passing screens, accepted submissions, consultant eligibility and actual payouts are four different states, and submission has its own acceptance gates." } },
+        { "@type": "Question", "name": "Do my credentials or research get uploaded?", "acceptedAnswer": { "@type": "Answer", "text": "No. All state lives in a local SQLite ledger; exports exclude cookies, passwords and task inputs; model calls go only to providers you explicitly select." } },
+        { "@type": "Question", "name": "How well is Windows supported?", "acceptedAnswer": { "@type": "Answer", "text": "The native tray and Task Scheduler runner work (experimental); the most mature process-isolation paths remain sandbox-exec on macOS and Docker on Linux/WSL2." } }
+      ]
+    }
+  ]
 }
 </script>
 </head>

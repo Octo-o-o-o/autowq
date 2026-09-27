@@ -1,6 +1,6 @@
 # autowq
 
-> autowq 是开源（Apache-2.0）的本地 WorldQuant BRAIN 研究回路。假设 → 异渠道审查 → 有限回测 → 真实结果诊断 → 互补信号 → 提交前验收。模型、预算、证据和队列由用户控制，数据不出本机。
+> autowq 是开源（Apache-2.0）的本地 WorldQuant BRAIN 研究回路。假设 → 异渠道审查 → 有限回测 → 真实结果诊断 → 互补信号 → 提交前验收。模型、预算、证据和队列由用户控制，数据不出本机。当前版本 0.2.4（2026-09-27），523 项自动化测试。
 
 - 官网: https://autowq.octoooo.com/ （中文） · https://autowq.octoooo.com/en/ （English）
 - 仓库: https://github.com/Octo-o-o-o/autowq
@@ -9,23 +9,24 @@
 
 ## 安装
 
-- macOS 菜单栏 App: `brew install --cask Octo-o-o-o/autowq/worldquant`（或 Releases 的 DMG），双击后首启向导全程引导
+- macOS 菜单栏 App: `brew install --cask Octo-o-o-o/autowq/worldquant`（或 Releases 的 DMG，Developer ID 签名 + Apple 公证），双击后首启向导全程引导；App 启动时按内置 wheel 校验和自动更新引擎
 - Windows: Releases 的 WorldQuantTray.exe，原生托盘 + 任务计划（实验性）
 - CLI: `brew install Octo-o-o-o/autowq/wq-pilot`，任意空目录 `wq onboard`
 - 源码: `git clone` 后 `./wq onboard`；Linux/WSL2 用 Docker 隔离
 
 ## 上手成本
 
-本地已有订阅的 Agent CLI（Grok Build、Devin、Cursor、ZCode、Claude Code、Codex、Gemini CLI、GitHub Copilot CLI、Qwen Code、OpenCode）或 OpenAI/Anthropic API Key 即可。向导只检测、生成配置、调起登录；模型、自动研究、提交默认全关。
+本地已有订阅的 Agent CLI（Grok Build、Devin、Cursor、ZCode、Claude Code、Codex、Gemini CLI、GitHub Copilot CLI、Qwen Code、OpenCode）或 OpenAI/Anthropic API Key 即可。向导只检测、生成配置、调起登录；模型、自动研究、提交默认全关。研究用量可完全落在已订阅渠道的 token 富余量内，不需要额外按量 API。
 
 ## 关键事实
 
 - 运行时零第三方依赖，纯 Python 3.11+ 标准库
 - 隔离：macOS sandbox-exec；Linux/WSL2 Docker
 - 闸门：单并发、逐渠道预算、授权期限、UNKNOWN 人工对账、崩溃恢复去重、提交前验收
-- 托盘：macOS 菜单栏 App 与 Windows 托盘共享同一受控桥接（状态、轮次历史、已提交 Alpha、预算/间隔/通知开关）
+- 托盘：macOS 菜单栏 App 与 Windows 托盘共享同一受控桥接（状态、BRAIN 账号绑定/核验/注册入口、轮次历史、已提交 Alpha、预算/间隔/通知开关）
+- 研究/审查复杂度契约按轮次类型（提案 / 预登记组合）分档，提示词如实说明
 - 非 WorldQuant 官方产品；研究工具，不承诺收益
 
 ## 真实案例（维护者本地账本第一周，2026-09-20 → 09-26）
 
-123 研究轮、160 次真实模拟、299 次模型调用；09-22 至 09-25 连续 4 天各有 1 个 Alpha 获得平台正式提交回执；7 天模型成本约 $37.30（CLI 侧估算，非供应商账单）。
+123 研究轮、160 次真实模拟；09-22 至 09-25 连续 4 天各有 1 个 Alpha 获得平台正式提交回执（平台状态均为 ACTIVE）；约第 2 天账号升至银牌、第 5 天升金牌。模型用量全部来自已订阅 CLI 的 token 富余量，无额外按量 API 开销；"被接收"不代表筛选通过或收益。
