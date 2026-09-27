@@ -270,6 +270,7 @@ h2 .no { color: var(--amber); margin-right: 12px; font-size: 15px; vertical-alig
 }
 .bars .bar i {
   display: block; border-radius: 4px 4px 0 0; min-height: 6px;
+  flex-shrink: 0;   /* 高度百分比以整根柱区为基准；标签不参与收缩，100% 柱不再被压到 ~76% */
   background: rgba(255, 176, 0, 0.14); border-top: 1px solid rgba(255, 176, 0, 0.3);
   transform-origin: bottom; transform: scaleY(0);
   animation: grow 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
