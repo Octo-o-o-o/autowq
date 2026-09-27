@@ -12,8 +12,10 @@
 <link rel="icon" href="/favicon.svg" type="image/svg+xml" sizes="any">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-<meta name="theme-color" content="#0b0e0c">
-<meta name="color-scheme" content="dark">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b0e0c">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#f5f3ec">
+<script>(function(){try{var m=localStorage.getItem('wq-theme');if(m!=='light'&&m!=='dark')m='auto';var d=m==='dark'||(m==='auto'&&window.matchMedia('(prefers-color-scheme: dark)').matches);var h=document.documentElement;h.dataset.theme=d?'dark':'light';h.dataset.themeMode=m;}catch(e){}})();</script>
 <meta property="og:site_name" content="autowq">
 <meta property="og:title" content="autowq — 本地 BRAIN 研究回路">
 <meta property="og:description" content="异渠道审查 · 预算闸门 · 提交前验收 · 数据不出本机">
@@ -29,7 +31,7 @@
 <meta name="twitter:title" content="autowq — 本地 BRAIN 研究回路">
 <meta name="twitter:description" content="异渠道审查 · 预算闸门 · 提交前验收 · 数据不出本机">
 <meta name="twitter:image" content="https://autowq.octoooo.com/assets/og.png">
-<link rel="stylesheet" href="/style.css?v=3">
+<link rel="stylesheet" href="/style.css?v=4">
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -86,6 +88,7 @@
     <a href="#install">安装</a>
     <a href="#faq">FAQ</a>
     <a href="https://github.com/Octo-o-o-o/autowq">GitHub</a>
+    <button class="theme" id="themeToggle" type="button" aria-label="切换配色（自动 / 亮 / 暗）">◐</button>
     <a class="lang" href="/en/">EN</a>
   </div>
   </div>

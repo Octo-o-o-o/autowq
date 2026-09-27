@@ -1,16 +1,27 @@
-/* autowq — "示波器实验室" 主题：墨底 + 琥珀波形 + 等宽字体。暗色唯一，刻意为之。 */
+/* autowq — "示波器实验室" 主题：墨底 + 琥珀波形 + 等宽字体。深色为默认；浅色通过 data-theme / prefers-color-scheme 切换（调色板见文件底部）。 */
 :root {
   --ink: #0b0e0c;
   --panel: #12160f;
   --panel-2: #171c14;
   --paper: #f2efe9;
   --dim: #9aa08f;
+  --faint: #5c6355;
   --amber: #ffb000;
   --amber-hot: #ffc840;
   --amber-soft: rgba(255, 176, 0, 0.09);
   --line: #252b21;
   --grid: rgba(255, 176, 0, 0.045);
+  --bar-grid: rgba(255, 176, 0, 0.07);
+  --nav-bg: rgba(11, 14, 12, 0.82);
+  --menu-bg: #1a1f16;
+  --menu-line: #31382a;
+  --menu-fg: #c9cec0;
+  --menu-dim: #6b7261;
+  --menu-hot-fg: #0b0e0c;
+  --menu-shadow: 0 18px 44px rgba(0, 0, 0, 0.55);
+  --term-shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
   --good: #7dd87d;
+  color-scheme: dark;
   /* 单一容器基准：顶栏、正文、走马灯、页脚全部对齐这一组变量 */
   --container: 1152px;
   --gutter: clamp(20px, 4vw, 44px);
@@ -39,7 +50,7 @@ a:hover { color: var(--amber-hot); }
 /* ── 顶栏 ── */
 nav {
   position: sticky; top: 0; z-index: 50;
-  background: rgba(11, 14, 12, 0.82); backdrop-filter: blur(10px);
+  background: var(--nav-bg); backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--line);
 }
 nav .inner {
@@ -159,10 +170,14 @@ h2 .no { color: var(--amber); margin-right: 12px; font-size: 15px; vertical-alig
 .p h3 { font-size: 16px; margin: 10px 0 8px; }
 .p p { color: var(--dim); font-size: 13.5px; }
 
-/* ── 终端（onboard 打字机） ── */
+/* ── 终端（onboard 打字机）：无论页面深浅色，终端窗口锁定深色 ── */
 .term {
-  border: 1px solid var(--line); border-radius: 6px; background: #0d100b;
-  overflow: hidden; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
+  /* 局部覆盖调色板：子树内所有 var() 引用回到深色值 */
+  --ink: #0b0e0c; --panel: #12160f; --panel-2: #171c14;
+  --paper: #f2efe9; --dim: #9aa08f; --faint: #5c6355;
+  --amber: #ffb000; --amber-hot: #ffc840; --good: #7dd87d; --line: #252b21;
+  border: 1px solid #252b21; border-radius: 6px; background: #0d100b;
+  overflow: hidden; box-shadow: var(--term-shadow);
 }
 .term .bar {
   display: flex; align-items: center; gap: 7px; padding: 10px 14px;
@@ -203,14 +218,14 @@ h2 .no { color: var(--amber); margin-right: 12px; font-size: 15px; vertical-alig
 .osbar .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--good); animation: pulse 2s infinite; margin-left: auto; }
 .osbody { padding: 18px; display: flex; justify-content: center; }
 .menu {
-  width: 250px; background: #1a1f16; border: 1px solid #31382a; border-radius: 8px;
-  padding: 5px; font-size: 12.5px; box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55);
+  width: 250px; background: var(--menu-bg); border: 1px solid var(--menu-line); border-radius: 8px;
+  padding: 5px; font-size: 12.5px; box-shadow: var(--menu-shadow);
 }
-.menu .mi { padding: 5px 12px; border-radius: 5px; color: #c9cec0; display: flex; justify-content: space-between; gap: 12px; }
-.menu .mi.hot { background: var(--amber); color: var(--ink); font-weight: 600; }
-.menu .mi.dim { color: #6b7261; }
+.menu .mi { padding: 5px 12px; border-radius: 5px; color: var(--menu-fg); display: flex; justify-content: space-between; gap: 12px; }
+.menu .mi.hot { background: var(--amber); color: var(--menu-hot-fg); font-weight: 600; }
+.menu .mi.dim { color: var(--menu-dim); }
 .menu .mi .r { color: inherit; opacity: 0.6; font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
-.menu hr { border: none; border-top: 1px solid #31382a; margin: 5px 8px; }
+.menu hr { border: none; border-top: 1px solid var(--menu-line); margin: 5px 8px; }
 .menu .head { color: var(--paper); font-weight: 600; }
 
 /* ── 案例：数字 + 成本柱状图（图表选择器一律 .bars 作用域，避免与 .term .bar 撞名） ── */
@@ -241,7 +256,7 @@ h2 .no { color: var(--amber); margin-right: 12px; font-size: 15px; vertical-alig
 .chart-head .lg i { width: 10px; height: 10px; border-radius: 3px; flex: none; }
 .chart-head .lg.acc i { background: linear-gradient(180deg, var(--amber-hot), var(--amber)); box-shadow: 0 0 8px rgba(255, 176, 0, 0.45); }
 .chart-head .lg.acc { color: var(--amber-hot); }
-.chart-head .note { margin-left: auto; color: #5c6355; font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; }
+.chart-head .note { margin-left: auto; color: var(--faint); font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; }
 
 .bars {
   display: grid; grid-template-columns: repeat(5, minmax(52px, 96px)); justify-content: center;
@@ -251,7 +266,7 @@ h2 .no { color: var(--amber); margin-right: 12px; font-size: 15px; vertical-alig
 .bars .bar {
   height: 230px;
   display: flex; flex-direction: column; justify-content: flex-end;
-  background: repeating-linear-gradient(to top, transparent 0 43px, rgba(255, 176, 0, 0.07) 43px 44px);
+  background: repeating-linear-gradient(to top, transparent 0 43px, var(--bar-grid) 43px 44px);
 }
 .bars .bar i {
   display: block; border-radius: 4px 4px 0 0; min-height: 6px;
@@ -276,12 +291,12 @@ h2 .no { color: var(--amber); margin-right: 12px; font-size: 15px; vertical-alig
 @keyframes grow { to { transform: scaleY(1); } }
 @media (max-width: 640px) {
   .chart { padding: 16px 14px 12px; }
-  .bars { grid-template-columns: repeat(4, 1fr); gap: 8px; }
-  .bars .bar { height: 200px; }
+  .bars { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+  .bars .bar { height: 190px; }
   .bars .bar b { font-size: 10.5px; }
-  .bars .bar em { font-size: 9.5px; margin-top: 6px; }
+  .bars .bar em { font-size: 9.5px; margin-top: 6px; white-space: normal; line-height: 1.4; }
 }
-.fineprint { color: #5c6355; font-size: 12.5px; margin-top: 14px; }
+.fineprint { color: var(--faint); font-size: 12.5px; margin-top: 14px; }
 
 /* ── 安装表 ── */
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
@@ -309,7 +324,7 @@ footer {
 }
 footer .inner {
   max-width: var(--container); margin-inline: auto; padding: 34px var(--gutter) 44px;
-  color: #5c6355; font-size: 12.5px; font-family: ui-monospace, Menlo, monospace;
+  color: var(--faint); font-size: 12.5px; font-family: ui-monospace, Menlo, monospace;
   display: flex; gap: 12px 24px; flex-wrap: wrap; justify-content: space-between; align-items: center;
 }
 footer a { color: var(--dim); }
@@ -330,3 +345,64 @@ footer a:hover { color: var(--amber); }
 /* 进入视口时的上浮 */
 .rise { opacity: 0; transform: translateY(18px); transition: opacity 0.7s ease, transform 0.7s ease; }
 .rise.on { opacity: 1; transform: none; }
+
+/* ── 浅色主题（"图纸上的示波器"）：暖纸底 + 深琥珀。默认跟随系统；data-theme 手动覆盖。两块调色板保持同步。 ── */
+:root[data-theme="light"] {
+  --ink: #f5f3ec;
+  --panel: #fdfcf7;
+  --panel-2: #efede1;
+  --paper: #1c2317;
+  --dim: #555c4e;
+  --faint: #7a8072;
+  --amber: #b07800;
+  --amber-hot: #8a5f00;
+  --amber-soft: rgba(176, 120, 0, 0.08);
+  --line: #ddd9c8;
+  --grid: rgba(140, 110, 30, 0.06);
+  --bar-grid: rgba(140, 110, 30, 0.10);
+  --nav-bg: rgba(245, 243, 236, 0.85);
+  --menu-bg: #fbfaf4;
+  --menu-line: #e2decd;
+  --menu-fg: #2a3124;
+  --menu-dim: #8a9080;
+  --menu-hot-fg: #fffdf6;
+  --menu-shadow: 0 14px 34px rgba(64, 58, 34, 0.16);
+  --term-shadow: 0 24px 60px rgba(64, 58, 34, 0.22);
+  --good: #2f7d33;
+  color-scheme: light;
+}
+/* 无 JS 兜底：未显式选择主题时跟随系统（与上一块保持同步） */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]):not([data-theme="light"]) {
+    --ink: #f5f3ec;
+    --panel: #fdfcf7;
+    --panel-2: #efede1;
+    --paper: #1c2317;
+    --dim: #555c4e;
+    --faint: #7a8072;
+    --amber: #b07800;
+    --amber-hot: #8a5f00;
+    --amber-soft: rgba(176, 120, 0, 0.08);
+    --line: #ddd9c8;
+    --grid: rgba(140, 110, 30, 0.06);
+    --bar-grid: rgba(140, 110, 30, 0.10);
+    --nav-bg: rgba(245, 243, 236, 0.85);
+    --menu-bg: #fbfaf4;
+    --menu-line: #e2decd;
+    --menu-fg: #2a3124;
+    --menu-dim: #8a9080;
+    --menu-hot-fg: #fffdf6;
+    --menu-shadow: 0 14px 34px rgba(64, 58, 34, 0.16);
+    --term-shadow: 0 24px 60px rgba(64, 58, 34, 0.22);
+    --good: #2f7d33;
+    color-scheme: light;
+  }
+}
+
+/* ── 配色切换按钮（与 .lang 芯片同款外观） ── */
+nav .theme {
+  font-family: ui-monospace, Menlo, monospace; font-size: 13px;
+  border: 1px solid var(--line); border-radius: 6px; padding: 3px 10px;
+  color: var(--dim); background: transparent; cursor: pointer; line-height: 1.5;
+}
+nav .theme:hover { color: var(--amber); border-color: var(--amber); }

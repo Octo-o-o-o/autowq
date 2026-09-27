@@ -64,3 +64,44 @@
 
   document.querySelectorAll('.rise, [data-count]').forEach(function (el) { io.observe(el); });
 })();
+
+/* ── 配色切换：自动 → 亮 → 暗 循环；自动档跟随系统并实时响应变化 ── */
+(function () {
+  'use strict';
+  var btn = document.getElementById('themeToggle');
+  if (!btn) return;
+  var root = document.documentElement;
+  var mq = window.matchMedia('(prefers-color-scheme: dark)');
+  var ZH = (root.lang || '').indexOf('zh') === 0;
+  var LABELS = {
+    auto: ZH ? '配色：跟随系统（点击切换）' : 'Theme: follow system (click to switch)',
+    light: ZH ? '配色：浅色（点击切换）' : 'Theme: light (click to switch)',
+    dark: ZH ? '配色：深色（点击切换）' : 'Theme: dark (click to switch)'
+  };
+  var ICONS = { auto: '\u25D0', light: '\u2600', dark: '\u263E' }; /* ◐ ☀ ☾ */
+  function mode() {
+    var m = root.dataset.themeMode;
+    return (m === 'light' || m === 'dark') ? m : 'auto';
+  }
+  function apply(m, persist) {
+    var dark = m === 'dark' || (m === 'auto' && mq.matches);
+    root.dataset.theme = dark ? 'dark' : 'light';
+    root.dataset.themeMode = m;
+    if (persist) { try { localStorage.setItem('wq-theme', m); } catch (e) {} }
+    btn.textContent = ICONS[m];
+    btn.title = LABELS[m];
+    btn.setAttribute('aria-label', LABELS[m]);
+    var color = dark ? '#0b0e0c' : '#f5f3ec';
+    Array.prototype.forEach.call(document.querySelectorAll('meta[name="theme-color"]'), function (mt) {
+      mt.setAttribute('content', color);
+    });
+  }
+  apply(mode(), false);
+  btn.addEventListener('click', function () {
+    var next = { auto: 'light', light: 'dark', dark: 'auto' }[mode()] || 'auto';
+    apply(next, true);
+  });
+  function onSystemChange() { if (mode() === 'auto') apply('auto', false); }
+  if (mq.addEventListener) mq.addEventListener('change', onSystemChange);
+  else if (mq.addListener) mq.addListener(onSystemChange);
+})();
