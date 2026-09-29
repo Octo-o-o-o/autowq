@@ -1,4 +1,5 @@
 // autowq 官网动效：onboard 打字机、数字滚动、进入视口上浮
+document.documentElement.classList.add('js');
 (function () {
   'use strict';
 
@@ -123,6 +124,77 @@
       hero.href = 'https://github.com/Octo-o-o-o/autowq/releases';
       hero.textContent = ZH ? '下载 Windows 版' : 'Download for Windows';
     }
+  }
+
+  /* Hero 下载下拉：主按钮直下，箭头切换系统 / 安装方式 */
+  var more = document.getElementById('heroMore');
+  var menu = document.getElementById('heroMenu');
+  if (more && menu) {
+    var dl = more.parentNode;
+    var mine = menu.querySelector(isWin ? '[data-os="windows"]' : (isMac ? '[data-os="macos"]' : 'x'));
+    if (mine) {
+      var chip = document.createElement('span');
+      chip.className = 'cm-chip';
+      chip.textContent = ZH ? '你的系统' : 'Your system';
+      mine.querySelector('.cm-l').appendChild(chip);
+    }
+    var items = function () {
+      return Array.prototype.slice.call(menu.querySelectorAll('[role="menuitem"]'));
+    };
+    function setOpen(open) {
+      menu.hidden = !open;
+      more.setAttribute('aria-expanded', open ? 'true' : 'false');
+      dl.classList.toggle('open', open);
+    }
+    more.addEventListener('click', function (e) {
+      e.stopPropagation();
+      setOpen(menu.hidden);
+    });
+    more.addEventListener('keydown', function (e) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setOpen(true); items()[0].focus(); }
+    });
+    menu.addEventListener('keydown', function (e) {
+      var list = items();
+      var i = list.indexOf(document.activeElement);
+      if (e.key === 'ArrowDown') { e.preventDefault(); list[(i + 1) % list.length].focus(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); list[(i - 1 + list.length) % list.length].focus(); }
+      else if (e.key === 'Escape') { setOpen(false); more.focus(); }
+      else if (e.key === 'Tab') { setOpen(false); }
+    });
+    menu.addEventListener('focusin', function (e) {
+      items().forEach(function (it) { it.classList.toggle('focus', it === e.target); });
+    });
+    document.addEventListener('click', function (e) { if (!dl.contains(e.target)) setOpen(false); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') setOpen(false); });
+
+    menu.querySelectorAll('a[role="menuitem"]').forEach(function (a) {
+      a.addEventListener('click', function () { setOpen(false); });
+    });
+    menu.querySelectorAll('[data-cmd]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var text = b.dataset.cmd;
+        var r = b.querySelector('.cm-r');
+        var orig = r.textContent;
+        function done() {
+          r.textContent = ZH ? '已复制 ✓' : 'Copied ✓';
+          setTimeout(function () {
+            setOpen(false);
+            setTimeout(function () { r.textContent = orig; }, 300);
+          }, 900);
+        }
+        function fallback() {
+          var t = document.createElement('textarea');
+          t.value = text;
+          document.body.appendChild(t);
+          t.select();
+          try { document.execCommand('copy'); done(); } catch (e) {}
+          t.remove();
+        }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(done, fallback);
+        } else { fallback(); }
+      });
+    });
   }
 
   var sel = isWin ? '.dl-card[data-os="windows"]' : (isMac ? '.dl-card.featured' : null);

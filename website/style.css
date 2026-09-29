@@ -94,6 +94,44 @@ section[id] { scroll-margin-top: 72px; }
 .btn.primary { background: var(--amber); border-color: var(--amber); color: var(--ink); font-weight: 700; }
 .btn.primary:hover { background: var(--amber-hot); color: var(--ink); }
 
+/* Hero 下载：主按钮 = 识别到的系统的完整包；箭头展开全部系统与安装方式。无 JS 时箭头隐藏、主按钮锚到下载区 */
+.cta-dl { position: relative; display: inline-flex; }
+html:not(.js) .cta-more, html:not(.js) .cta-menu { display: none; }
+.cta-dl .btn.primary:first-child { border-radius: 4px 0 0 4px; }
+.cta-more {
+  border-radius: 0 4px 4px 0; margin-left: -1px; padding: 11px 13px; cursor: pointer;
+  display: inline-flex; align-items: center;
+  box-shadow: inset 1px 0 0 rgba(11, 14, 12, 0.28);
+}
+.cta-more svg { transition: transform .25s; }
+.cta-dl.open .cta-more svg { transform: rotate(180deg); }
+.cta-menu {
+  position: absolute; top: calc(100% + 8px); left: 0; z-index: 60;
+  width: max-content; min-width: 280px; max-width: min(400px, calc(100vw - 40px));
+  background: var(--menu-bg); border: 1px solid var(--menu-line); border-radius: 8px;
+  padding: 6px; box-shadow: var(--menu-shadow); font-size: 13.5px;
+}
+.cta-menu[hidden] { display: none; }
+.cta-menu .cm-head {
+  font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--menu-dim); padding: 8px 10px 3px;
+}
+.cta-menu [role="menuitem"] {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 14px;
+  width: 100%; padding: 7px 10px; border: 0; border-radius: 5px; background: none;
+  color: var(--menu-fg); font: inherit; text-align: left; cursor: pointer; text-decoration: none;
+}
+.cta-menu [role="menuitem"]:hover, .cta-menu [role="menuitem"].focus { background: var(--amber); color: var(--menu-hot-fg); }
+.cta-menu [role="menuitem"]:hover .cm-r, .cta-menu [role="menuitem"].focus .cm-r { color: inherit; opacity: 0.65; }
+.cta-menu .cm-r { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--menu-dim); white-space: nowrap; }
+.cta-menu .cm-l { white-space: nowrap; display: inline-flex; align-items: baseline; }
+.cta-menu hr { border: none; border-top: 1px solid var(--menu-line); margin: 5px 8px; }
+.cta-menu .cm-all { color: var(--amber); font-size: 12.5px; }
+.cta-menu .cm-chip {
+  margin-left: 8px; padding: 0 7px; border: 1px solid currentColor; border-radius: 999px;
+  font-size: 10px; opacity: 0.75; vertical-align: 1px; white-space: nowrap;
+}
+
 /* 品牌波形回路 SVG 动画 */
 .loopmark { width: 100%; max-width: 340px; margin: 0 auto; display: block; }
 .loopmark .trace {

@@ -31,7 +31,7 @@
 <meta name="twitter:title" content="autowq — a local BRAIN research loop">
 <meta name="twitter:description" content="Cross-provider review · budget gates · pre-submission acceptance · your data never leaves the machine">
 <meta name="twitter:image" content="https://autowq.octoooo.com/assets/og.png">
-<link rel="stylesheet" href="/style.css?v=9">
+<link rel="stylesheet" href="/style.css?v=10">
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -101,7 +101,24 @@
     <h1>BRAIN research on <span class="amber">autopilot</span>,<br>out of the box.</h1>
     <p class="sub">Install it and it runs from your menu bar: hypothesis → cross-provider review → bounded simulation → diagnosis → gated submission, looping on its own. Your accounts, your budgets, your cadence.</p>
     <div class="cta">
-      <a class="btn primary" id="heroCta" href="#install">Free download · up in 5 minutes</a>
+      <div class="cta-dl">
+        <a class="btn primary" id="heroCta" href="#install">Free download · up in 5 minutes</a>
+        <button class="btn primary cta-more" id="heroMore" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="heroMenu" aria-label="Choose platform or install method">
+          <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="cta-menu" id="heroMenu" role="menu" aria-label="Download options" hidden>
+          <div class="cm-head">Desktop · just open it</div>
+          <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.15/WorldQuant-0.2.15.dmg" data-os="macos"><span class="cm-l">macOS full package</span><span class="cm-r">DMG · 54 MB</span></a>
+          <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.15/WorldQuant-0.2.15-light.dmg"><span class="cm-l">macOS light package</span><span class="cm-r">DMG · 1 MB</span></a>
+          <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases" target="_blank" rel="noopener" data-os="windows"><span class="cm-l">Windows tray</span><span class="cm-r">.exe · experimental</span></a>
+          <hr>
+          <div class="cm-head">Developers</div>
+          <button role="menuitem" type="button" data-cmd="pipx install wq-pilot"><span class="cm-l">Command line</span><span class="cm-r">pipx install wq-pilot</span></button>
+          <button role="menuitem" type="button" data-cmd="git clone https://github.com/Octo-o-o-o/autowq && cd autowq && ./wq onboard"><span class="cm-l">Source</span><span class="cm-r">git clone …</span></button>
+          <hr>
+          <a role="menuitem" href="#install" class="cm-all">All install options →</a>
+        </div>
+      </div>
       <a class="btn" href="https://github.com/Octo-o-o-o/autowq" target="_blank" rel="noopener">GitHub →</a>
     </div>
   </div>
@@ -298,6 +315,6 @@ window.ONBOARD_LINES = [
   { text: 'Done. Hit "Start automation" in the menu bar.', cls: 'ok', pause: 900 }
 ];
 </script>
-<script src="/script.js?v=2"></script>
+<script src="/script.js?v=3"></script>
 </body>
 </html>

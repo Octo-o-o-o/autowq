@@ -31,7 +31,7 @@
 <meta name="twitter:title" content="autowq — 本地 BRAIN 研究回路">
 <meta name="twitter:description" content="异渠道审查 · 预算闸门 · 提交前验收 · 数据不出本机">
 <meta name="twitter:image" content="https://autowq.octoooo.com/assets/og.png">
-<link rel="stylesheet" href="/style.css?v=9">
+<link rel="stylesheet" href="/style.css?v=10">
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -101,7 +101,24 @@
     <h1>开箱即用的<br><span class="amber">全自动</span> BRAIN 研究。</h1>
     <p class="sub">装上就在菜单栏里运转：假设 → 异渠道审查 → 有限回测 → 诊断 → 提交前验收，一条回路自动循环。用你的账号、你的预算、你的节奏。</p>
     <div class="cta">
-      <a class="btn primary" id="heroCta" href="#install">免费下载 · 5 分钟上手</a>
+      <div class="cta-dl">
+        <a class="btn primary" id="heroCta" href="#install">免费下载 · 5 分钟上手</a>
+        <button class="btn primary cta-more" id="heroMore" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="heroMenu" aria-label="选择系统或安装方式">
+          <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="cta-menu" id="heroMenu" role="menu" aria-label="下载选项" hidden>
+          <div class="cm-head">桌面版 · 打开即用</div>
+          <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.15/WorldQuant-0.2.15.dmg" data-os="macos"><span class="cm-l">macOS 完整包</span><span class="cm-r">DMG · 54 MB</span></a>
+          <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.15/WorldQuant-0.2.15-light.dmg"><span class="cm-l">macOS 轻量包</span><span class="cm-r">DMG · 1 MB</span></a>
+          <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases" target="_blank" rel="noopener" data-os="windows"><span class="cm-l">Windows 托盘版</span><span class="cm-r">.exe · 实验性</span></a>
+          <hr>
+          <div class="cm-head">开发者</div>
+          <button role="menuitem" type="button" data-cmd="pipx install wq-pilot"><span class="cm-l">命令行 CLI</span><span class="cm-r">pipx install wq-pilot</span></button>
+          <button role="menuitem" type="button" data-cmd="git clone https://github.com/Octo-o-o-o/autowq && cd autowq && ./wq onboard"><span class="cm-l">源码</span><span class="cm-r">git clone …</span></button>
+          <hr>
+          <a role="menuitem" href="#install" class="cm-all">全部下载方式与说明 →</a>
+        </div>
+      </div>
       <a class="btn" href="https://github.com/Octo-o-o-o/autowq" target="_blank" rel="noopener">GitHub →</a>
     </div>
   </div>
@@ -298,6 +315,6 @@ window.ONBOARD_LINES = [
   { text: '完成。去菜单栏点「开始自动运行」。', cls: 'ok', pause: 900 }
 ];
 </script>
-<script src="/script.js?v=2"></script>
+<script src="/script.js?v=3"></script>
 </body>
 </html>
