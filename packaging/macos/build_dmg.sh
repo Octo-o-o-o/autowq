@@ -6,6 +6,12 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
 VERSION="$(python3 -c "import re; print(re.search(r'^version = \"(.+?)\"', open('pyproject.toml').read(), re.M).group(1))")"
+# full：自带 Python 运行时。light：不含运行时，首次设置使用本机 Python ≥ 3.11。
+PACKAGE="${WQ_PACKAGE:-full}"
+if [ "$PACKAGE" != full ] && [ "$PACKAGE" != light ]; then
+    echo "WQ_PACKAGE must be full or light" >&2
+    exit 1
+fi
 DIST="${WQ_DIST_DIR:-$ROOT/dist}"
 if [ "${REQUIRE_NOTARIZATION:-0}" = 1 ]; then
     test -n "${MACOS_SIGN_IDENTITY:-}" || { echo "Developer ID identity required" >&2; exit 1; }
@@ -75,6 +81,7 @@ mkdir -p "$APP/Contents/Resources/bin"
 cp packaging/macos/bin/wq packaging/macos/bin/wq-setup "$APP/Contents/Resources/bin/"
 chmod 755 "$APP/Contents/Resources/bin/"*
 
+if [ "$PACKAGE" = full ]; then
 echo "==> Bundling Python ${PBS_PY} runtimes"
 mkdir -p "$PBS_CACHE"
 for arch in arm64 x86_64; do
@@ -97,9 +104,13 @@ for arch in arm64 x86_64; do
     unzip -q "$WHEELS"/wq_pilot-*.whl -d "$site"
     echo "cpython-${PBS_PY}+${PBS_TAG}-${arch}" > "$dest/WQ-RUNTIME-ID"
 done
+else
+    echo "==> Light package: no bundled Python runtime"
+fi
 
 echo "==> Signing"
-# 内置运行时里的每个 Mach-O 先签（公证要求逐个签名 + hardened runtime），再签整个 app。
+# 内置运行时里的每个 Mach-O 先签（公证要求逐个签名 + hardened runtime），再签整个 app。轻量包没有这一层。
+if [ -d "$APP/Contents/Resources/runtime" ]; then
 while IFS= read -r -d '' f; do
     if file -b "$f" | grep -q 'Mach-O'; then
         if [ -n "${MACOS_SIGN_IDENTITY:-}" ]; then
@@ -109,6 +120,7 @@ while IFS= read -r -d '' f; do
         fi
     fi
 done < <(find "$APP/Contents/Resources/runtime" -type f -print0)
+fi
 if [ -n "${MACOS_SIGN_IDENTITY:-}" ]; then
     codesign --force --options runtime --timestamp --sign "$MACOS_SIGN_IDENTITY" "$APP"
 else
@@ -124,14 +136,16 @@ if [ -n "${NOTARY_KEYCHAIN_PROFILE:-}" ]; then
     spctl --assess --type execute --verbose=2 "$APP"
 fi
 
-DMG="$DIST/WorldQuant-${VERSION}.dmg"
+suffix=""
+if [ "$PACKAGE" = light ]; then suffix="-light"; fi
+DMG="$DIST/WorldQuant-${VERSION}${suffix}.dmg"
 RW="$BUILD/rw.dmg"
 MOUNT="$BUILD/mount"
 rm -f "$DMG" "$RW"
 mkdir -p "$MOUNT"
 
 echo "==> Creating DMG"
-hdiutil create -size 600m -fs HFS+ -volname "WorldQuant" "$RW" >/dev/null
+hdiutil create -size "$([ "$PACKAGE" = light ] && echo 80m || echo 600m)" -fs HFS+ -volname "WorldQuant" "$RW" >/dev/null
 hdiutil attach "$RW" -mountpoint "$MOUNT" >/dev/null
 trap 'hdiutil detach "$MOUNT" >/dev/null 2>&1 || true' EXIT
 cp -R "$APP" "$MOUNT/WorldQuant.app"

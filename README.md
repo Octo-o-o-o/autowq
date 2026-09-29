@@ -23,7 +23,12 @@ brew tap Octo-o-o-o/autowq && brew install wq-pilot
 brew install --cask Octo-o-o-o/autowq/worldquant   # 可选：菜单栏 App
 ```
 
-方式三：macOS 只用 DMG（开箱即用）。从 [Releases](https://github.com/Octo-o-o-o/autowq/releases) 下载 `WorldQuant-<版本>.dmg`，拖入"应用程序"。DMG 自带 Python 运行时和引擎，不需要系统 Python、Xcode 命令行工具或 pip。可以用菜单栏应用（双击后按首启向导选择工作区并完成 onboard），也可以完全不开菜单栏，直接用应用内的 `WorldQuant.app/Contents/Resources/bin/wq` 命令行（适合交给 AI 操作）。两种用法的完整命令见 **[macOS 安装包说明](docs/app-bundle.md)**。未公证版本可用 `brew install --cask` 安装（自动去除隔离属性），或首次右键打开。
+方式三：macOS DMG，有两个已公证的包，都从 [Releases](https://github.com/Octo-o-o-o/autowq/releases) 下载，拖入"应用程序"。
+
+- **完整包** `WorldQuant-<版本>.dmg`（约 54 MB）：自带 Python 运行时和引擎，不需要系统 Python、Xcode 命令行工具或 pip。菜单栏应用和包内 `WorldQuant.app/Contents/Resources/bin/wq` 都可以直接用。
+- **轻量包** `WorldQuant-<版本>-light.dmg`（约 1 MB）：不含 Python。第一次打开时用本机 Python 3.11 及以上完成设置（Homebrew 或 Xcode 命令行工具）。适合已经装过 Python、想少下载一点的人。设置完成前，包内 `bin/wq` 还不能单独运行。
+
+菜单栏用法和命令行用法见 **[macOS 安装包说明](docs/app-bundle.md)**。未公证版本可用 `brew install --cask` 安装（自动去除隔离属性），或首次右键打开。检查更新下载的是完整包。
 
 Windows（实验性）：只用 `WorldQuantTray.exe`（从 [Releases](https://github.com/Octo-o-o-o/autowq/releases) 下载）。单文件自带引擎，同时是托盘、完整命令行（`--engine <wq 参数>`，或 `--install-cli` 生成 `wq.cmd`）和调度入口；双击后没有配置会先开控制台完成向导。原生 Windows **只支持 API 渠道**（免费预设、OpenAI/Anthropic 协议、自建兼容接口），模型 CLI 订阅需走 WSL2。详见[跨平台部署](docs/linux-windows.md)。
 

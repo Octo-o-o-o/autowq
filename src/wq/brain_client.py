@@ -92,8 +92,10 @@ class BrainClient:
         finally:
             response.close()
         if status in (401,403):
-            challenge = result_headers.get('www-authenticate','')
-            raise AdapterError(AdapterError.AUTH, 'BRAIN认证/权限未通过'+('，需本人完成人机/身份验证' if challenge else ''))
+            challenge = (result_headers.get('www-authenticate') or '').strip()
+            # 普通 401 的 "Bearer" 只表示要带会话，不是人机校验。
+            human = bool(challenge) and challenge.lower() not in ('bearer', 'basic')
+            raise AdapterError(AdapterError.AUTH, 'BRAIN认证/权限未通过'+('，需本人完成人机/身份验证' if human else ''))
         if status == 429:
             raise AdapterError(AdapterError.RATE_LIMIT, 'BRAIN限流', retry_delay(result_headers.get('retry-after')))
         if status >= 500 or 300 <= status < 400:

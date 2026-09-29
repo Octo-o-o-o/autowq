@@ -23,7 +23,12 @@ brew tap Octo-o-o-o/autowq && brew install wq-pilot
 brew install --cask Octo-o-o-o/autowq/worldquant   # optional menu-bar app
 ```
 
-Option 3: macOS, DMG only (works out of the box). Download `WorldQuant-<version>.dmg` from [Releases](https://github.com/Octo-o-o-o/autowq/releases) and drag the app into Applications. The DMG ships its own Python runtime and engine; no system Python, Xcode Command Line Tools or pip needed. Use the menu-bar app (open it and follow the first-launch wizard to pick a workspace and finish onboarding), or skip the menu bar entirely and drive the bundled CLI at `WorldQuant.app/Contents/Resources/bin/wq` (suited to AI agents). Full commands for both: **[macOS bundle guide](docs/app-bundle.md)**. If the build is not notarized, install via `brew install --cask` (which removes quarantine) or right-click Open once.
+Option 3: macOS DMGs. Both builds are notarized. Download either from [Releases](https://github.com/Octo-o-o-o/autowq/releases) and drag the app into Applications.
+
+- **Full** `WorldQuant-<version>.dmg` (about 54 MB): includes the Python runtime and the engine. No system Python, Xcode Command Line Tools or pip. The menu-bar app and `WorldQuant.app/Contents/Resources/bin/wq` both work immediately.
+- **Light** `WorldQuant-<version>-light.dmg` (about 1 MB): no Python runtime. The first launch uses a local Python 3.11 or newer (Homebrew or Xcode Command Line Tools). For people who already have Python and want a smaller download. `bin/wq` inside the app does not run until that first setup finishes.
+
+Menu-bar and CLI steps: **[macOS bundle guide](docs/app-bundle.md)**. If a build is not notarized, install via `brew install --cask` (which removes quarantine) or right-click Open once. Check for Updates downloads the full DMG.
 
 Windows (experimental): `WorldQuantTray.exe` alone (download from [Releases](https://github.com/Octo-o-o-o/autowq/releases)). The single file bundles the engine and is the tray, the full CLI (`--engine <wq args>`, or `--install-cli` to create `wq.cmd`) and the scheduler entry; on first launch without a config it opens a console for the wizard. Native Windows supports **API providers only** (free presets, OpenAI/Anthropic protocols, self-hosted compatible endpoints); model CLI subscriptions need WSL2. See the cross-platform guide (docs/linux-windows.md).
 

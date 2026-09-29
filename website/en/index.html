@@ -214,7 +214,8 @@
   <table>
     <tr><th>Platform</th><th>How</th><th>Notes</th></tr>
     <tr><td>CLI (recommended)</td><td><code>pipx install wq-pilot</code></td><td>Cross-platform; any empty directory + <code>wq onboard</code> = a workspace</td></tr>
-    <tr><td>macOS</td><td><a href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.15/WorldQuant-0.2.15.dmg" target="_blank" rel="noopener">Download the notarized 0.2.15 DMG</a></td><td>Menu-bar app; the first-launch wizard guides setup. Or <code>brew install --cask Octo-o-o-o/autowq/worldquant</code></td></tr>
+    <tr><td>macOS, full</td><td><a href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.15/WorldQuant-0.2.15.dmg" target="_blank" rel="noopener">Download the notarized full DMG 0.2.15</a></td><td>About 54 MB, with Python 3.12 inside. No system Python, Xcode Command Line Tools or pip. The menu bar and the in-app <code>bin/wq</code> both work immediately.</td></tr>
+    <tr><td>macOS, light</td><td><a href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.15/WorldQuant-0.2.15-light.dmg" target="_blank" rel="noopener">Download the notarized light DMG 0.2.15</a></td><td>About 1 MB, no Python runtime. First-time setup uses a local Python 3.11 or newer (Homebrew or Xcode Command Line Tools). For people who already have Python and want a smaller download.</td></tr>
     <tr><td>Windows</td><td><code>WorldQuantTray.exe</code> from Releases</td><td>Native tray + Task Scheduler (experimental)</td></tr>
     <tr><td>Source</td><td><code>git clone</code>, then <code>./wq onboard</code></td><td>Linux/WSL2 isolate via Docker</td></tr>
   </table>
@@ -226,6 +227,7 @@
   <details><summary>Does autowq itself cost anything?</summary><p>No — it's free and open source. It orchestrates your own model subscriptions / API keys and your own BRAIN account; those costs are between you and the vendors. The wizard never starts paid inference. Without a subscription you can start on official free API tiers (<code>wq providers free</code>: Gemini, OpenRouter, BigModel, SiliconFlow and more); an exhausted quota pauses and resumes automatically.</p></details>
   <details><summary>Does automation mean submissions and income?</summary><p>No. Passing screens, accepted submissions, consultant eligibility and actual payouts are four different states, and submission has its own acceptance gates.</p></details>
   <details><summary>Do my credentials or research get uploaded?</summary><p>No. All state lives in a local SQLite ledger; exports exclude cookies, passwords and task inputs; model calls go only to providers you explicitly select.</p></details>
+  <details><summary>Full or light macOS DMG?</summary><p>Both are notarized and install by dragging into Applications. The features match. The full DMG includes Python and opens ready to use. The light DMG is only the menu and the engine; first setup looks for Python 3.11+ on the machine, and the prompt tells you to install Xcode Command Line Tools if it is missing. Check for Updates opens the full DMG.</p></details>
   <details><summary>How well is Windows supported?</summary><p>The native tray and Task Scheduler runner work (experimental); the most mature process-isolation paths remain sandbox-exec on macOS and Docker on Linux/WSL2.</p></details>
 </section>
 </div>

@@ -1,5 +1,6 @@
 {
   "version": "0.2.15",
   "dmg": "https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.15/WorldQuant-0.2.15.dmg",
-  "notes": "macOS 仍是已公证 DMG。原生 Windows 可用托盘程序单独完成研究，仅支持 API 渠道。"
+  "dmg_light": "https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.15/WorldQuant-0.2.15-light.dmg",
+  "notes": "完整包自带 Python，开箱即用。轻量包不含运行时，首次设置需要本机 Python 3.11+。"
 }

@@ -13,4 +13,13 @@ if [ "$(uname -m)" = arm64 ] || [ "$(sysctl -n hw.optional.arm64 2>/dev/null || 
 else
     ARCH=x86_64
 fi
-PYTHONDONTWRITEBYTECODE=1 exec "$RES/runtime/$ARCH/bin/python3" -m wq "$@"
+if [ -x "$RES/runtime/$ARCH/bin/python3" ]; then
+    PY="$RES/runtime/$ARCH/bin/python3"
+elif [ -x "$HOME/Library/Application Support/WorldQuant/venv/bin/python" ]; then
+    PY="$HOME/Library/Application Support/WorldQuant/venv/bin/python"
+else
+    echo "轻量包没有内置 Python。请先打开菜单完成首次设置（需要本机 Python 3.11+），或改用完整包。" >&2
+    echo "This light build has no bundled Python. Open the menu once to finish setup (Python 3.11+ required), or use the full build." >&2
+    exit 1
+fi
+PYTHONDONTWRITEBYTECODE=1 exec "$PY" -m wq "$@"

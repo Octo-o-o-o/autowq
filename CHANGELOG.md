@@ -2,6 +2,8 @@
 
 ## 0.2.15
 
+- Refreshing the menu account line signs in again from the macOS Keychain when the BRAIN session has expired, then reloads level and score. Manual refresh, opening the app, 08:00 local time and a successful submission are still the only times it contacts BRAIN.
+- macOS ships two notarized DMGs: `WorldQuant-<version>.dmg` bundles Python and works out of the box; `WorldQuant-<version>-light.dmg` is the small build and uses a local Python 3.11+ at first setup.
 - Native Windows runs the full workflow from `WorldQuantTray.exe` alone, with API providers only (free presets, OpenAI/Anthropic protocols, custom endpoints); CLI providers are refused because native Windows has no sandbox. The exe now dispatches `--engine` (full CLI), `--console` (own console for the wizard and BRAIN login), `--provider-runtime` (API calls), `--scheduled-run` (Task Scheduler tick with logs), `--setup-windows [--no-tray|--remove]` and `--install-cli` (writes `wq.cmd`). Starting research from the tray registers the scheduler task itself; the first launch without a config opens the onboarding wizard. The build now bundles `wq/assets` data and runs in UTF-8 mode, and CI smoke-tests the packaged exe. `build_exe.ps1` is now ASCII so Windows PowerShell 5.1 can parse it. CLI, API-call, scheduler registration and scheduled-run paths were verified on a real Windows machine; the interactive console, BRAIN login and tray UI still await desktop testing.
 
 ## 0.2.14

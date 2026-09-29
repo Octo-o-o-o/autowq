@@ -227,9 +227,11 @@ def _identity_flag(cfg):
 def _fetch_identity(cfg, cached):
     from wq import util
     from wq.brain_client import BrainClient
+    from wq.brain_jobs import get_with_reauth
     from wq.errors import AdapterError
     client = BrainClient(cfg.private_dir)
-    status, _, data = client.request('GET', '/users/self')
+    # 会话大约数小时过期。自动登录已开启时，这里和模拟预检一样用 Keychain 重新登录后再读。
+    status, _, data = get_with_reauth(client, cfg, '/users/self')
     if status != 200 or not isinstance(data, dict):
         return None
     kept = {'bound': True, 'queried_at': util.now_iso()}
@@ -239,7 +241,7 @@ def _fetch_identity(cfg, cached):
             kept[key] = value
     score = None
     try:
-        cstatus, _, comp = client.request('GET', '/users/self/competitions')
+        cstatus, _, comp = get_with_reauth(client, cfg, '/users/self/competitions')
         if cstatus == 200:
             score = _leaderboard_score(comp)
     except (AdapterError, OSError, ValueError):
@@ -793,8 +795,8 @@ def control(action, arg=None):
         identity, refreshed = menu_identity(_cfg(), lang, refresh=True)
         out = {'identity': identity, 'refreshed': refreshed}
         if arg == 'manual' and not refreshed:
-            out['message'] = text(lang, '账号信息暂时没有刷新，仍显示上次记录。',
-                                  'Account info was not refreshed; showing the last record.')
+            out['message'] = text(lang, '账号信息没有刷新。BRAIN 会话可能已过期，自动重新登录也没完成；请用「绑定 / 重新登录」。仍显示上次记录。',
+                                  'Account info was not refreshed. The BRAIN session may have expired and automatic sign-in did not finish; use “Bind / re-login”. Showing the last record.')
         return out
     if action == 'brain-register':
         webbrowser.open(BRAIN_REGISTER_URL)

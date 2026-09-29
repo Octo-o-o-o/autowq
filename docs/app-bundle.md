@@ -4,9 +4,15 @@
 
 ## 结论 / Summary
 
-macOS 只需要 `WorldQuant-<版本>.dmg`。DMG 里带了 Python 3.12 运行时（arm64 与 x86_64 各一份）、预装好的引擎、菜单栏应用和命令行入口。**不需要**系统 Python、Xcode Command Line Tools、pip、Homebrew 或源码。
+macOS 有两个已公证的 DMG，功能相同，拖进“应用程序”即可。
 
-On macOS, `WorldQuant-<version>.dmg` is all you need. It ships a Python 3.12 runtime (one arm64, one x86_64), the engine preinstalled, the menu-bar app and command-line entry points. You do **not** need system Python, Xcode Command Line Tools, pip, Homebrew or a source checkout.
+- **完整包** `WorldQuant-<版本>.dmg`：带 Python 3.12 运行时（arm64 与 x86_64 各一份）、预装好的引擎、菜单栏应用和命令行入口。**不需要**系统 Python、Xcode Command Line Tools、pip、Homebrew 或源码。
+- **轻量包** `WorldQuant-<版本>-light.dmg`：只有菜单、引擎和命令行入口，没有 Python 运行时。第一次设置使用本机 Python 3.11 及以上；找不到时提示安装 Xcode 命令行工具。设置完成后，应用内 `bin/wq` 走 `~/Library/Application Support/WorldQuant/venv`。
+
+On macOS there are two notarized DMGs. The features match; drag either into Applications.
+
+- **Full** `WorldQuant-<version>.dmg`: a Python 3.12 runtime (arm64 and x86_64), the engine preinstalled, the menu-bar app and the CLI. You do **not** need system Python, Xcode Command Line Tools, pip, Homebrew or a source checkout.
+- **Light** `WorldQuant-<version>-light.dmg`: the menu, the engine and the CLI, without a Python runtime. First-time setup uses a local Python 3.11 or newer, and tells you to install Xcode Command Line Tools if none is found. After setup, `bin/wq` uses `~/Library/Application Support/WorldQuant/venv`.
 
 安装包带不进去、必须由本人准备的东西 / What no installer can bundle:
 
