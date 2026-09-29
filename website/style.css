@@ -342,12 +342,19 @@ footer a:hover { color: var(--amber); }
   border-bottom: 1px solid var(--line);
 }
 .byline p { color: var(--faint); font-size: 13px; line-height: 2.05; }
-.byline a {
-  color: var(--dim); text-decoration: none;
-  border-bottom: 1px solid var(--menu-line);
-  transition: color .25s, border-color .25s;
+.byline-brand { margin-bottom: 8px; }
+.byline-brand a {
+  display: inline-flex; align-items: center; gap: 9px;
+  padding: 8px 18px 8px 11px;
+  border: 1px solid var(--menu-line); border-radius: 999px;
+  background: var(--panel);
+  color: var(--paper); font-size: 14px; font-weight: 600; letter-spacing: .01em;
+  text-decoration: none;
+  transition: border-color .25s, color .25s, background .25s;
 }
-.byline a:hover { color: var(--amber); border-color: var(--amber); }
+.byline-brand a:hover { border-color: var(--amber); color: var(--amber-hot); background: var(--amber-soft); }
+.byline-mark { width: 20px; height: 20px; flex-shrink: 0; }
+.byline-zh { color: var(--dim); font-weight: 400; font-size: 12.5px; }
 
 @media (max-width: 640px) {
   nav .inner { gap: 12px; }
