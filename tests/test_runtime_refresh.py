@@ -15,6 +15,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class RuntimeRefreshTests(unittest.TestCase):
     def setUp(self):
+        # 刷新逻辑按 macOS 生成 launcher/沙箱文件；在 Linux CI 上也模拟 darwin 走同一分支（只写文件，不执行 sandbox-exec）。
+        darwin = patch.object(providers.sys, 'platform', 'darwin'); darwin.start(); self.addCleanup(darwin.stop)
         self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
         self.base = Path(self.tmp.name).resolve()
         self.root = self.base/'project'
