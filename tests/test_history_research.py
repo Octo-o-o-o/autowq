@@ -83,3 +83,9 @@ class HistoryResearchTests(unittest.TestCase):
             autopilot.make_job(self.conn,self.cfg,46,'research','Original required task contract')
         prompt=Path(queue.call_args.args[3]).read_text()
         self.assertIn('Original required task contract',prompt);self.assertIn(h.RULES['novel_measurement'],prompt)
+
+    def test_old_priority_expires_without_rewriting_accepted_evidence(self):
+        self.insert('accepted')
+        self.conn.execute("UPDATE history_research SET updated_at='2000-01-01T00:00:00Z'")
+        self.assertEqual(h.context(self.conn,self.cfg),'')
+        self.assertEqual(self.conn.execute('SELECT state FROM history_research').fetchone()[0],'accepted')

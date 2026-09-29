@@ -48,12 +48,15 @@ def daily_pnl(doc):
 def correlation(left, right, minimum=252):
     a, b = daily_pnl(left), daily_pnl(right)
     dates = sorted(a.keys() & b.keys())
-    if len(dates) < minimum: return {'value': None, 'observations': len(dates), 'reason': '共同日区间不足'}
+    contract={'algorithm':'cumulative-delta-interval-correlation-v1','minimum':minimum,
+              'left_content_hash':util.sha256_json(left),'right_content_hash':util.sha256_json(right),
+              'aligned_intervals_hash':util.sha256_json(dates),'pool_kind':'local_pair'}
+    if len(dates) < minimum: return {'value': None, 'observations': len(dates), 'reason': '共同日区间不足','contract':contract}
     x, y = [a[d] for d in dates], [b[d] for d in dates]
     mx, my = sum(x)/len(x), sum(y)/len(y)
     vx, vy = sum((v-mx)**2 for v in x), sum((v-my)**2 for v in y)
     value = sum((u-mx)*(v-my) for u,v in zip(x,y))/math.sqrt(vx*vy) if vx > 0 and vy > 0 else None
-    return {'value': value, 'observations': len(dates), 'from': dates[0][1], 'to': dates[-1][1],
+    return {'value': value, 'contract':contract, 'observations': len(dates), 'from': dates[0][1], 'to': dates[-1][1],
             'note': '探索期累计PnL差分相关性；不是官方SELF_CORRELATION，也不是独立样本外证据'}
 
 
@@ -126,9 +129,10 @@ def submitted_correlation(conn, pnl_doc, exclude=None, candidate_sharpe=None):
         except (OSError, ValueError, KeyError, TypeError):
             corr = {'value': None}
         if corr['value'] is None: missing.append(aid)
-        else: out.append({'alpha_id': aid, 'value': corr['value'], 'sharpe': alpha_sharpe(conn, aid)})
+        else: out.append({'alpha_id': aid, 'value': corr['value'], 'sharpe': alpha_sharpe(conn, aid), 'contract':corr.get('contract')})
     values = [abs(x['value']) for x in out]
     result = {'max': max(values) if values else None, 'against': out, 'missing': missing, 'premium': None}
+    result['pool_contract']={'kind':'local_accepted_submissions','members_hash':util.sha256_json(sorted([x['alpha_id'] for x in out]+missing)),'official':False}
     peers = [x for x in out if abs(x['value']) >= SUBMITTED_CORR_BLOCK]
     if peers:
         known = [x['sharpe'] for x in peers if x['sharpe'] is not None]
@@ -252,11 +256,26 @@ def enqueue(conn, cfg, aid):
         'title':'真实结果诊断/分段/相关性资料：'+aid}, 'brain-feedback-v1:'+aid, max_attempts=120)
 
 
+def enqueue_refresh(conn, cfg, aid):
+    """One GET-only collection per Alpha/day; old files are immutable snapshots."""
+    if not isinstance(aid,str) or not aid: raise ValueError('Alpha ID required')
+    setup(conn)
+    _,alpha=source(conn,aid)
+    for row in conn.execute("SELECT task_id,payload_json FROM tasks WHERE kind='brain_feedback' AND status IN ('queued','claimed','running','unknown')"):
+        if json.loads(row['payload_json']).get('alpha_id')==aid:return row['task_id'],False
+    day=util.now().date().isoformat()
+    return store.enqueue_task(conn,'brain_feedback',{'alpha_id':aid,'identity':identity(alpha),
+        'snapshot_date':day,'title':'追加只读反馈快照'},'brain-feedback-refresh-v1:'+aid+':'+day,max_attempts=120)
+
+
 def step(conn, cfg, task, payload):
     setup(conn)
     aid = payload['alpha_id']; _, alpha = source(conn, aid)
     if identity(alpha) != payload['identity']: return 'blocked', {}, '反馈对象改变'
     root = Path(cfg.private_dir)/'research-feedback'/aid
+    if payload.get('snapshot_date'):
+        snapshot_date=dt.date.fromisoformat(payload['snapshot_date']).isoformat()
+        root=root/'observations'/snapshot_date
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     cooldown = store.get_flag(conn, 'brain_not_before')
     if cooldown and util.now() < util.parse_iso(cooldown):
@@ -295,6 +314,12 @@ def step(conn, cfg, task, payload):
         result['updated_at'] = util.now_iso()
         conn.execute('INSERT OR REPLACE INTO research_feedback VALUES(?,?,?,?)',
                      (aid, identity(alpha), json.dumps(result, ensure_ascii=False), result['updated_at']))
+        from . import research_learning
+        data_rows=records(pnl)
+        research_learning.capture_feedback(conn,aid,result,origin='platform_collection',
+            data_through=data_rows[-1].get('date'),content_hash=util.sha256_json(pnl))
+        research_learning.sync(conn)
+        research_learning.derive_rules(conn)
         util.write_json(str(root/'report.json'), result)
         return 'succeeded', {'alpha_id':aid,'diagnosis':result['diagnosis'],
             'retain':result['retain_for_complementarity'],'submission_candidate':result['submission_candidate']}, None
@@ -312,7 +337,8 @@ def refresh_local(conn, cfg):
     updated = []
     rules = segment_rules(cfg)
     for row in conn.execute('SELECT alpha_id, identity, report_json FROM research_feedback').fetchall():
-        root = Path(cfg.private_dir)/'research-feedback'/row['alpha_id']
+        previous=json.loads(row['report_json'])
+        root=Path(previous['pnl_path']).parent if previous.get('pnl_path') else Path(cfg.private_dir)/'research-feedback'/row['alpha_id']
         if not (root/'alpha.json').exists() or not (root/'yearly-stats.json').exists() or not (root/'pnl.json').exists():
             continue
         alpha = util.read_json(str(root/'alpha.json'))
@@ -330,6 +356,11 @@ def refresh_local(conn, cfg):
         old_cmp = {k: v for k, v in old.items() if k not in ('recomputed_at', 'recomputed_note')}
         new_cmp = {k: v for k, v in result.items() if k not in ('recomputed_at', 'recomputed_note')}
         if new_cmp != old_cmp:
+            from . import research_learning
+            research_learning.capture_feedback(conn,row['alpha_id'],old,origin='before_recompute')
+            pnl=util.read_json(str(root/'pnl.json'))
+            research_learning.capture_feedback(conn,row['alpha_id'],result,origin='local_recompute',
+                data_through=records(pnl)[-1].get('date'),content_hash=util.sha256_json(pnl))
             conn.execute('UPDATE research_feedback SET report_json=? WHERE alpha_id=?', (json.dumps(result, ensure_ascii=False), row['alpha_id']))
             util.write_json(str(root/'report.json'), result); updated.append(row['alpha_id'])
     return updated

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.17
+
+- Add versioned research lineage, scoped edit/counterexample retrieval, bounded plan selection, typed mutation suggestions and structural-family collision auditing.
+- Add prospective budget-bound comparisons, evidence-bound rule ranking, explicit uncertainty/cost gaps, idle maintenance and automatic fallback. Existing execution and submission gates remain enforced.
+- Freeze candidate pools and historical risk weights; evaluate only genuinely new post-freeze intervals with immutable PnL identities. Add measurement/NaN coverage audits, local gate counterfactuals and actual effort/cash reporting.
+- Provide `research-learning` CLI and operating guide. No Alpha-quality or cash-return improvement is claimed by software validation.
+
 ## 0.2.16
 
 - Chinese Windows opens the first-run wizard and tray in Chinese: the language is read from the Windows UI language, because `locale.getlocale()` there returns names like `Chinese (Simplified)_China` that were treated as English.

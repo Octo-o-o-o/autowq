@@ -322,7 +322,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         DispatchQueue.global(qos: .userInitiated).async {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: self.setupPython())
-            process.arguments = [script] + arguments
+            process.arguments = ["-B", script] + arguments
             let pipe = Pipe(); process.standardOutput = pipe; process.standardError = pipe
             var result: [String: Any]
             do {
