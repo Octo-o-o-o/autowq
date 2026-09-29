@@ -31,7 +31,7 @@
 <meta name="twitter:title" content="autowq — a local BRAIN research loop">
 <meta name="twitter:description" content="Cross-provider review · budget gates · pre-submission acceptance · your data never leaves the machine">
 <meta name="twitter:image" content="https://autowq.octoooo.com/assets/og.png">
-<link rel="stylesheet" href="/style.css?v=8">
+<link rel="stylesheet" href="/style.css?v=9">
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -85,7 +85,7 @@
     <a href="#start">Onboarding</a>
     <a href="#tray">Tray</a>
     <a href="#case">Case study</a>
-    <a href="#install">Install</a>
+    <a href="#install">Download</a>
     <a href="#faq">FAQ</a>
     <a href="https://github.com/Octo-o-o-o/autowq" target="_blank" rel="noopener">GitHub</a>
     <button class="theme" id="themeToggle" type="button" aria-label="Switch theme (auto / light / dark)">◐</button>
@@ -101,7 +101,7 @@
     <h1>BRAIN research on <span class="amber">autopilot</span>,<br>out of the box.</h1>
     <p class="sub">Install it and it runs from your menu bar: hypothesis → cross-provider review → bounded simulation → diagnosis → gated submission, looping on its own. Your accounts, your budgets, your cadence.</p>
     <div class="cta">
-      <a class="btn primary" href="#start">Up in 5 minutes</a>
+      <a class="btn primary" id="heroCta" href="#install">Free download · up in 5 minutes</a>
       <a class="btn" href="https://github.com/Octo-o-o-o/autowq" target="_blank" rel="noopener">GitHub →</a>
     </div>
   </div>
@@ -138,7 +138,7 @@
 
 <section id="start">
   <h2><span class="no">02</span>Zero friction: your subscribed agents are enough</h2>
-  <p class="lead">Nothing new to buy. The wizard detects the agent CLIs you already subscribe to — Grok, Devin, Cursor, Claude Code, Codex and ten more, or OpenAI / Anthropic API keys — and orchestrates them.</p>
+  <p class="lead">Nothing new to buy. The wizard detects the agent CLIs you already subscribe to — Grok, Devin, Cursor, Claude Code, Codex and ten more, or OpenAI / Anthropic API keys — and orchestrates them. Not installed yet? <a href="#install">Grab it first ↓</a></p>
   <div class="split">
     <div class="term">
       <div class="bar"><i></i><i></i><i></i><span class="ttl">wq onboard — first-run wizard</span></div>
@@ -209,16 +209,51 @@
 </section>
 
 <section id="install">
-  <h2><span class="no">05</span>Install</h2>
-  <p class="lead">Zero third-party dependencies, pure Python 3.11+ standard library. Desktop builds are turnkey; the CLI goes anywhere.</p>
-  <table>
-    <tr><th>Platform</th><th>How</th><th>Notes</th></tr>
-    <tr><td>CLI (recommended)</td><td><code>pipx install wq-pilot</code></td><td>Cross-platform; any empty directory + <code>wq onboard</code> = a workspace</td></tr>
-    <tr><td>macOS, full</td><td><a href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.15/WorldQuant-0.2.15.dmg" target="_blank" rel="noopener">Download the notarized full DMG 0.2.15</a></td><td>About 54 MB, with Python 3.12 inside. No system Python, Xcode Command Line Tools or pip. The menu bar and the in-app <code>bin/wq</code> both work immediately.</td></tr>
-    <tr><td>macOS, light</td><td><a href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.15/WorldQuant-0.2.15-light.dmg" target="_blank" rel="noopener">Download the notarized light DMG 0.2.15</a></td><td>About 1 MB, no Python runtime. First-time setup uses a local Python 3.11 or newer (Homebrew or Xcode Command Line Tools). For people who already have Python and want a smaller download.</td></tr>
-    <tr><td>Windows</td><td><code>WorldQuantTray.exe</code> from Releases</td><td>Native tray + Task Scheduler (experimental)</td></tr>
-    <tr><td>Source</td><td><code>git clone</code>, then <code>./wq onboard</code></td><td>Linux/WSL2 isolate via Docker</td></tr>
-  </table>
+  <h2><span class="no">05</span>Download & setup</h2>
+  <p class="lead">Two paths, one first-run wizard at the end: download the desktop app and just open it, or install from your terminal in one line.</p>
+  <div class="dl-grid rise">
+    <div class="dl-card featured" data-os="macos">
+      <div class="dl-tag">Recommended · just open it</div>
+      <h3>macOS full package</h3>
+      <div class="dl-size">54 <span>MB</span></div>
+      <p>Ships with Python 3.12 — no system Python, Xcode CLT or pip needed. Drag into Applications, double-click, and the wizard takes over.</p>
+      <a class="btn primary dl-btn" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.15/WorldQuant-0.2.15.dmg" target="_blank" rel="noopener">Download the full DMG</a>
+      <div class="dl-meta">0.2.15 · Notarized by Apple · menu-bar app</div>
+    </div>
+    <div class="dl-card" data-os="macos">
+      <div class="dl-tag">If you already have Python</div>
+      <h3>macOS light package</h3>
+      <div class="dl-size">1 <span>MB</span></div>
+      <p>No bundled Python. First setup uses your local Python 3.11+ (Homebrew or Xcode CLT) and guides you if it's missing. Features are identical.</p>
+      <a class="btn dl-btn" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.15/WorldQuant-0.2.15-light.dmg" target="_blank" rel="noopener">Download the light DMG</a>
+      <div class="dl-meta">0.2.15 · Notarized by Apple · menu-bar app</div>
+    </div>
+    <div class="dl-card" data-os="windows">
+      <div class="dl-tag">Windows · experimental</div>
+      <h3>Windows tray</h3>
+      <div class="dl-size">.exe</div>
+      <p>Native tray + Task Scheduler. Grab <code>WorldQuantTray.exe</code> from Releases and run it.</p>
+      <a class="btn dl-btn" href="https://github.com/Octo-o-o-o/autowq/releases" target="_blank" rel="noopener">Get it on Releases</a>
+      <div class="dl-meta">Native tray · Task Scheduler</div>
+    </div>
+  </div>
+  <p class="dl-choose">Both macOS packages are feature-identical; the only difference is the bundled Python. When in doubt, take the full one.</p>
+
+  <div class="cli-row rise">
+    <div class="cli-card">
+      <h3>Command line</h3>
+      <div class="cmdline"><code>pipx install wq-pilot</code><button class="copy" type="button" data-copy="pipx install wq-pilot">Copy</button></div>
+      <div class="cmdline"><code>brew install --cask Octo-o-o-o/autowq/worldquant</code><button class="copy" type="button" data-copy="brew install --cask Octo-o-o-o/autowq/worldquant">Copy</button></div>
+      <p>Cross-platform; zero third-party runtime dependencies, pure Python 3.11+ standard library. Any empty directory + <code>wq onboard</code> = a workspace.</p>
+    </div>
+    <div class="cli-card">
+      <h3>Source</h3>
+      <div class="cmdline"><code>git clone https://github.com/Octo-o-o-o/autowq && cd autowq && ./wq onboard</code><button class="copy" type="button" data-copy="git clone https://github.com/Octo-o-o-o/autowq && cd autowq && ./wq onboard">Copy</button></div>
+      <p>Linux / WSL2 isolate via Docker. Every build and changelog lives on <a href="https://github.com/Octo-o-o-o/autowq/releases" target="_blank" rel="noopener">Releases</a>.</p>
+    </div>
+  </div>
+
+  <p class="next-steps">After the download: double-click the icon (or run <code>wq onboard</code>) → the wizard detects providers, writes config, launches logins → hit “Start automation” in the menu bar. <a href="#start">See the wizard in action ↑</a></p>
 </section>
 
 <section id="faq">
@@ -263,6 +298,6 @@ window.ONBOARD_LINES = [
   { text: 'Done. Hit "Start automation" in the menu bar.', cls: 'ok', pause: 900 }
 ];
 </script>
-<script src="/script.js"></script>
+<script src="/script.js?v=2"></script>
 </body>
 </html>

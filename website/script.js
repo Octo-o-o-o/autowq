@@ -105,3 +105,61 @@
   if (mq.addEventListener) mq.addEventListener('change', onSystemChange);
   else if (mq.addListener) mq.addListener(onSystemChange);
 })();
+
+/* ── 下载：按访客平台换 Hero 主按钮、高亮对应卡片；命令一键复制 ── */
+(function () {
+  'use strict';
+  var ZH = (document.documentElement.lang || '').indexOf('zh') === 0;
+  var ua = navigator.userAgent || '';
+  var isWin = /Windows/i.test(ua);
+  var isMac = /Mac/i.test(ua) && !isWin;
+
+  var hero = document.getElementById('heroCta');
+  if (hero) {
+    if (isMac) {
+      hero.href = 'https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.15/WorldQuant-0.2.15.dmg';
+      hero.textContent = ZH ? '下载 macOS 版 · 54 MB' : 'Download for macOS · 54 MB';
+    } else if (isWin) {
+      hero.href = 'https://github.com/Octo-o-o-o/autowq/releases';
+      hero.textContent = ZH ? '下载 Windows 版' : 'Download for Windows';
+    }
+  }
+
+  var sel = isWin ? '.dl-card[data-os="windows"]' : (isMac ? '.dl-card.featured' : null);
+  var card = sel && document.querySelector(sel);
+  if (card && !card.classList.contains('featured')) {
+    card.classList.add('yours');
+    var tag = card.querySelector('.dl-tag');
+    if (tag) {
+      var chip = document.createElement('span');
+      chip.className = 'yours-chip';
+      chip.textContent = ZH ? '你的系统' : 'Your system';
+      tag.appendChild(chip);
+    }
+  }
+
+  document.querySelectorAll('.copy').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var text = b.dataset.copy;
+      function done() {
+        b.classList.add('done');
+        b.textContent = ZH ? '已复制' : 'Copied';
+        setTimeout(function () {
+          b.classList.remove('done');
+          b.textContent = ZH ? '复制' : 'Copy';
+        }, 1600);
+      }
+      function fallback() {
+        var t = document.createElement('textarea');
+        t.value = text;
+        document.body.appendChild(t);
+        t.select();
+        try { document.execCommand('copy'); done(); } catch (e) {}
+        t.remove();
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, fallback);
+      } else { fallback(); }
+    });
+  });
+})();

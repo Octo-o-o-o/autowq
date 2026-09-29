@@ -31,7 +31,7 @@
 <meta name="twitter:title" content="autowq — 本地 BRAIN 研究回路">
 <meta name="twitter:description" content="异渠道审查 · 预算闸门 · 提交前验收 · 数据不出本机">
 <meta name="twitter:image" content="https://autowq.octoooo.com/assets/og.png">
-<link rel="stylesheet" href="/style.css?v=8">
+<link rel="stylesheet" href="/style.css?v=9">
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -85,7 +85,7 @@
     <a href="#start">上手</a>
     <a href="#tray">托盘</a>
     <a href="#case">案例</a>
-    <a href="#install">安装</a>
+    <a href="#install">下载</a>
     <a href="#faq">FAQ</a>
     <a href="https://github.com/Octo-o-o-o/autowq" target="_blank" rel="noopener">GitHub</a>
     <button class="theme" id="themeToggle" type="button" aria-label="切换配色（自动 / 亮 / 暗）">◐</button>
@@ -101,7 +101,7 @@
     <h1>开箱即用的<br><span class="amber">全自动</span> BRAIN 研究。</h1>
     <p class="sub">装上就在菜单栏里运转：假设 → 异渠道审查 → 有限回测 → 诊断 → 提交前验收，一条回路自动循环。用你的账号、你的预算、你的节奏。</p>
     <div class="cta">
-      <a class="btn primary" href="#start">5 分钟上手</a>
+      <a class="btn primary" id="heroCta" href="#install">免费下载 · 5 分钟上手</a>
       <a class="btn" href="https://github.com/Octo-o-o-o/autowq" target="_blank" rel="noopener">GitHub →</a>
     </div>
   </div>
@@ -138,7 +138,7 @@
 
 <section id="start">
   <h2><span class="no">02</span>开箱即用：有订阅的 Agent 就够</h2>
-  <p class="lead">不需要新买任何服务。你本地已订阅的 Agent CLI——Grok、Devin、Cursor、Claude Code、Codex 等十余个渠道，或 OpenAI / Anthropic API Key——向导检测到就能编排。</p>
+  <p class="lead">不需要新买任何服务。你本地已订阅的 Agent CLI——Grok、Devin、Cursor、Claude Code、Codex 等十余个渠道，或 OpenAI / Anthropic API Key——向导检测到就能编排。还没安装？<a href="#install">先去下载 ↓</a></p>
   <div class="split">
     <div class="term">
       <div class="bar"><i></i><i></i><i></i><span class="ttl">wq onboard — 首次向导</span></div>
@@ -209,16 +209,51 @@
 </section>
 
 <section id="install">
-  <h2><span class="no">05</span>安装</h2>
-  <p class="lead">引擎零第三方依赖、纯 Python 3.11+ 标准库。桌面端开箱即用，命令行随取随用。</p>
-  <table>
-    <tr><th>平台</th><th>方式</th><th>说明</th></tr>
-    <tr><td>CLI（推荐）</td><td><code>pipx install wq-pilot</code></td><td>跨平台，任意空目录 <code>wq onboard</code> 即工作区</td></tr>
-    <tr><td>macOS 完整包</td><td><a href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.15/WorldQuant-0.2.15.dmg" target="_blank" rel="noopener">下载已公证的完整 DMG 0.2.15</a></td><td>约 54 MB，自带 Python 3.12。不需要系统 Python、Xcode 命令行工具或 pip。菜单栏或应用内 <code>bin/wq</code> 都能直接用。</td></tr>
-    <tr><td>macOS 轻量包</td><td><a href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.15/WorldQuant-0.2.15-light.dmg" target="_blank" rel="noopener">下载已公证的轻量 DMG 0.2.15</a></td><td>约 1 MB，不含 Python。首次设置使用本机 Python 3.11 及以上（Homebrew 或 Xcode 命令行工具）。适合已经装过 Python、想少下一点的人。</td></tr>
-    <tr><td>Windows</td><td>Releases 下载 <code>WorldQuantTray.exe</code></td><td>原生托盘 + 任务计划（实验性）</td></tr>
-    <tr><td>源码</td><td><code>git clone</code> 后 <code>./wq onboard</code></td><td>Linux/WSL2 走 Docker 隔离</td></tr>
-  </table>
+  <h2><span class="no">05</span>下载与上手</h2>
+  <p class="lead">两条路，最后都走进同一个首启向导：想点开就用的下载桌面版，习惯终端的一行命令装好。</p>
+  <div class="dl-grid rise">
+    <div class="dl-card featured" data-os="macos">
+      <div class="dl-tag">推荐 · 打开即用</div>
+      <h3>macOS 完整包</h3>
+      <div class="dl-size">54 <span>MB</span></div>
+      <p>自带 Python 3.12——不需要系统 Python、Xcode 命令行工具或 pip。拖进「应用程序」双击，首启向导直接接管。</p>
+      <a class="btn primary dl-btn" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.15/WorldQuant-0.2.15.dmg" target="_blank" rel="noopener">下载完整版 DMG</a>
+      <div class="dl-meta">0.2.15 · Apple 已公证 · 菜单栏 App</div>
+    </div>
+    <div class="dl-card" data-os="macos">
+      <div class="dl-tag">已装 Python 的选这个</div>
+      <h3>macOS 轻量包</h3>
+      <div class="dl-size">1 <span>MB</span></div>
+      <p>不含 Python。首次设置自动使用本机 Python 3.11+（Homebrew 或 Xcode 命令行工具），没有会引导你装。功能与完整包完全相同。</p>
+      <a class="btn dl-btn" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.15/WorldQuant-0.2.15-light.dmg" target="_blank" rel="noopener">下载轻量版 DMG</a>
+      <div class="dl-meta">0.2.15 · Apple 已公证 · 菜单栏 App</div>
+    </div>
+    <div class="dl-card" data-os="windows">
+      <div class="dl-tag">Windows · 实验性</div>
+      <h3>Windows 托盘版</h3>
+      <div class="dl-size">.exe</div>
+      <p>原生托盘 + 任务计划调度。从 Releases 下载 <code>WorldQuantTray.exe</code> 即可。</p>
+      <a class="btn dl-btn" href="https://github.com/Octo-o-o-o/autowq/releases" target="_blank" rel="noopener">去 Releases 下载</a>
+      <div class="dl-meta">原生托盘 · 任务计划调度</div>
+    </div>
+  </div>
+  <p class="dl-choose">两个 macOS 包功能完全相同，区别只在「要不要自带 Python」。拿不准，就选完整包。</p>
+
+  <div class="cli-row rise">
+    <div class="cli-card">
+      <h3>命令行</h3>
+      <div class="cmdline"><code>pipx install wq-pilot</code><button class="copy" type="button" data-copy="pipx install wq-pilot">复制</button></div>
+      <div class="cmdline"><code>brew install --cask Octo-o-o-o/autowq/worldquant</code><button class="copy" type="button" data-copy="brew install --cask Octo-o-o-o/autowq/worldquant">复制</button></div>
+      <p>跨平台，引擎零第三方依赖、纯 Python 3.11+ 标准库。任意空目录 <code>wq onboard</code> 即工作区。</p>
+    </div>
+    <div class="cli-card">
+      <h3>源码</h3>
+      <div class="cmdline"><code>git clone https://github.com/Octo-o-o-o/autowq && cd autowq && ./wq onboard</code><button class="copy" type="button" data-copy="git clone https://github.com/Octo-o-o-o/autowq && cd autowq && ./wq onboard">复制</button></div>
+      <p>Linux / WSL2 走 Docker 隔离。全部版本与更新记录见 <a href="https://github.com/Octo-o-o-o/autowq/releases" target="_blank" rel="noopener">Releases</a>。</p>
+    </div>
+  </div>
+
+  <p class="next-steps">下载之后：双击图标（或跑 <code>wq onboard</code>）→ 首启向导检测渠道、生成配置、调起登录 → 菜单栏点「开始自动运行」。<a href="#start">先看看向导实际怎么跑 ↑</a></p>
 </section>
 
 <section id="faq">
@@ -263,6 +298,6 @@ window.ONBOARD_LINES = [
   { text: '完成。去菜单栏点「开始自动运行」。', cls: 'ok', pause: 900 }
 ];
 </script>
-<script src="/script.js"></script>
+<script src="/script.js?v=2"></script>
 </body>
 </html>
