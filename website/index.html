@@ -41,7 +41,7 @@
       "name": "autowq",
       "applicationCategory": "DeveloperApplication",
       "operatingSystem": "macOS, Windows, Linux",
-      "softwareVersion": "0.2.13",
+      "softwareVersion": "0.2.14",
       "isAccessibleForFree": true,
       "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
       "license": "https://www.apache.org/licenses/LICENSE-2.0",
@@ -66,7 +66,7 @@
       "@type": "FAQPage",
       "mainEntity": [
         { "@type": "Question", "name": "是 WorldQuant 官方产品吗？", "acceptedAnswer": { "@type": "Answer", "text": "不是。autowq 是独立开源项目（Apache-2.0），与 WorldQuant 无隶属关系；BRAIN 商标、平台与数据归其权利人。" } },
-        { "@type": "Question", "name": "autowq 收费吗？", "acceptedAnswer": { "@type": "Answer", "text": "项目本身免费开源。它编排的是你自己的模型订阅 / API Key 和你自己的 BRAIN 账号，费用由你与供应商结算；向导不会发起任何付费推理。" } },
+        { "@type": "Question", "name": "autowq 收费吗？", "acceptedAnswer": { "@type": "Answer", "text": "项目本身免费开源。它编排的是你自己的模型订阅 / API Key 和你自己的 BRAIN 账号，费用由你与供应商结算；向导不会发起任何付费推理。没有订阅也可以用官方免费 API 起步（wq providers free：Gemini、OpenRouter、智谱、硅基流动等），额度用尽会自动暂停、恢复后自动继续。" } },
         { "@type": "Question", "name": "自动研究 = 自动提交 = 收益吗？", "acceptedAnswer": { "@type": "Answer", "text": "不等于。平台筛选通过、提交接收、顾问资格、实际到账是四种不同状态，提交有独立验收门禁。" } },
         { "@type": "Question", "name": "我的凭证和研究会上传吗？", "acceptedAnswer": { "@type": "Answer", "text": "不会。一切状态存本地 SQLite 账本；导出不包含 Cookie、密码与任务输入；模型请求只发给你显式选择的渠道。" } },
         { "@type": "Question", "name": "Windows 支持到什么程度？", "acceptedAnswer": { "@type": "Answer", "text": "原生托盘与任务计划调度已可用（实验性）；模型进程的沙箱隔离仍以 macOS sandbox-exec 与 Linux/WSL2 Docker 为最成熟路径。" } }
@@ -214,7 +214,7 @@
   <table>
     <tr><th>平台</th><th>方式</th><th>说明</th></tr>
     <tr><td>CLI（推荐）</td><td><code>pipx install wq-pilot</code></td><td>跨平台，任意空目录 <code>wq onboard</code> 即工作区</td></tr>
-    <tr><td>macOS</td><td><a href="/downloads/WorldQuant-0.2.13.dmg">下载已公证的 DMG 0.2.13</a></td><td>菜单栏 App；双击后首启向导全程引导。也可 <code>brew install --cask Octo-o-o-o/autowq/worldquant</code></td></tr>
+    <tr><td>macOS</td><td><a href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.14/WorldQuant-0.2.14.dmg">下载已公证的 DMG 0.2.14</a></td><td>菜单栏 App；双击后首启向导全程引导。也可 <code>brew install --cask Octo-o-o-o/autowq/worldquant</code></td></tr>
     <tr><td>Windows</td><td>Releases 下载 <code>WorldQuantTray.exe</code></td><td>原生托盘 + 任务计划（实验性）</td></tr>
     <tr><td>源码</td><td><code>git clone</code> 后 <code>./wq onboard</code></td><td>Linux/WSL2 走 Docker 隔离</td></tr>
   </table>
@@ -223,7 +223,7 @@
 <section id="faq">
   <h2><span class="no">06</span>FAQ</h2>
   <details><summary>是 WorldQuant 官方产品吗？</summary><p>不是。autowq 是独立开源项目（Apache-2.0），与 WorldQuant 无隶属关系；BRAIN 商标、平台与数据归其权利人。</p></details>
-  <details><summary>autowq 收费吗？</summary><p>项目本身免费开源。它编排的是你自己的模型订阅 / API Key 和你自己的 BRAIN 账号，费用由你与供应商结算；向导不会发起任何付费推理。</p></details>
+  <details><summary>autowq 收费吗？</summary><p>项目本身免费开源。它编排的是你自己的模型订阅 / API Key 和你自己的 BRAIN 账号，费用由你与供应商结算；向导不会发起任何付费推理。没有订阅也可以用官方免费 API 起步（<code>wq providers free</code>：Gemini、OpenRouter、智谱、硅基流动等），额度用尽会自动暂停、恢复后自动继续。</p></details>
   <details><summary>自动研究 = 自动提交 = 收益吗？</summary><p>不等于。平台筛选通过、提交接收、顾问资格、实际到账是四种不同状态，提交有独立验收门禁。</p></details>
   <details><summary>我的凭证和研究会上传吗？</summary><p>不会。一切状态存本地 SQLite 账本；导出不包含 Cookie、密码与任务输入；模型请求只发给你显式选择的渠道。</p></details>
   <details><summary>Windows 支持到什么程度？</summary><p>原生托盘与任务计划调度已可用（实验性）；模型进程的沙箱隔离仍以 macOS sandbox-exec 与 Linux/WSL2 Docker 为最成熟路径。</p></details>

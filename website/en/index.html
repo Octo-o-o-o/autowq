@@ -41,7 +41,7 @@
       "name": "autowq",
       "applicationCategory": "DeveloperApplication",
       "operatingSystem": "macOS, Windows, Linux",
-      "softwareVersion": "0.2.13",
+      "softwareVersion": "0.2.14",
       "isAccessibleForFree": true,
       "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
       "license": "https://www.apache.org/licenses/LICENSE-2.0",
@@ -66,7 +66,7 @@
       "@type": "FAQPage",
       "mainEntity": [
         { "@type": "Question", "name": "Is this an official WorldQuant product?", "acceptedAnswer": { "@type": "Answer", "text": "No. autowq is an independent open-source project (Apache-2.0), unaffiliated with WorldQuant; BRAIN trademarks, platform and data belong to their owners." } },
-        { "@type": "Question", "name": "Does autowq itself cost anything?", "acceptedAnswer": { "@type": "Answer", "text": "No — it's free and open source. It orchestrates your own model subscriptions / API keys and your own BRAIN account; those costs are between you and the vendors. The wizard never starts paid inference." } },
+        { "@type": "Question", "name": "Does autowq itself cost anything?", "acceptedAnswer": { "@type": "Answer", "text": "No — it's free and open source. It orchestrates your own model subscriptions / API keys and your own BRAIN account; those costs are between you and the vendors. The wizard never starts paid inference. Without a subscription you can start on official free API tiers (wq providers free: Gemini, OpenRouter, BigModel, SiliconFlow and more); an exhausted quota pauses and resumes automatically." } },
         { "@type": "Question", "name": "Does automation mean submissions and income?", "acceptedAnswer": { "@type": "Answer", "text": "No. Passing screens, accepted submissions, consultant eligibility and actual payouts are four different states, and submission has its own acceptance gates." } },
         { "@type": "Question", "name": "Do my credentials or research get uploaded?", "acceptedAnswer": { "@type": "Answer", "text": "No. All state lives in a local SQLite ledger; exports exclude cookies, passwords and task inputs; model calls go only to providers you explicitly select." } },
         { "@type": "Question", "name": "How well is Windows supported?", "acceptedAnswer": { "@type": "Answer", "text": "The native tray and Task Scheduler runner work (experimental); the most mature process-isolation paths remain sandbox-exec on macOS and Docker on Linux/WSL2." } }
@@ -214,7 +214,7 @@
   <table>
     <tr><th>Platform</th><th>How</th><th>Notes</th></tr>
     <tr><td>CLI (recommended)</td><td><code>pipx install wq-pilot</code></td><td>Cross-platform; any empty directory + <code>wq onboard</code> = a workspace</td></tr>
-    <tr><td>macOS</td><td><a href="/downloads/WorldQuant-0.2.13.dmg">Download the notarized 0.2.13 DMG</a></td><td>Menu-bar app; the first-launch wizard guides setup. Or <code>brew install --cask Octo-o-o-o/autowq/worldquant</code></td></tr>
+    <tr><td>macOS</td><td><a href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.14/WorldQuant-0.2.14.dmg">Download the notarized 0.2.14 DMG</a></td><td>Menu-bar app; the first-launch wizard guides setup. Or <code>brew install --cask Octo-o-o-o/autowq/worldquant</code></td></tr>
     <tr><td>Windows</td><td><code>WorldQuantTray.exe</code> from Releases</td><td>Native tray + Task Scheduler (experimental)</td></tr>
     <tr><td>Source</td><td><code>git clone</code>, then <code>./wq onboard</code></td><td>Linux/WSL2 isolate via Docker</td></tr>
   </table>
@@ -223,7 +223,7 @@
 <section id="faq">
   <h2><span class="no">06</span>FAQ</h2>
   <details><summary>Is this an official WorldQuant product?</summary><p>No. autowq is an independent open-source project (Apache-2.0), unaffiliated with WorldQuant; BRAIN trademarks, platform and data belong to their owners.</p></details>
-  <details><summary>Does autowq itself cost anything?</summary><p>No — it's free and open source. It orchestrates your own model subscriptions / API keys and your own BRAIN account; those costs are between you and the vendors. The wizard never starts paid inference.</p></details>
+  <details><summary>Does autowq itself cost anything?</summary><p>No — it's free and open source. It orchestrates your own model subscriptions / API keys and your own BRAIN account; those costs are between you and the vendors. The wizard never starts paid inference. Without a subscription you can start on official free API tiers (<code>wq providers free</code>: Gemini, OpenRouter, BigModel, SiliconFlow and more); an exhausted quota pauses and resumes automatically.</p></details>
   <details><summary>Does automation mean submissions and income?</summary><p>No. Passing screens, accepted submissions, consultant eligibility and actual payouts are four different states, and submission has its own acceptance gates.</p></details>
   <details><summary>Do my credentials or research get uploaded?</summary><p>No. All state lives in a local SQLite ledger; exports exclude cookies, passwords and task inputs; model calls go only to providers you explicitly select.</p></details>
   <details><summary>How well is Windows supported?</summary><p>The native tray and Task Scheduler runner work (experimental); the most mature process-isolation paths remain sandbox-exec on macOS and Docker on Linux/WSL2.</p></details>

@@ -1,5 +1,5 @@
 {
-  "version": "0.2.13",
-  "dmg": "https://autowq.octoooo.com/downloads/WorldQuant-0.2.13.dmg",
-  "notes": "后台任务还在跑时，重新打开菜单栏应用只打开菜单，不碰这些任务。"
+  "version": "0.2.14",
+  "dmg": "https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.14/WorldQuant-0.2.14.dmg",
+  "notes": "没有订阅也能起步：内置 10 个官方免费 API 预设；额度用尽自动暂停，恢复后自动继续。DMG 自带 Python 运行时。"
 }
