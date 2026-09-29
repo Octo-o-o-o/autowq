@@ -35,6 +35,39 @@ class AutopilotTests(unittest.TestCase):
         self.real_dispatch=runner.dispatch_task
         self.add_patch('wq.runner.dispatch_task',side_effect=self.dispatch)
 
+    def test_plan_first_routes_one_selected_candidate_through_review_and_one_simulation(self):
+        from wq import research_learning as learning
+        def dispatch(conn,cfg,t):
+            result=self.dispatch(conn,cfg,t)
+            payload=json.loads(t['payload_json'])
+            if t['kind']=='agent_call' and payload['role']=='research':
+                self.assertEqual(payload.get('plan_contract_version'),1)
+                plan=lambda c:{'candidate':c,'measurement':'Only observable past daily returns',
+                    'prediction':'A falsifiable future ranking association','falsifier':'No association in further measurements'}
+                util.write_json(str(Path(payload['job_dir'])/'result.json'),{'status':'completed','plans':[plan(proposal()),plan(proposal('std'))]})
+            return result
+        with patch('wq.runner.dispatch_task',side_effect=dispatch):self.full_cycle()
+        self.assertEqual(self.cycle()['state'],'closed');self.assertEqual(self.posts,1);self.assertEqual(self.counter,2)
+        self.assertEqual(self.c.execute('SELECT COUNT(*) FROM learning_selections').fetchone()[0],1)
+        report=learning.report(self.c)
+        self.assertEqual(report['actual_requests'],1);self.assertEqual(report['execution_counts']['complete'],1)
+        self.assertEqual(report['usable_families'],0)
+        self.assertEqual(self.c.execute('SELECT COUNT(*) FROM submissions').fetchone()[0],0)
+
+    def test_frozen_experiment_switches_prompt_only_without_extra_requests(self):
+        from wq import research_learning as learning
+        learning.freeze_experiment(self.c,'fixture',learning.current_baseline(self.cfg),2)
+        self.full_cycle()
+        first=json.loads(self.c.execute('SELECT payload_json FROM tasks WHERE task_id=?',(self.cycle()['research_task'],)).fetchone()[0])
+        self.assertNotIn('plan_contract_version',first)
+        store.set_flag(self.c,'autopilot_next_at','2000-01-01T00:00:00Z')
+        self.full_cycle()
+        second=json.loads(self.c.execute('SELECT payload_json FROM tasks WHERE task_id=?',(self.cycle()['research_task'],)).fetchone()[0])
+        self.assertEqual(second.get('plan_contract_version'),1)
+        arms=learning.report(self.c,experiment_id='fixture')['arms']
+        self.assertEqual(arms['baseline']['actual_requests'],1);self.assertEqual(arms['learning']['actual_requests'],1)
+        self.assertEqual(self.posts,2)
+
     def test_total_cap_finishes_active_cycle_and_survives_restart(self):
         self.cfg.data['autopilot']['max_cycles_total']=1
         self.full_cycle()

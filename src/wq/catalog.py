@@ -24,7 +24,9 @@ def catalog_path(private_dir, query):
 
 def fetch_catalog(client, query, spacing_s=0.5, sleep=time.sleep, max_pages=400):
     """分页读取 /data-fields；每页之间留间隔，不并发。"""
+    if type(max_pages) is not int or not 1<=max_pages<=400:raise ValueError('max_pages must be 1..400')
     results, offset, count = [], 0, None
+    exhausted=False
     base = '&'.join(f'{k}={query[k]}' for k in QUERY_KEYS)
     for _ in range(max_pages):
         _, _, data = client.request('GET', f'/data-fields?{base}&limit={PAGE}&offset={offset}')
@@ -35,8 +37,10 @@ def fetch_catalog(client, query, spacing_s=0.5, sleep=time.sleep, max_pages=400)
         results.extend(page)
         offset += len(page)
         if not page or (isinstance(count, int) and offset >= count):
+            exhausted=True
             break
         sleep(spacing_s)
+    if not exhausted and count is None:raise ValueError('字段目录分页不完整：达到页数上限且总数未知')
     if isinstance(count, int) and len(results) != count:
         raise ValueError(f'字段目录分页不完整：{len(results)}/{count}')
     fields = [{k: x.get(k) for k in ('id', 'type', 'description', 'coverage', 'userCount', 'alphaCount')}
@@ -193,3 +197,18 @@ def refresh_evidence_hash(policy_path, path):
     if changed:
         util.write_json(policy_path, policy)
     return changed
+
+
+def search_scoped(doc, query, text=None, dataset=None, field_type='MATRIX', min_coverage=0.0, limit=20):
+    """Bounded result envelope: callers can distinguish zero matches from incomplete evidence."""
+    if doc.get('schema') != CATALOG_SCHEMA or doc.get('query') != query:
+        raise ValueError('Catalog query scope mismatch')
+    if type(limit) is not int or not 1 <= limit <= 100:
+        raise ValueError('Result limit must be 1..100')
+    if type(min_coverage) not in (int,float) or not 0 <= min_coverage <= 1:
+        raise ValueError('Coverage filter must be 0..1')
+    found=search(doc,text,dataset,field_type,min_coverage,limit+1)
+    return {'query':dict(query),'filters':{'text':text,'dataset':dataset,'field_type':field_type,'min_coverage':min_coverage},
+            'results':found[:limit],'returned':min(len(found),limit),'truncated':len(found)>limit,
+            'catalog_complete':doc.get('complete') is True,'queried_at':doc.get('queried_at'),
+            'catalog_hash':util.sha256_json(doc),'no_match_is_exhaustive':not found and doc.get('complete') is True}

@@ -150,6 +150,14 @@ def _run_once(conn, cfg, lease_s: int) -> tuple[int, list[str]]:
 
     from . import history_research
     autopilot.setup(conn)
+    from . import research_maintenance
+    try:
+        research_maintenance.tick(conn, cfg)
+        conn.commit()
+    except (ValueError, OSError, KeyError, TypeError) as exc:
+        conn.rollback()
+        store.set_flag(conn, 'research_learning_maintenance_error', str(exc)[:200])
+        conn.commit()
     history_research.tick(conn, cfg)
     autopilot.tick(conn, cfg)
 

@@ -45,7 +45,7 @@ PLATFORM_THRESHOLDS = {
         '收益效率不足': '通常是换手过高或收益太薄：改用变化更慢的观测量（基本面/分析师/附注）在其自身长窗口（120/252）的时序位置（time_rank），或把两个不同数据簇的角色做排名相加（add）；decay分档复核由程序按基础换手预登记，模型不自调',
         '换手过高': '窗口拉长、平滑、用backfill/sum而非单日差分；日频价量信号最易触发',
         '换手过低': '信号几乎不变（如季度基本面原值），需加入变化项或与价量信号组合',
-        '子股票池不稳健': '设置已是INDUSTRY中性化：表达式内再套group_rank(...,industry)属于重复中性化，子池易碎；改用基本面比率而非原值，或改用两个不同数据簇的排名相加；不要用两个行业内排名相乘',
+        '子股票池不稳健': '检查测量、覆盖和风险暴露在子池的变化；表达式内分组变换与模拟中性化不等价。历史弱形态只是局部经验，需反例和固定设置对照，不自动禁止分组或乘积',
         '收益风险比不足': '机制本身弱或方向错：更换信息来源，不靠调窗口；反向若显著为负会由程序预登记一次符号翻转复核',
         '与已提交信号重叠': '换数据簇/经济逻辑，同簇调参无法解决',
         '最近测试年收益风险比为负': '训练段强而最近一年为负的机制多为拥挤或已衰减：不要沿同族继续乘或加复杂度；换信息来源或数据簇'}}
@@ -117,6 +117,7 @@ def compile_ast(ast, bindings, profile='proposal'):
         raise ValueError('未知操作；不接受原始表达式、未来值、无保护除法或自定义代码')
 
     expression = visit(ast)
+    type_signature(ast, bindings)
     if all(x.startswith('field:') for x in signature):
         raise ValueError('拒绝单字段或单字段排名的已知教学/旧基线')
     if counts['timeseries'] > limits['timeseries'] or counts['binary'] > limits['binary'] or counts['group'] > limits['group']:
@@ -161,3 +162,30 @@ def public_contract(bindings=None, profile='proposal'):
                 'pair':'op=corr, left=AST, right=AST, window=…（过去窗口内两个序列的相关系数）',
                 'group':'op=group_rank/group_zscore/group_neutralize, arg=AST, group=' + ('/'.join(groups) if groups else '（本策略未核验分组字段）')},
         'limits':f"最多{limits['nodes']}节点、深度{limits['depth']}（根节点深度为0，每条父子边加1；重复子树按每次出现计数），最多{limits['timeseries']}个时间操作、{limits['binary']}个组合操作、{limits['group']}个分组操作、{limits['roles']}个字段角色。文字字段上限为title 100、hypothesis 2000、counterexample 2000字符；禁止单字段及仅用rank/neg包裹的单字段（例如neg(rank(daily_return))）；不得为绕过此规则机械添加算子。单个提案；不得通过改窗口、改符号、加rank救活旧候选。禁止原始代码、API、平台字段名。"}
+
+
+def type_signature(ast, bindings):
+    """Propagate declared expression types/units; unknown metadata stays unknown."""
+    op=ast['op']
+    if op=='field':
+        spec=bindings[ast['name']]
+        kind=spec.get('expression_type','matrix')
+        if kind!='matrix': raise ValueError('字段角色表达式必须是数值matrix；vector/group需先核验转换')
+        measurement=spec.get('measurement') or {}
+        if not isinstance(measurement,dict):raise ValueError('measurement元数据必须是对象')
+        return {'type':'matrix','unit':measurement.get('unit'),'domain':measurement.get('domain','unknown')}
+    children=[type_signature(ast[k],bindings) for k in ('arg','left','right') if k in ast]
+    if any(c['type']!='matrix' for c in children):raise ValueError('算子参数类型不兼容')
+    unit=children[0]['unit'] if children else None
+    if op in ('rank','zscore','sign','time_rank','time_zscore','group_rank','group_zscore','corr'):
+        unit='dimensionless'
+    elif op in ('add','sub') and len(children)==2:
+        a,b=(c['unit'] for c in children)
+        if a is not None and b is not None and a!=b:raise ValueError('加减两侧已声明量纲不一致')
+        unit=a if a==b else None
+    elif op in ('mul','div'):
+        unit=None
+    elif op=='log':
+        if children[0]['domain']=='nonpositive':raise ValueError('log输入已声明非正')
+        unit='dimensionless' if unit=='dimensionless' else None
+    return {'type':'matrix','unit':unit,'domain':'unknown'}

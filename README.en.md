@@ -129,3 +129,7 @@ All-cycle review supports manual and automatic runs: `./wq auto-research report`
   <a href="https://www.octoooo.com"><img src="https://octoooo.com/site-assets/favicon-64.png" width="30" alt="OctoLab mark"></a><br>
   <sub>By <a href="https://www.octoooo.com"><b>OctoLab</b></a> · more curious projects live in the studio, and collaborations stay open</sub>
 </p>
+
+### Evidence-driven research
+
+Local trial lineage, versioned feedback, counterexample-aware shadow rules and bounded plan selection reuse the existing queue and review/budget gates. Software checks do not establish Alpha quality improvements. See [Research learning](RESEARCH_LEARNING.md) for replay, frozen comparisons and read-only feedback refresh.

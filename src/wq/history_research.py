@@ -30,6 +30,9 @@ def snapshot(conn):
         LEFT JOIN brain_runs b ON b.task_id=c.simulation_task
         LEFT JOIN research_feedback f ON f.alpha_id=b.alpha_id
         WHERE c.state='closed' ORDER BY c.cycle_id''').fetchall()
+    from . import research_learning
+    research_learning.sync(conn)
+    research_learning.derive_rules(conn)
     cycles=[]
     for row in rows:
         outcome=row['outcome'] or ''; tags=[]
@@ -151,6 +154,9 @@ def context(conn,cfg):
     if not cfg.get('history_research','use_priorities',default=True):return ''
     row=conn.execute("SELECT * FROM history_research WHERE state='accepted' ORDER BY updated_at DESC LIMIT 1").fetchone()
     if not row:return ''
+    ttl=cfg.get('research_learning','priority_ttl_days',default=30)
+    if type(ttl) is not int or not 1<=ttl<=90:raise ValueError('priority_ttl_days must be 1..90')
+    if util.now()-util.parse_iso(row['updated_at'])>=dt.timedelta(days=ttl):return ''
     evidence=json.loads(row['snapshot_json']);rec=validate_recommendation({'recommendation':json.loads(row['recommendation_json'])},evidence)
     return '\n历史复盘研究重点（仅固定指导语；不是质量证明，不替代本轮验证）：\n'+json.dumps(
         {'snapshot_hash':row['snapshot_hash'],'covered_closed_cycles':evidence['closed_cycles'],

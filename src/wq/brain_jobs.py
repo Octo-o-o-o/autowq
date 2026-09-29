@@ -61,6 +61,9 @@ def enqueue(conn,cfg,doc):
     for key in ('region','universe','delay','decay','truncation','neutralization'):
         if doc.get('config',{}).get(key)!=settings.get(key):raise ValueError('账本配置与请求不一致: '+key)
     key='brain:'+util.sha256_json({'account':cfg.get('account_alias'),'request':doc['request'],'config':doc['config']})
+    if doc.get('research_cycle_id') is not None and not conn.execute('SELECT 1 FROM tasks WHERE dedup_key=?',(key,)).fetchone():
+        from . import research_learning
+        research_learning.check_request_budget(conn,doc['research_cycle_id'],cfg)
     return store.enqueue_task(conn,'brain_simulation',doc,key,max_attempts=360)
 
 def step(conn,cfg,task,payload):
@@ -75,6 +78,9 @@ def step(conn,cfg,task,payload):
     client=BrainClient(cfg.private_dir)
     root=Path(cfg.private_dir)/'brain-runs'/tid;root.mkdir(parents=True,exist_ok=True,mode=0o700)
     if not row:
+        from . import research_learning
+        try: research_learning.validate_dispatch(conn,cfg,tid,payload)
+        except ValueError as exc: return 'blocked', {}, str(exc)
         if payload.get('purpose')=='research_validation':
             from . import research_gate
             try:research_gate.validate(cfg,payload)

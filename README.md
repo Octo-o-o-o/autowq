@@ -128,3 +128,7 @@ PYTHONPATH=src python3 -m unittest discover -s tests
   <a href="https://www.octoooo.com"><img src="https://octoooo.com/site-assets/favicon-64.png" width="30" alt="OctoLab 五瓣标"></a><br>
   <sub>By <a href="https://www.octoooo.com"><b>OctoLab 千手实验室</b></a> · 那里还有更多有趣的项目，对各种合作保持开放</sub>
 </p>
+
+### 历史驱动研究
+
+新增本地实验谱系、追加式反馈、带反例的 shadow 规则和单调用多计划筛选。沿用原预算、审查与提交边界；软件验证不代表 Alpha 质量提升。配置、回放、冻结实验和只读反馈刷新见 [Research learning](RESEARCH_LEARNING.md)。
