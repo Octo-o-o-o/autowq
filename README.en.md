@@ -2,6 +2,8 @@
 
 English | [简体中文](README.md)
 
+**Official site: [autowq.octoooo.com](https://autowq.octoooo.com)** — product overview, macOS DMG downloads and the quick-start guide.
+
 A local WorldQuant BRAIN research workflow: propose a hypothesis → review through a different provider → bounded simulation → diagnose real results → investigate complementary signals → validate before submission. You control models, budgets, evidence and the queue. A chat session does not need to stay online.
 
 **A research tool, not a promise of income.** Passing a screen, an accepted submission, consultant eligibility and actual payment are separate states. Research automation does not automatically authorize submissions.

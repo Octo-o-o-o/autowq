@@ -1,6 +1,6 @@
 {
-  "version": "0.2.15",
-  "dmg": "https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.15/WorldQuant-0.2.15.dmg",
-  "dmg_light": "https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.15/WorldQuant-0.2.15-light.dmg",
-  "notes": "完整包自带 Python，开箱即用。轻量包不含运行时，首次设置需要本机 Python 3.11+。"
+  "version": "0.2.16",
+  "dmg": "https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.16/WorldQuant-0.2.16.dmg",
+  "dmg_light": "https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.16/WorldQuant-0.2.16-light.dmg",
+  "notes": "中文 Windows 首次向导默认中文；Windows 托盘 exe 重新随版本发布。完整包自带 Python，开箱即用。"
 }

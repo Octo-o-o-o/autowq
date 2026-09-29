@@ -30,7 +30,7 @@ jobs:
         shell: pwsh
         run: |
           $exe = (Resolve-Path dist/WorldQuantTray.exe).Path
-          $expected = (python -c "import re;print(re.search(r'^version = \"(.+?)\"', open('pyproject.toml').read(), re.M).group(1))").Trim()
+          $expected = (Select-String -Path pyproject.toml -Pattern '^version = "(.+?)"').Matches[0].Groups[1].Value
           $version = (& $exe --engine --version | Out-String).Trim()
           if ($LASTEXITCODE -ne 0 -or $version -ne "wq $expected") { throw "version: '$version' (expected wq $expected)" }
           $ws = Join-Path $env:RUNNER_TEMP 'wq-ws'; $rt = Join-Path $env:RUNNER_TEMP 'wq-rt'

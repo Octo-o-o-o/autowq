@@ -118,7 +118,7 @@ document.documentElement.classList.add('js');
   var hero = document.getElementById('heroCta');
   if (hero) {
     if (isMac) {
-      hero.href = 'https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.15/WorldQuant-0.2.15.dmg';
+      hero.href = 'https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.16/WorldQuant-0.2.16.dmg';
       hero.textContent = ZH ? '下载 macOS 版 · 54 MB' : 'Download for macOS · 54 MB';
     } else if (isWin) {
       hero.href = 'https://github.com/Octo-o-o-o/autowq/releases';

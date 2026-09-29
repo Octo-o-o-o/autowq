@@ -74,5 +74,14 @@ class FrozenExeTests(unittest.TestCase):
         register.assert_called_once_with(self.root)
 
 
+
+class WindowsLanguageTests(unittest.TestCase):
+    def test_windows_locale_name_counts_as_chinese(self):
+        from wq import i18n
+        with patch.object(i18n.sys, 'platform', 'linux'), \
+             patch.object(i18n.locale, 'getlocale', return_value=('Chinese (Simplified)_China', '936')):
+            self.assertEqual(i18n.default_language({}), 'zh')
+
+
 if __name__ == '__main__':
     unittest.main()

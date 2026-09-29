@@ -7,6 +7,7 @@
 import json
 import locale
 import os
+import sys
 import re
 from pathlib import Path
 
@@ -14,10 +15,18 @@ from pathlib import Path
 def default_language(environ=None):
     env = os.environ if environ is None else environ
     value = next((env[k] for k in ('LC_ALL', 'LC_MESSAGES', 'LANGUAGE', 'LANG') if env.get(k)), None)
+    if value is None and sys.platform == 'win32':
+        # Windows 的 getlocale() 返回 'Chinese (Simplified)_China' 这类名称；以系统界面语言为准（主语言 0x04 为中文）。
+        try:
+            import ctypes
+            return 'zh' if ctypes.windll.kernel32.GetUserDefaultUILanguage() & 0x3FF == 0x04 else 'en'
+        except (AttributeError, OSError):
+            pass
     if value is None:
         try: value = locale.getlocale()[0] or ''
         except (ValueError, locale.Error): value = ''
-    return 'zh' if value.split(':')[0].lower().replace('-', '_').startswith('zh') else 'en'
+    value = value.split(':')[0].lower().replace('-', '_')
+    return 'zh' if value.startswith(('zh', 'chinese')) else 'en'
 
 
 def text(lang, zh, en):
