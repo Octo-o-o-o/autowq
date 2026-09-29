@@ -335,6 +335,20 @@ footer .inner {
 footer a { color: var(--dim); }
 footer a:hover { color: var(--amber); }
 
+/* ── 署名带：页脚上方的安静一行 ── */
+.byline {
+  max-width: var(--container); margin-inline: auto;
+  padding: 46px var(--gutter) 32px; text-align: center;
+  border-bottom: 1px solid var(--line);
+}
+.byline p { color: var(--faint); font-size: 13px; line-height: 2.05; }
+.byline a {
+  color: var(--dim); text-decoration: none;
+  border-bottom: 1px solid var(--menu-line);
+  transition: color .25s, border-color .25s;
+}
+.byline a:hover { color: var(--amber); border-color: var(--amber); }
+
 @media (max-width: 640px) {
   nav .inner { gap: 12px; }
   nav .links { gap: 12px; }
