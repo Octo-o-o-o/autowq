@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.15
+
+- Native Windows runs the full workflow from `WorldQuantTray.exe` alone, with API providers only (free presets, OpenAI/Anthropic protocols, custom endpoints); CLI providers are refused because native Windows has no sandbox. The exe now dispatches `--engine` (full CLI), `--console` (own console for the wizard and BRAIN login), `--provider-runtime` (API calls), `--scheduled-run` (Task Scheduler tick with logs), `--setup-windows [--no-tray|--remove]` and `--install-cli` (writes `wq.cmd`). Starting research from the tray registers the scheduler task itself; the first launch without a config opens the onboarding wizard. The build now bundles `wq/assets` data and runs in UTF-8 mode, and CI smoke-tests the packaged exe. `build_exe.ps1` is now ASCII so Windows PowerShell 5.1 can parse it. CLI, API-call, scheduler registration and scheduled-run paths were verified on a real Windows machine; the interactive console, BRAIN login and tray UI still await desktop testing.
+
 ## 0.2.14
 
 - The submission standby list drops Alphas the platform has already accepted, and menu rows for submitted and standby Alphas lead with their cycle number so they line up with cycle history.

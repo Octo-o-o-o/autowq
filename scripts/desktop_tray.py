@@ -12,28 +12,165 @@ import subprocess
 import sys
 import threading
 
+def _bind_console(alloc=False):
+    """--windowed exe 没有控制台：输出被管道/文件接走就用它；否则挂到已有或父进程控制台，alloc 时新开一个。
+
+    从 cmd 启动时会继承 cmd 的控制台句柄：fstat 能通过，但本进程并未挂上该控制台，直接写会静默丢失；
+    句柄也可能“存在但无效”（WinError 6）。所以只有管道/磁盘文件走原句柄，其余一律先挂控制台。"""
+    import io
+    if sys.platform != 'win32':
+        return False
+    import ctypes
+    from ctypes import wintypes
+    import msvcrt
+    kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel32.GetFileType.argtypes = (wintypes.HANDLE,)
+
+    def file_type(fd):   # 1 磁盘文件，2 字符设备（控制台/NUL），3 管道；None 无效
+        try:
+            os.fstat(fd)
+            return kernel32.GetFileType(msvcrt.get_osfhandle(fd))
+        except OSError:
+            return None
+
+    def rebind_streams():
+        for name, fd, mode in (('stdin', 0, 'r'), ('stdout', 1, 'w'), ('stderr', 2, 'w')):
+            if file_type(fd) in (1, 3):
+                setattr(sys, name, io.open(fd, mode, encoding='utf-8', errors='replace', closefd=False))
+
+    def attach_ancestor():
+        # PyInstaller 单文件运行时是“引导进程 → Python 进程”两层，父进程（引导进程）没有控制台，
+        # AttachConsole(-1) 会失败；沿祖先链往上，挂到第一个有控制台的进程（cmd / PowerShell）。
+        class Entry(ctypes.Structure):
+            _fields_ = [('size', wintypes.DWORD), ('usage', wintypes.DWORD), ('pid', wintypes.DWORD),
+                        ('heap', ctypes.c_void_p), ('module', wintypes.DWORD), ('threads', wintypes.DWORD),
+                        ('ppid', wintypes.DWORD), ('priority', wintypes.LONG), ('flags', wintypes.DWORD),
+                        ('exe', wintypes.WCHAR * 260)]
+        kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+        snap = kernel32.CreateToolhelp32Snapshot(0x2, 0)
+        parents = {}
+        entry = Entry(); entry.size = ctypes.sizeof(Entry)
+        ok = kernel32.Process32FirstW(snap, ctypes.byref(entry))
+        while ok:
+            parents[entry.pid] = entry.ppid
+            ok = kernel32.Process32NextW(snap, ctypes.byref(entry))
+        kernel32.CloseHandle(snap)
+        pid = os.getpid()
+        for _ in range(4):
+            pid = parents.get(pid)
+            if not pid:
+                return False
+            if kernel32.AttachConsole(pid):
+                return True
+        return False
+
+    if file_type(1) in (1, 3):
+        rebind_streams()
+        return False
+    # --console（向导/登录）总是自己开窗口，避免挂进祖先进程可能隐藏着的控制台里。
+    if kernel32.GetConsoleWindow() or (kernel32.AllocConsole() if alloc else attach_ancestor()):
+        sys.stdin = open('CONIN$', 'r', encoding='utf-8', errors='replace')
+        sys.stdout = open('CONOUT$', 'w', encoding='utf-8', errors='replace', buffering=1)
+        sys.stderr = sys.stdout
+        # getpass 只在 sys.stdin is sys.__stdin__ 时走不回显的 msvcrt 路径，否则退化为明文回显。
+        sys.__stdin__, sys.__stdout__, sys.__stderr__ = sys.stdin, sys.stdout, sys.stderr
+        return True
+    rebind_streams()
+    return False
+
+
+def _pop_flag(name, value=False):
+    if name not in sys.argv[1:]:
+        return None
+    i = sys.argv.index(name, 1)
+    if value:
+        result = sys.argv[i + 1] if i + 1 < len(sys.argv) else None
+        del sys.argv[i:i + 2]
+        return result
+    del sys.argv[i]
+    return True
+
+
+def _default_workspace():
+    """托盘模式的工作区：上次用过的 → ~/autowq。"""
+    remembered = Path(os.environ.get('APPDATA') or Path.home()) / 'WorldQuant' / 'workspace.txt'
+    try:
+        value = remembered.read_text(encoding='utf-8').strip()
+        if value and (Path(value) / 'config' / 'config.json').exists():
+            return Path(value)
+    except OSError:
+        pass
+    return Path.home() / 'autowq'
+
+
+def _remember_workspace(root):
+    remembered = Path(os.environ.get('APPDATA') or Path.home()) / 'WorldQuant' / 'workspace.txt'
+    try:
+        remembered.parent.mkdir(parents=True, exist_ok=True)
+        remembered.write_text(str(root), encoding='utf-8')
+    except OSError:
+        pass
+
+
+def _install_cli():
+    """写一个 wq.cmd，让命令行（含 AI 代理）像普通 CLI 一样调用内置引擎；批处理会等 exe 结束。"""
+    target = Path(os.environ.get('LOCALAPPDATA') or Path.home()) / 'WorldQuant' / 'bin'
+    target.mkdir(parents=True, exist_ok=True)
+    script = target / 'wq.cmd'
+    script.write_text(f'@echo off\r\n"{sys.executable}" --engine %*\r\n', encoding='utf-8')
+    print(json.dumps({'wq': str(script), 'add_to_path': str(target)}, ensure_ascii=False))
+    return 0
+
+
 if getattr(sys, 'frozen', False):
-    # PyInstaller 打包：__file__ 指向解包临时目录；工作区用 --workspace 指定，默认 cwd。
-    argv_ws = None
-    if '--workspace' in sys.argv:
-        i = sys.argv.index('--workspace')
-        if i + 1 < len(sys.argv):
-            argv_ws = sys.argv[i + 1]
-    ROOT = Path(argv_ws).resolve() if argv_ws else Path.cwd()
+    # PyInstaller 打包：一个 exe 同时是托盘、完整命令行和调度入口。
+    #   --engine <wq 参数>       运行内置 CLI（desktop_control 与 wq.cmd 自代理到这里）
+    #   --console                先新开控制台（交互向导 / 登录），结束后等回车
+    #   --provider-runtime ...   API 渠道调用（providers.runtime_argv）
+    #   --scheduled-run          任务计划每分钟一次：日志写 var/run 后跑 run-once
+    #   --setup-windows ...      注册/移除调度与自启（wq.windows_setup）
+    #   --install-cli            生成 %LOCALAPPDATA%\WorldQuant\bin\wq.cmd
+    import json
     BUNDLE = Path(sys._MEIPASS)
+    sys.path.insert(0, str(BUNDLE))
+    argv_ws = _pop_flag('--workspace', value=True)
+    console = _pop_flag('--console')
+    mode = sys.argv[1] if len(sys.argv) > 1 else None
+    if mode is None and not argv_ws:
+        ROOT = _default_workspace()
+    else:
+        ROOT = Path(argv_ws).resolve() if argv_ws else Path.cwd()
+    ROOT.mkdir(parents=True, exist_ok=True)
     os.chdir(ROOT)
-    if len(sys.argv) > 1 and sys.argv[1] == '--engine':
-        # frozen 下 sys.executable 是本 exe，无法当解释器跑 `-m wq`；
-        # desktop_control.wq() 以 `exe --engine <args...>` 自代理到内置引擎。
-        # --windowed 构建 stdout 可能为 None，父进程靠管道捕获输出，须显式重绑 fd。
-        import io
-        if sys.stdout is None:
-            sys.stdout = io.open(1, 'w', closefd=False)
-        if sys.stderr is None:
-            sys.stderr = io.open(2, 'w', closefd=False)
-        sys.path.insert(0, str(BUNDLE))
+    if mode == '--engine':
+        _bind_console(alloc=bool(console))
         from wq import cli as _cli
-        raise SystemExit(_cli.main(sys.argv[2:]))
+        try:
+            code = _cli.main(sys.argv[2:])
+        except SystemExit as exc:
+            code = exc.code
+        if console:
+            input('\n[Enter] ')
+        raise SystemExit(code)
+    if mode == '--provider-runtime':
+        _bind_console()
+        import runpy
+        sys.argv = ['provider_runtime', *sys.argv[2:]]
+        runpy.run_module('wq.provider_runtime', run_name='__main__')
+        raise SystemExit(0)
+    if mode == '--scheduled-run':
+        (ROOT / 'var' / 'run').mkdir(parents=True, exist_ok=True)
+        sys.stdout = open(ROOT / 'var' / 'run' / 'runner.out.log', 'a', buffering=1, encoding='utf-8')
+        sys.stderr = open(ROOT / 'var' / 'run' / 'runner.err.log', 'a', buffering=1, encoding='utf-8')
+        from wq import cli as _cli
+        raise SystemExit(_cli.main(['run-once', '--lease', '3600']))
+    if mode == '--setup-windows':
+        _bind_console()
+        from wq import windows_setup as _win
+        raise SystemExit(_win.main(['--root', str(ROOT), *sys.argv[2:]]))
+    if mode == '--install-cli':
+        _bind_console()
+        raise SystemExit(_install_cli())
 else:
     ROOT = Path(__file__).resolve().parents[1]
     BUNDLE = None
@@ -433,10 +570,33 @@ class Tray:
                 logging.exception('刷新循环异常')
 
 
+def first_run(root):
+    """打包 exe 首次打开：工作区没有配置时，新开控制台跑 onboard 向导，结束后再进托盘。"""
+    if (root / 'config' / 'config.json').exists():
+        return True
+    if not getattr(sys, 'frozen', False):
+        return True   # 源码方式沿用原行为：由用户先在终端跑 wq onboard
+    subprocess.call([sys.executable, '--console', '--workspace', str(root), '--engine', 'onboard'], cwd=str(root))
+    if (root / 'config' / 'config.json').exists():
+        return True
+    if sys.platform == 'win32':
+        from wq.i18n import default_language
+        import ctypes
+        lang = default_language()
+        ctypes.windll.user32.MessageBoxW(None, text(lang, f'初始化向导没有完成，工作区 {root} 还没有配置。重新打开 WorldQuant 即可继续。',
+                                                    f'The setup wizard did not finish, so {root} has no configuration yet. Open WorldQuant again to continue.'),
+                                         'WorldQuant', 0x40)
+    return False
+
+
 def main():
     from PIL import Image
     import pystray
 
+    if not first_run(ROOT):
+        return 0
+    if getattr(sys, 'frozen', False):
+        _remember_workspace(ROOT)
     log_path = ROOT / 'var/run/tray.log'
     log_path.parent.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s',

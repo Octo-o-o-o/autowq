@@ -314,6 +314,10 @@ def spawn_login_terminal():
     """在独立交互终端窗口运行 `wq brain login`：getpass 需要本人 tty，不能在菜单进程内代输。"""
     argv = _engine_argv('brain', 'login')
     env = _child_env()
+    if sys.platform == 'win32' and getattr(sys, 'frozen', False):
+        # 打包 exe 是窗口程序：--console 让子进程自己开控制台，getpass 才有本人的终端。
+        subprocess.Popen([sys.executable, '--console', '--engine', 'brain', 'login'], cwd=ROOT, env=env)
+        return True
     if sys.platform == 'win32':
         # cmd /k 保持窗口：登录完成后仍可查看结果；GUI 父进程下显式新开控制台。
         subprocess.Popen(['cmd', '/k', subprocess.list2cmdline(argv)], cwd=ROOT, env=env,
@@ -340,10 +344,14 @@ def spawn_login_terminal():
 
 
 def ensure_runner():
-    """start 前置：macOS 加载 LaunchAgent；Windows 只认 setup_windows.py 注册的任务。"""
+    """start 前置：macOS 加载 LaunchAgent；Windows 打包 exe 直接注册任务计划，源码方式仍需 setup_windows.py。"""
     if MACOS:
         plist = Path.home() / 'Library/LaunchAgents' / (LABEL + '.plist')
         command(['/bin/launchctl', 'bootstrap', f'gui/{os.getuid()}', str(plist)])
+        return
+    if getattr(sys, 'frozen', False):
+        from wq.windows_setup import register_runner
+        register_runner(ROOT)
         return
     raise RuntimeError('Windows 调度任务未注册；请先运行 python scripts/setup_windows.py / '
                        'Windows scheduler task not registered; run python scripts/setup_windows.py first')

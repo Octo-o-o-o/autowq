@@ -1,5 +1,5 @@
 {
-  "version": "0.2.14",
-  "dmg": "https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.14/WorldQuant-0.2.14.dmg",
-  "notes": "没有订阅也能起步：内置 10 个官方免费 API 预设；额度用尽自动暂停，恢复后自动继续。DMG 自带 Python 运行时。"
+  "version": "0.2.15",
+  "dmg": "https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.15/WorldQuant-0.2.15.dmg",
+  "notes": "macOS 仍是已公证 DMG。原生 Windows 可用托盘程序单独完成研究，仅支持 API 渠道。"
 }

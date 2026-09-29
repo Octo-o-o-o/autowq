@@ -1,6 +1,6 @@
 # Ubuntu/Debian 服务器与 Windows WSL2
 
-项目采用两种部署：macOS 使用既有 launchd + sandbox-exec；Ubuntu/Debian 使用 systemd 用户定时器 + Docker 模型容器。Windows 完整研究栈使用 WSL2 Ubuntu 的同一套 Linux 部署；仅托盘/调度控制层可跑原生 Windows（实验性，见下文），Provider 二进制不随项目发布。
+项目采用两种部署：macOS 使用既有 launchd + sandbox-exec；Ubuntu/Debian 使用 systemd 用户定时器 + Docker 模型容器。Windows 有两条路：原生 Windows 用 `WorldQuantTray.exe` 单文件跑完整研究，但只支持 API 渠道（实验性，见下文）；要用模型 CLI 订阅，则在 WSL2 Ubuntu 里走同一套 Linux 部署。Provider 二进制不随项目发布。
 
 Grok、Devin 和 Cursor 官方文档均提供 Linux 安装途径。项目此版实际构建并启动了 Linux arm64 的 Grok 1.0.40、Devin 3000.10.31；Cursor 的 Docker 配置已提供，但本轮未构建验证。ZCode 的当前 macOS bundle 不能直接搬到 Linux，Linux 配置暂不包含 ZCode。各 Provider 仍需用户本人登录，并确认自己的订阅可用于该 CLI。
 
@@ -66,21 +66,49 @@ Linux 服务器需要管理员为部署用户启用 linger，用户退出 SSH �
 
 暂停：`./wq pause --reason "暂停"`；停定时器：`systemctl --user disable --now autowq.timer`。不要把 systemd 的 inactive 当成故障：oneshot 两次触发之间正常为 inactive。
 
-## 原生 Windows 托盘与调度（实验性）
+## 原生 Windows：只用 WorldQuantTray.exe（实验性，仅 API 渠道）
 
-除 WSL2 外，控制层现可直接跑在原生 Windows Python 上：托盘菜单（pystray）、调度（任务计划程序每分钟一次 `run-once`，等价 launchd StartInterval=60）与 macOS 共用同一套 `wq.desktop_control` 动作，功能一致（状态、轮次历史、已提交 Alpha、路由预设/渠道/间隔/上限/通知开关、界面语言、系统通知）。语言与 macOS 菜单栏一致：「设置 → 界面语言」可选跟随系统/中文/English，写入 config.json 的 `ui.language`。
+`WorldQuantTray.exe` 是一个单文件，同时是托盘、完整 `wq` 命令行和调度入口，自带 Python 与引擎，不需要安装 Python、pip 或源码。
+
+**只支持 API 渠道**：官方免费预设（`wq providers free`）、OpenAI / Anthropic 协议，或自建兼容接口。原生 Windows 没有 macOS `sandbox-exec` 或 Linux Docker 那样的隔离，因此不在宿主上直接运行模型 CLI（Claude Code、Codex、Grok 等）；向导选择 CLI 渠道会直接拒绝。要用 CLI 订阅，请走下文 WSL2 路线。
+
+### 托盘用法
+
+双击 exe。默认工作区是 `%USERPROFILE%\autowq`（也可以 `--workspace <目录>`）。没有配置时会先开一个控制台窗口跑 `wq onboard` 向导，完成后进入托盘；之后记住这个工作区。在托盘「开始」时会自动注册任务计划（每分钟一次 `run-once`），不再需要源码环境。登录自启：
 
 ```powershell
-python -m pip install pystray Pillow
-python scripts\setup_windows.py            # 注册调度任务与托盘登录自启；移除用 --remove
+.\WorldQuantTray.exe --workspace $HOME\autowq --setup-windows          # 调度 + 托盘登录自启
+.\WorldQuantTray.exe --workspace $HOME\autowq --setup-windows --remove # 移除，不动队列与账本
 ```
 
-或直接从 Releases 下载 `WorldQuantTray.exe`（PyInstaller 单文件、内置引擎），在已完成 `wq onboard` 的工作区运行，支持 `--workspace <目录>` 指定；注意任务计划调度目前仍由 `setup_windows.py` 注册，纯 exe 使用前需要一次源码环境。
+### 不用托盘，只用命令行（适合交给 AI 操作）
 
-- 托盘脚本 `scripts/desktop_tray.py`；调度包装器与日志在 `var\run\`（runner.out.log / tray.log）。
-- 队列核心已做 Windows 可移植：单实例锁用 msvcrt，进程树终止用 taskkill，进程探活用 tasklist（`os.kill(pid,0)` 在 Windows 是发 CTRL_C_EVENT，不可用）。
-- **Provider 仍需自行解决**：profiles.json 里的 grok/devin/cursor 启动器是按部署生成的 macOS/Linux 路径；原生 Windows 需要本机可用的各 CLI 并自行配置 profiles.json，本项目不发布 Windows 版 Provider 二进制。要开箱即用的完整研究栈仍推荐 WSL2/Linux 路线。
-- 本轮没有 Windows 实机可用：已验证自动化测试、pystray 菜单构建/回调冒烟与参数生成，**未经 Windows 实机验收**；首次运行请在暂停状态下核对菜单与日志再启用自动研究。
+`--engine` 后面跟任意 `wq` 参数，在当前目录（或 `--workspace`）运行。输出被管道捕获时（AI 代理、脚本）可以直接读；在交互终端里建议先生成 `wq.cmd`，批处理会等命令结束再返回：
+
+```powershell
+.\WorldQuantTray.exe --install-cli     # 生成 %LOCALAPPDATA%\WorldQuant\bin\wq.cmd，输出 JSON 含路径
+# 把输出里的 add_to_path 目录加入用户 PATH 后：
+mkdir $HOME\autowq; cd $HOME\autowq
+wq onboard --non-interactive --lang en --skip-login `
+  --free gemini-free --free groq-free --research gemini-free --review groq-free --engineering groq-free
+wq doctor --fix-private
+wq tasks --json
+..\WorldQuantTray.exe --setup-windows --no-tray   # 只注册调度，不设托盘自启（路径按实际 exe 位置）
+```
+
+Windows PowerShell 5.1 的两点注意：直接 `& WorldQuantTray.exe --engine ...` 且不接管道时，PowerShell 不等窗口程序结束就返回，所以请用 `wq.cmd`，或在命令后接 `| Out-String`；exe 输出 UTF-8，读中文前先执行 `[Console]::OutputEncoding = [Text.Encoding]::UTF8`。
+
+免费预设的 Key 按向导提示放进对应环境变量（`wq providers free` 列出变量名和申请地址）。`wq brain login` 需要本人在交互终端输入；Windows 没有 macOS Keychain，会话过期后需要本人重新登录。
+
+### 实现与验证边界
+
+- 调度：任务计划程序运行 `WorldQuantTray.exe --workspace <工作区> --scheduled-run`，日志在 `var\run\runner.out.log`；API 调用通过 `--provider-runtime` 由 exe 自代理。
+- 队列核心的 Windows 可移植：单实例锁用 msvcrt，进程树终止用 taskkill，进程探活用 tasklist。
+- 源码方式仍可用：`python -m pip install pystray Pillow` 后 `python scripts\setup_windows.py`。
+- 2026-09-29 Windows 实机（Windows 10.0.29671，Windows PowerShell 5.1，Python 3.11 venv）用 `build_exe.ps1` 打包后通过 SSH 实测：版本；仅 API 渠道的无人交互初始化（中文输出为 UTF-8）；拒绝 CLI 渠道且不写文件；`status`、`doctor`、`tasks --json`；`--scheduled-run` 写日志；`wq.cmd`；`--provider-runtime` 对本地模拟 API 完成调用；`--setup-windows --no-tray` 真实注册任务计划，`schtasks /Run` 触发后写出日志，`--remove` 删除干净。
+- 同时有：自动化测试（平台参数模拟 Windows）、用同一组 PyInstaller 参数在 macOS 打包后实测 `--engine`、`--scheduled-run`、`--install-cli`、`--provider-runtime`（对本地模拟 API 完成一次调用并写出 result.json）。CI 的 Windows 任务对打包后的 exe 做冒烟：版本、无人交互初始化、status、`wq.cmd`。
+- 同日桌面实测（两轮）：双击后向导在新控制台完成、托盘出现、语言切换、「开始」注册任务计划、退出重开不再弹向导，均通过。首轮发现并已修复：从控制台或托盘拉起的 exe 继承到无效句柄而崩溃（WinError 6）；PyInstaller 单文件是“引导进程 → Python 进程”两层，`AttachConsole(-1)` 挂不上 cmd，交互 cmd 里输出全部丢失，现改为沿祖先链挂控制台；`getpass` 因 stdin 被替换而明文回显。修复后用一个自动化测试工具在真实控制台里复测：`--engine --version`、`--install-cli`、`wq.cmd --version` 的输出都出现在控制台上，密码输入不回显，行为与原生 Python 相同。
+- **修复后尚待桌面复测**：托盘拉起的向导与 BRAIN 登录窗口（`--console` 现在总是新开窗口）；登录自启。首次运行请在暂停状态下核对菜单与日志再启用自动研究。
 
 ## Windows 朋友
 

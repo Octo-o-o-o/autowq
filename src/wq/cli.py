@@ -63,7 +63,8 @@ def cmd_doctor(args) -> int:
         add("sqlite", True, cfg.db_path)
     priv = cfg.private_dir
     exists = os.path.isdir(priv)
-    mode_ok = exists and (os.stat(priv).st_mode & 0o777) == 0o700
+    # Windows 没有 POSIX 权限位（目录恒为 0o777），私有性由用户目录 ACL 保证。
+    mode_ok = exists and (sys.platform == 'win32' or (os.stat(priv).st_mode & 0o777) == 0o700)
     if args.fix_private and not mode_ok:
         cfg.ensure_private_dir()
         exists, mode_ok = True, True

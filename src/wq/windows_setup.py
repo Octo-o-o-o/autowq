@@ -1,7 +1,11 @@
 """Windows 部署：任务计划程序每分钟跑一次 run-once（等价 launchd StartInterval=60），
-托盘脚本写入当前用户 Run 键登录自启。全部用户级操作，不需要管理员。"""
+托盘脚本写入当前用户 Run 键登录自启。全部用户级操作，不需要管理员。
+
+原生 Windows 只支持 API 渠道（OpenAI / Anthropic 协议）：没有 sandbox-exec 或 Docker 隔离，
+不在宿主上直接运行模型 CLI。打包的 WorldQuantTray.exe 自带引擎，调度与自启都指向 exe 本身。"""
 import argparse
 import importlib.util
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -18,6 +22,32 @@ def _t(zh, en):
     except ImportError:                      # 被 scripts/ 以文件方式加载时无包上下文
         from wq.i18n import default_language, text
     return text(default_language(), zh, en)
+
+
+def frozen():
+    return bool(getattr(sys, 'frozen', False))
+
+
+def render(root, runtime):
+    """生成默认关闭的 Windows 配置：只放 API 渠道由向导写入，不生成 CLI 启动器。"""
+    from .assets import path as asset_path
+    root = Path(root).resolve(); runtime = Path(runtime).expanduser().resolve()
+    if runtime.is_relative_to(root) or root.is_relative_to(runtime):
+        raise ValueError('Runtime and project must be separate directories')
+    targets = [root / 'config' / n for n in ('config.json', 'profiles.json', 'autopilot-policy.json')]
+    if runtime.exists() or any(p.exists() for p in targets):
+        raise ValueError('Refusing to overwrite existing deployment')
+    jobs = runtime / 'jobs'
+    jobs.mkdir(parents=True)
+    cfg = json.loads(asset_path('config.example.json').read_text(encoding='utf-8'))
+    cfg['routing']['work_root'] = str(jobs)
+    profiles = json.loads(asset_path('profiles.example.json').read_text(encoding='utf-8'))
+    profiles['providers'] = {}
+    (root / 'config').mkdir(parents=True, exist_ok=True)
+    for path, data in [(targets[0], cfg), (targets[1], profiles)]:
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    targets[2].write_text(asset_path('autopilot-policy.example.json').read_text(encoding='utf-8'), encoding='utf-8')
+    return runtime
 
 
 def pythonw_exe(python):
@@ -49,14 +79,33 @@ raise SystemExit(cli.main(['run-once', '--lease', '3600']))
 
 
 def runner_task_args(root, python):
-    pyw = pythonw_exe(python)
-    return ['schtasks', '/Create', '/TN', TASK,
-            '/TR', f'"{pyw}" "{Path(root) / "var" / "run" / "wq_runner.pyw"}"',
-            '/SC', 'MINUTE', '/MO', '1', '/F']
+    if frozen():
+        # exe 自带引擎：--scheduled-run 把输出写进 var/run 日志后跑一次 run-once。
+        tr = f'"{python}" --workspace "{Path(root)}" --scheduled-run'
+    else:
+        tr = f'"{pythonw_exe(python)}" "{Path(root) / "var" / "run" / "wq_runner.pyw"}"'
+    return ['schtasks', '/Create', '/TN', TASK, '/TR', tr, '/SC', 'MINUTE', '/MO', '1', '/F']
 
 
 def tray_run_value(root, python):
+    if frozen():
+        return f'"{python}" --workspace "{Path(root)}"'
     return f'"{pythonw_exe(python)}" "{Path(root) / "scripts" / "desktop_tray.py"}"'
+
+
+def register_runner(root, python=None):
+    """注册（或覆盖）每分钟一次的调度任务；幂等。"""
+    python = python or sys.executable
+    root = Path(root).resolve()
+    validate(root, python)
+    run_dir = root / 'var' / 'run'
+    run_dir.mkdir(parents=True, exist_ok=True)
+    if not frozen():
+        (run_dir / 'wq_runner.pyw').write_text(wrapper_script(root), encoding='utf-8')
+    result = subprocess.run(runner_task_args(root, python), capture_output=True, text=True, errors='replace')
+    if result.returncode:
+        raise RuntimeError((result.stderr or result.stdout or f'schtasks exit {result.returncode}')[-500:])
+    return run_dir
 
 
 def _importable(module):
@@ -71,6 +120,7 @@ def main(argv=None):
     parser.add_argument('--root', default=os.getcwd())
     parser.add_argument('--python', default=sys.executable)
     parser.add_argument('--remove', action='store_true', help='移除调度任务与自启；不动队列与账本')
+    parser.add_argument('--no-tray', action='store_true', help='只注册调度，不设托盘登录自启（纯命令行 / AI 使用）')
     args = parser.parse_args(argv)
     if sys.platform != 'win32':
         raise SystemExit(_t('此脚本仅用于 Windows；macOS 用 scripts/install_menubar.py，Linux 用 scripts/setup_linux.py',
@@ -83,14 +133,18 @@ def main(argv=None):
         print(_t('已移除：调度任务与托盘自启；研究队列与账本保持原状',
                 'Removed: the scheduler task and tray auto-start; the research queue and ledger are unchanged.'))
         return 0
-    run_dir = root / 'var' / 'run'
-    run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / 'wq_runner.pyw').write_text(wrapper_script(root), encoding='utf-8')
-    subprocess.run(runner_task_args(root, args.python), check=True)
+    run_dir = register_runner(root, args.python)
+    if args.no_tray:
+        print(_t(f'已注册调度任务 {TASK}（每分钟一次）；未设托盘自启。日志在 {run_dir}',
+                 f'Registered scheduler task {TASK} (every minute); tray auto-start not set. Logs in {run_dir}'))
+        return 0
     subprocess.run(['reg', 'add', RUN_KEY, '/v', TRAY_VALUE, '/t', 'REG_SZ',
                     '/d', tray_run_value(root, args.python), '/f'], check=True)
     print(_t(f'已注册调度任务 {TASK}（每分钟一次）与托盘登录自启；日志在 {run_dir}',
              f'Registered scheduler task {TASK} (every minute) and tray auto-start; logs in {run_dir}'))
+    if frozen():
+        print(_t('托盘登录自启已设置；下次登录自动打开', 'Tray auto-start set; it opens at next sign-in'))
+        return 0
     missing = [m for m in ('pystray', 'PIL') if not _importable(m)]
     if missing:
         print(_t(f'缺少托盘依赖 {", ".join(missing)}；请先运行 {args.python} -m pip install pystray Pillow，'

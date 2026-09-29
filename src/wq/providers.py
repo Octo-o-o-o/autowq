@@ -197,7 +197,11 @@ def runtime_argv(cfg, definition):
     if item.get('kind') == 'api': validate_api(item)
     elif item.get('kind') not in CLI or item.get('kind') in LEGACY: raise ValueError('Unsupported transport kind')
     script = str(Path(__file__).with_name('provider_runtime.py'))
-    argv = [sys.executable, script, json.dumps(item), '{prompt}']
+    if getattr(sys, 'frozen', False):
+        # 打包的 Windows exe：sys.executable 是 exe 自身，用 --provider-runtime 分发到内置模块。
+        argv = [sys.executable, '--provider-runtime', json.dumps(item), '{prompt}']
+    else:
+        argv = [sys.executable, script, json.dumps(item), '{prompt}']
     if item['kind'] != 'api':
         runtime = Path(cfg.get('onboarding', 'runtime', default='')).expanduser()
         if sys.platform != 'darwin' or not (runtime / 'agents.sb').is_file():

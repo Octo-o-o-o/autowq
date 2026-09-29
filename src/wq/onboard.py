@@ -39,7 +39,7 @@ def configure(root, runtime, selected, models, binaries, roles, efforts, platfor
             apis.setdefault(name, api_definition(name, models.get(name,'')))
             from wq.provider_runtime import validate_api
             validate_api(apis[name])
-    if platform not in ('darwin', 'linux'): raise ValueError('Use macOS, Linux or Windows WSL2.')
+    if platform not in ('darwin', 'linux', 'win32'): raise ValueError('Use macOS, Linux or Windows.')
     if not selected or len(set(selected)) != len(selected):
         raise ValueError('Choose supported, non-duplicate providers.')
     custom = [n for n in selected if n not in NAMES]
@@ -48,6 +48,9 @@ def configure(root, runtime, selected, models, binaries, roles, efforts, platfor
     import re
     if any(not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,31}', n) or n in CLI or n in PROTOCOLS for n in custom):
         raise ValueError('Custom endpoint name is invalid or reserved.')
+    if platform == 'win32' and any(n not in apis for n in selected):
+        raise ValueError('Native Windows supports API providers only (OpenAI/Anthropic protocols, free presets, custom endpoints); '
+                         'CLI providers need macOS, or Linux/WSL2 with Docker.')
     if platform == 'linux' and any(n not in ('grok','devin','cursor',*PROTOCOLS) and n not in custom for n in selected):
         raise ValueError('Linux wizard supports grok/devin/cursor Docker and standard APIs; other CLI adapters currently require macOS.')
     if any(n not in selected for n in roles.values()): raise ValueError('Role provider must be selected.')
@@ -66,6 +69,9 @@ def configure(root, runtime, selected, models, binaries, roles, efforts, platfor
     if platform=='darwin':
         from .setup_local import render
         render(root,runtime,binaries=binaries)
+    elif platform=='win32':
+        from .windows_setup import render
+        render(root,runtime)
     else:
         from .setup_linux import render
         render(root,runtime)
@@ -164,7 +170,8 @@ def login_flow(root, lang, persist=None):
         say('登录命令结束；模型权限需后续单轮验证。' if code==0 else '登录未完成，可稍后继续。',
             'Login command finished; verify model access in a later cycle.' if code==0 else 'Login did not complete; you can resume later.')
     if ask('现在登录BRAIN？[Y/n]：','Sign in to BRAIN now? [Y/n]: ') not in ('n','no'):
-        code=subprocess.call([sys.executable,'-m','wq','--config',str(path),'--lang',lang,'brain','login'],cwd=root)
+        engine=[sys.executable,'--engine'] if getattr(sys,'frozen',False) else [sys.executable,'-m','wq']
+        code=subprocess.call(engine+['--config',str(path),'--lang',lang,'brain','login'],cwd=root)
         status['brain']='authenticated' if code==0 else 'failed'
     else: status.setdefault('brain','pending')
     # Re-read: the login command may have updated configuration in a future version.
@@ -219,6 +226,9 @@ def main(argv=None):
         if not a.non_interactive and not sys.stdin.isatty(): raise ValueError('Interactive terminal required, or use --non-interactive with explicit choices.')
         say('步骤：选择模型渠道。BRAIN注册入口：'+BRAIN_REGISTER_URL,'Step: select model providers. BRAIN registration: '+BRAIN_REGISTER_URL)
         say('检测到的宿主CLI（不代表已登录或模型有权限）：','Detected host CLIs (not proof of login/model access):');print(json.dumps(found,ensure_ascii=False))
+        if sys.platform=='win32':
+            say('原生 Windows 只支持 API 渠道：官方免费预设、OpenAI/Anthropic 协议或自建兼容接口；模型 CLI 需在 macOS 或 WSL2 使用。',
+                'Native Windows supports API providers only: free presets, OpenAI/Anthropic protocols or self-hosted compatible endpoints. Model CLIs need macOS or WSL2.')
         if sys.platform.startswith('linux'):
             say('Linux/WSL使用隔离Docker镜像；宿主CLI不会直接执行。后续需构建镜像并登录。','Linux/WSL uses isolated Docker images, not host CLIs. Build images and sign in afterward.')
         chosen=a.providers

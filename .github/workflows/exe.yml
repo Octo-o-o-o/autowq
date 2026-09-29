@@ -25,6 +25,26 @@ jobs:
       - name: Build single-file tray exe
         shell: pwsh
         run: packaging/windows/build_exe.ps1
+      # 冒烟：打包产物本身（不是源码）能当 CLI 用、能在无配置目录完成 API 渠道初始化并生成调度参数。
+      - name: Smoke test packaged exe
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path dist/WorldQuantTray.exe).Path
+          $expected = (python -c "import re;print(re.search(r'^version = \"(.+?)\"', open('pyproject.toml').read(), re.M).group(1))").Trim()
+          $version = (& $exe --engine --version | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or $version -ne "wq $expected") { throw "version: '$version' (expected wq $expected)" }
+          $ws = Join-Path $env:RUNNER_TEMP 'wq-ws'; $rt = Join-Path $env:RUNNER_TEMP 'wq-rt'
+          New-Item -ItemType Directory -Force $ws | Out-Null
+          & $exe --workspace $ws --engine onboard --non-interactive --lang en --skip-login `
+            --free gemini-free --free groq-free --research gemini-free --review groq-free --engineering groq-free `
+            --runtime $rt | Out-String | Write-Host
+          if ($LASTEXITCODE -ne 0) { throw "onboard exit $LASTEXITCODE" }
+          if (-not (Test-Path (Join-Path $ws 'config/config.json'))) { throw 'config.json missing' }
+          & $exe --workspace $ws --engine status | Out-String | Write-Host
+          if ($LASTEXITCODE -ne 0) { throw "status exit $LASTEXITCODE" }
+          $cli = (& $exe --install-cli | Out-String | ConvertFrom-Json).wq
+          $viaCmd = (& cmd /c "`"$cli`" --version" | Out-String).Trim()
+          if ($viaCmd -ne "wq $expected") { throw "wq.cmd: '$viaCmd'" }
       - uses: actions/upload-artifact@v4
         with:
           name: WorldQuantTray-exe
