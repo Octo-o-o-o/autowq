@@ -88,11 +88,33 @@ def cmd_doctor(args) -> int:
         else:
             add(f"{agent} {text(lang, 'bin 存在', 'binary present')}",
                 os.path.isfile(b) and os.access(b, os.X_OK), b)
+            if agent == "zcode":
+                # ZCode 链路前置条件：node、应用内 CLI 包、bundled provider 配置、已核验版本。
+                import shutil as _shutil
+                from .assets.provider_entry import (ZCODE_CJS, ZCODE_PROVIDER_CONFIG,
+                                                    zcode_version)
+                node = os.environ.get("WQ_NODE_BIN") or _shutil.which("node")
+                add("zcode node", bool(node), node or text(lang, "未找到 node；可设 WQ_NODE_BIN",
+                                                                "node not found; set WQ_NODE_BIN"))
+                add("zcode CLI bundle", os.path.isfile(ZCODE_CJS), ZCODE_CJS)
+                add("zcode builtin provider config", os.path.isfile(ZCODE_PROVIDER_CONFIG), ZCODE_PROVIDER_CONFIG)
+                verified = (cfg.get("onboarding", "verified_versions", default={}) or {}).get("zcode", "")
+                if verified and node:
+                    current = zcode_version(node)
+                    add(f"zcode {text(lang, '版本与已核验一致', 'version matches verified')}",
+                        current == verified,
+                        f"{current or '?'} vs {verified}" + ("" if current == verified else
+                        text(lang, "；应用已更新，需重新单轮核验后更新 verified_versions",
+                              "; app updated, re-verify one real call then update verified_versions")))
         if args.probe and os.path.isfile(b):
             import subprocess
+            # launcher 型渠道经沙箱启动：探活须用沙箱放行的 cwd（生产为 work_root 下的副本），
+            # 否则沙箱禁读项目根会让 getcwd 失败、探活误报。
+            work_root = cfg.resolve(cfg.get("routing", "work_root", default="var/jobs"))
+            probe_cwd = work_root if os.path.isdir(work_root) else None
             try:
                 r = subprocess.run([b, "--version"], capture_output=True, text=True,
-                                   timeout=15, stdin=subprocess.DEVNULL)
+                                   timeout=15, stdin=subprocess.DEVNULL, cwd=probe_cwd)
                 add(f"{agent} --version", r.returncode == 0, (r.stdout or r.stderr).strip()[:80])
             except Exception as e:
                 add(f"{agent} --version", False, str(e))
@@ -105,10 +127,33 @@ def cmd_doctor(args) -> int:
                           f"Within the authorization window (until {winfo}): remaining/weekly caps waived; vendor balance still unknown — not unlimited quota"))
         elif wstate == "invalid":
             det = f"debug_authorization {text(lang, '无效', 'invalid')}: {winfo}"
+        elif confirmed:
+            det = f"remaining={b_.get('remaining')} {b_.get('unit', '')}".rstrip()
         else:
             det = text(lang, "未确认 → 模型调用一律阻断（默认安全）",
                               "Unconfirmed → every model call is blocked (safe default)")
         add(f"{agent} {text(lang, '预算已确认', 'budget confirmed')}", confirmed, det)
+    sandbox = os.path.join(os.path.expanduser(cfg.get("onboarding", "runtime", default="") or ""), "agents.sb")
+    if sys.platform == "darwin" and cfg.get("onboarding", "runtime") and os.path.isfile(sandbox):
+        # 沙箱实测：每个任务目录须在 agents.sb 内可写，否则调用写不出 result.json。
+        import subprocess
+        from .providers import sandbox_work_dirs
+        for d in dict.fromkeys(sandbox_work_dirs(cfg)):
+            if not os.path.isdir(d):
+                continue
+            probe = os.path.join(d, f".wq-sandbox-probe-{os.getpid()}")
+            try:
+                r = subprocess.run(["/usr/bin/sandbox-exec", "-f", sandbox, "/usr/bin/touch", probe],
+                                   capture_output=True, text=True, timeout=15, stdin=subprocess.DEVNULL, cwd=d)
+                ok = r.returncode == 0 and os.path.isfile(probe)
+            except (OSError, subprocess.TimeoutExpired):
+                ok = False
+            finally:
+                if os.path.lexists(probe):
+                    os.remove(probe)
+            add(text(lang, "沙箱可写任务目录", "sandbox can write work dir"), ok,
+                d + ("" if ok else text(lang, "；运行 wq providers refresh-runtime，或把目录移出项目",
+                                          "; run wq providers refresh-runtime, or move it outside the project")))
     if conn:
         stage = store.current_account_stage(conn)
         add(text(lang, "账号阶段已登记", "account stage recorded"), stage["stage"] not in ("UNKNOWN",), stage["stage"])
@@ -418,13 +463,28 @@ def cmd_preset(args) -> int:
     cfg, conn = _ctx(args)
     data = routing.catalog(cfg)
     if args.action == "use":
-        routing.choose_preset(conn, cfg, args.name, once=getattr(args, 'once', False))
+        cycles = getattr(args, "cycles", 1) or 1
+        routing.choose_preset(conn, cfg, args.name, once=getattr(args, 'once', False), cycles=cycles)
+        permanent = store.get_flag(conn, "active_preset") or data["default"]
         if getattr(args, 'once', False):
-            print(text(lang, f"已登记仅一轮预设 {args.name}：下一个新建的研究轮次使用它，该轮结束后自动回到永久预设 {routing.active_preset(conn, cfg)}。",
-                              f"One-cycle preset {args.name} registered: the next new research cycle uses it, then the permanent preset {routing.active_preset(conn, cfg)} resumes."))
+            if cycles <= 1:
+                print(text(lang, f"已登记仅一轮预设 {args.name}：下一个新建的研究轮次使用它，该轮结束后自动回到永久预设 {permanent}。",
+                                  f"One-cycle preset {args.name} registered: the next new research cycle uses it, then the permanent preset {permanent} resumes."))
+            else:
+                print(text(lang, f"已登记临时预设 {args.name}：接下来 {cycles} 个新建研究轮次使用它，用完后自动回到永久预设 {permanent}。",
+                                  f"Temporary preset {args.name} registered: the next {cycles} new research cycles use it, then the permanent preset {permanent} resumes."))
         else:
             print(text(lang, f"已选择预设 {args.name}。下一项任务领取时生效；在途任务及其重试保持原预设。",
                               f"Preset {args.name} selected; applies to the next claimed task. In-flight tasks and their retries keep the original preset."))
+        return OK
+    if args.action == "cancel-once":
+        pending = store.get_flag(conn, "preset_once") or ""
+        routing.cancel_once(conn)
+        if not pending:
+            print(text(lang, "当前没有待生效的临时预设。", "No temporary preset is pending."))
+        else:
+            print(text(lang, f"已取消临时预设 {pending}；之后的新轮次使用永久预设，已绑定到进行中轮次的预设不变。",
+                              f"Temporary preset {pending} cancelled; new cycles use the permanent preset. Presets already bound to in-flight cycles are unchanged."))
         return OK
     current = routing.active_preset(conn, cfg, data)
     print(text(lang, f"当前预设：{current}；每个渠道：首次 + 3 次重试，仅明确额度/容量故障才切备用渠道。",
@@ -445,8 +505,22 @@ def cmd_provider(args) -> int:
     from . import routing
     lang = getattr(args, "lang", "zh")
     cfg, conn = _ctx(args)
+    if args.action == 'quota':
+        pauses = routing.quota_pauses(conn, cfg)
+        if not pauses:
+            print(text(lang, "没有处于额度暂停的渠道。", "No provider is paused for quota."))
+        for item in pauses:
+            print(text(lang, f"{item['provider']}：{item['reason'] or '额度暂停'}，至 {item['until']} 自动恢复",
+                              f"{item['provider']}: {item['reason'] or 'quota pause'}, resumes automatically at {item['until']}"))
+        return OK
     if args.name not in routing.catalog(cfg)['providers']:
         raise WqExit(INVALID, text(lang, f"未知渠道：{args.name}", f"Unknown provider: {args.name}"))
+    if args.action == 'resume':
+        routing.clear_quota_pause(conn, args.name)
+        conn.commit()
+        print(text(lang, f"{args.name} 的额度暂停已解除；下一次调度会再试它，若供应商仍拒绝会重新暂停。",
+                          f"Quota pause cleared for {args.name}; the next dispatch tries it again and re-pauses if the vendor still refuses."))
+        return OK
     store.set_flag(conn, f'provider_disabled:{args.name}', '1' if args.action == 'disable' else '0')
     if args.action == 'disable':
         print(text(lang, f"{args.name} 已停用；不打断在途调用，后续任务不再路由到该渠道，预算闸门保留。",
@@ -654,10 +728,8 @@ def cmd_autopilot(args):
             if not result['candidates']: print('暂无真实自动研究回测。')
         return OK
     if args.action == 'run-next':
-        lock = agent_runner._acquire_lock(cfg.run_dir, 'runner')
-        if lock is None:
-            raise ValueError(text(lang, '调度器正在处理任务；请等待当前任务完成后再请求下一轮',
-                                       'The scheduler is busy; wait for the current task to finish before requesting the next cycle'))
+        # 不占 runner 文件锁。调度器在模型调用期间会一直持有该锁；菜单若因此失败，
+        # 点击「立刻运行下一轮」在最常见的时候等于没有生效。用数据库事务与 finish() 对齐。
         try:
             conn.execute('BEGIN IMMEDIATE')
             autopilot.request_run_next(conn, cfg)
@@ -665,11 +737,10 @@ def cmd_autopilot(args):
         except Exception:
             conn.rollback()
             raise
-        finally:
-            os.close(lock)
     if args.action in ('start','stop'):
         if args.action == 'start':
             autopilot.policy(cfg)
+            store.set_flag(conn, 'autopilot_stop_after_cycle', '0')
         else:
             store.set_flag(conn,'autopilot_run_next','0')
         store.set_flag(conn,'autopilot_enabled','1' if args.action=='start' else '0')
@@ -832,13 +903,20 @@ def build_parser(lang=None) -> argparse.ArgumentParser:
     use = ps.add_parser('use'); use.add_argument('--once', action='store_true',
                                                  help=text(lang, '仅下一个新建轮次使用该预设，结束后自动恢复',
                                                                  'Use this preset for the next new cycle only, then revert'))
+    use.add_argument('--cycles', type=int, default=1, metavar='N',
+                     help=text(lang, '与 --once 搭配：临时预设覆盖的新建轮次数（1..100）',
+                                     'With --once: how many new cycles use the temporary preset (1..100)'))
     use.add_argument('name')
     use.set_defaults(fn=cmd_preset)
+    ps.add_parser('cancel-once', help=text(lang, '取消待生效的临时预设登记',
+                                                     'Cancel a pending temporary preset registration')).set_defaults(fn=cmd_preset)
 
     s = sub.add_parser('provider', help=text(lang, '临时停用/恢复某个渠道，不修改套餐',
                                                       'Disable or enable a provider locally; does not change your subscription'))
-    s.add_argument('action', choices=['enable', 'disable'])
-    s.add_argument('name')
+    s.add_argument('action', choices=['enable', 'disable', 'resume', 'quota'],
+                   help=text(lang, 'resume：额度已恢复（如已充值）时提前解除额度暂停；quota：查看额度暂停',
+                                   'resume: lift a quota pause early (e.g. after topping up); quota: show quota pauses'))
+    s.add_argument('name', nargs='?')
     s.set_defaults(fn=cmd_provider)
 
     s = sub.add_parser('job', help=text(lang, '创建按预设路由的本地任务', 'Create a locally routed task'))

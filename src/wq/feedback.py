@@ -190,7 +190,19 @@ def diagnose(alpha, yearly=None, rules=None, submitted=None):
         else:
             temporal.append({'segment':split,'sharpe':s['sharpe'],'fitness':s['fitness']})
             if s['sharpe'] < rules['min_sharpe'] or s['fitness'] < rules['min_fitness']:
-                gaps.append(split+f"未达本地分段要求：Sharpe>={rules['min_sharpe']}且Fitness>={rules['min_fitness']}")
+                # 官方检查已全部 PASS 时，测试段低于本地门槛只作说明，不写提交缺口。
+                # 用户 2026-09-28 要求：9qjVXgN1 / KPNgk2xk 这类官方已过、测试段为负的 Alpha 可以提交。
+                # 训练段和年度缺口仍阻断。测试段为负的信号仍不能作组合父信号。
+                if split == 'test' and not blockers:
+                    categories.append('测试段未达本地分段门槛，官方检查已通过，不阻断提交')
+                else:
+                    gaps.append(split+f"未达本地分段要求：Sharpe>={rules['min_sharpe']}且Fitness>={rules['min_fitness']}")
+    # 最近测试年（testPeriod分段）为负：给模型一档粗标签并撤销组合父信号资格；不给精确数值。
+    # 账本对照（2026-09-28）：9qjVXgN1/KPNgk2xk 官方全过但2023为负（-0.10/-0.57），本地拦下是正确方向。
+    test_seg = alpha.get('test') if isinstance(alpha.get('test'), dict) else {}
+    if number(test_seg.get('sharpe')) and test_seg['sharpe'] < 0:
+        categories.append('最近测试年收益风险比为负')
+        retain = False
     if yearly is None: gaps.append('年度记录缺失')
     else:
         years = records(yearly)
@@ -486,7 +498,8 @@ def model_context(conn):
 
 
 DISPLAY_ONLY_SETTINGS = ('testPeriod', 'visualization')
-MIN_PARENT_SHARPE = 0.9   # 历史 16 次组合里父信号 Sharpe<0.8 的从未通过门槛
+MIN_PARENT_SHARPE = 1.2   # 账本对照（2026-09-28）：第103轮后弱父信号（Sharpe<1.2）组合从未通过门槛；
+                          # 近失候选（XgbVwvEl 1.47 / LLNzJGK9 1.59，测试段健康）才是高价值父信号
 MAX_FAILED_BLENDS = 3     # 同一父信号参与 3 次未过门槛的组合后不再作父信号（如 xA3jJmkW 连败 5 次）
 
 
@@ -534,16 +547,24 @@ def next_combination(conn, max_plans=2, min_parent_sharpe=MIN_PARENT_SHARPE, cur
     def correlated(aid):
         value=(reports.get(aid,{}).get('submitted_correlation') or {}).get('max')
         return number(value) and value > SUBMITTED_CORR_PARENT
-    # 已被反复组合但从未产出更强结果的父信号视为"已挖尽"，不再消耗组合轮。
+    # 父信号测试段不得为负：训练段强而最近测试年为负的信号会把衰减带进组合（9qjVXgN1/KPNgk2xk型）。
+    # 缺测试段资料时先放行（与correlated缺PnL的口径一致）：diagnose侧retain=False是第一层拦截。
+    def test_year_ok(aid):
+        temporal=(reports.get(aid,{}).get('temporal') or [])
+        sharpe=next((t.get('sharpe') for t in temporal if t.get('segment')=='test'), None)
+        return not number(sharpe) or sharpe >= 0
+    # 已被反复组合但从未产出更强结果的父信号视为"已挖尽"。
+    # 审查拒绝、主动放弃、结构重复没有回测，blend 记 0 会把好父信号提前耗尽（LLNzJGK9 两次配弱信号都死在审查）。
     failed_blends={}
     for r in conn.execute('''SELECT p.pair_key,b.alpha_id FROM combination_plans p
             JOIN research_cycles c ON c.cycle_id=p.cycle_id LEFT JOIN brain_runs b ON b.task_id=c.simulation_task'''):
-        blend=strength(r['alpha_id']) if r['alpha_id'] else 0.0
+        if not r['alpha_id']: continue
+        blend=strength(r['alpha_id'])
         for parent in r['pair_key'].split(':'):
             if blend <= max(strength(parent), MIN_PARENT_SHARPE) or blend < 1.25:
                 failed_blends[parent]=failed_blends.get(parent,0)+1
     exhausted={a for a,n in failed_blends.items() if n >= MAX_FAILED_BLENDS}
-    pairs = [x for x in report(conn)['pairs'] if x['worth_combination_review'] and not any(tainted(i) or correlated(i) or i in exhausted for i in x['parents'])]
+    pairs = [x for x in report(conn)['pairs'] if x['worth_combination_review'] and not any(tainted(i) or correlated(i) or not test_year_ok(i) or i in exhausted for i in x['parents'])]
     for pair in sorted(pairs, key=lambda x: (-(strength(x['parents'][0])+strength(x['parents'][1])), abs(x['value']))):
         ids = pair['parents']; key = ':'.join(ids)
         if not all(x in parents for x in ids): continue

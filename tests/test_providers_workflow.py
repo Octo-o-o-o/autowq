@@ -37,7 +37,7 @@ class ProviderWorkflowTests(unittest.TestCase):
             'routing': {'profiles_file': 'config/profiles.json', 'work_root': str(self.root/'jobs')}}, str(self.root), str(self.root/'config/config.json'))
         self.conn = db.connect(self.cfg.db_path); self.addCleanup(self.conn.close)
         self.doc = workflow.template({'research': ['api'], 'review': ['review'], 'engineering': ['api']})
-        self.profile = {'default': 'test', 'providers': {'api': {'argv': [sys.executable, '-c', 'pass']}, 'review': {'argv': [sys.executable, '-c', 'pass']}},
+        self.profile = {'default': 'test', 'providers': {'api': {'argv': [sys.executable, '-c', 'pass']}, 'review': {'argv': [sys.executable, '-c', 'pass  # review']}},
                         'presets': {'test': {'routes': self.doc['routes']}}}
         self.save()
 
@@ -84,7 +84,79 @@ class ProviderWorkflowTests(unittest.TestCase):
     def test_http_failure_never_echoes_credentials_or_response(self):
         item, _ = self.server(status=401)
         with patch.dict(os.environ, {'WQ_FIXTURE_KEY':'do-not-log'}):
-            with self.assertRaisesRegex(ValueError, '^API HTTP 401$'): runtime.api_generate(item, 'hello')
+            with self.assertRaisesRegex(ValueError, '^API HTTP 401 limit=auth$'): runtime.api_generate(item, 'hello')
+
+    def test_quota_429_reports_class_and_http_date_wait_without_body(self):
+        import email.utils, time
+        when = email.utils.formatdate(time.time() + 7200, usegmt=True)
+        body = b'{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"secret-ish detail","details":[{"quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier"}]}}'
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args): pass
+            def do_POST(self):
+                self.rfile.read(int(self.headers['Content-Length']))
+                self.send_response(429); self.send_header('Retry-After', when); self.end_headers(); self.wfile.write(body)
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close); self.addCleanup(server.shutdown)
+        item = providers.api_definition('openai', 'm', 'http://127.0.0.1:'+str(server.server_port)+'/v1', 'WQ_FIXTURE_KEY')
+        with patch.dict(os.environ, {'WQ_FIXTURE_KEY': 'k'}):
+            with self.assertRaises(ValueError) as caught: runtime.api_generate(item, 'hello')
+        message = str(caught.exception)
+        self.assertRegex(message, r'^API HTTP 429 limit=quota retry_after=(71\d\d|7200)$')
+        self.assertNotIn('secret', message)
+
+    def test_limit_classes_and_retry_after_forms(self):
+        self.assertEqual(runtime.limit_kind(429, '{"quotaId":"GenerateRequestsPerMinutePerProjectPerModel-FreeTier"}'), 'rate')
+        gemini_minute = ('{"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details.",'
+                         '"status":"RESOURCE_EXHAUSTED","details":[{"violations":[{"quotaId":"GenerateRequestsPerMinutePerProjectPerModel-FreeTier"}]},'
+                         '{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"37s"}]}}')
+        self.assertEqual(runtime.limit_kind(429, gemini_minute), 'rate')
+        self.assertEqual(runtime.limit_suffix(429, gemini_minute, {}), ' limit=rate retry_after=37')
+        self.assertEqual(runtime.limit_kind(429, gemini_minute.replace('PerMinute', 'PerDay')), 'quota')
+        self.assertEqual(runtime.limit_kind(429, '{"error":{"message":"Rate limit exceeded: free-models-per-day"}}'), 'quota')
+        self.assertEqual(runtime.limit_kind(429, '{"error":{"code":"insufficient_quota","message":"You exceeded your current quota"}}'), 'quota')
+        self.assertEqual(runtime.limit_kind(403, '{"code":"AllocationQuota.FreeTierOnly"}'), 'quota')
+        self.assertEqual(runtime.limit_kind(429, '{"error":{"code":"1113","message":"余额不足或无可用资源包,请充值。"}}'), 'quota')
+        self.assertEqual(runtime.limit_kind(402, ''), 'quota')
+        self.assertEqual(runtime.limit_kind(401, ''), 'auth')
+        self.assertEqual(runtime.limit_kind(500, 'boom'), '')
+        self.assertEqual(runtime.retry_after_seconds('30'), 30)
+        self.assertIsNone(runtime.retry_after_seconds('soon'))
+        self.assertEqual(runtime.limit_suffix(429, 'Rate limit reached', {'x-ratelimit-reset-requests': '6m0s'}), ' limit=rate retry_after=360')
+
+    def test_cli_env_drops_unlisted_keys(self):
+        source = {'PATH': '/bin', 'HOME': '/h', 'LC_ALL': 'C', 'OPENAI_API_KEY': 'paid', 'ANTHROPIC_API_KEY': 'paid',
+                  'WQ_HOMELAB_API_KEY': 'custom', 'CODEX_HOME': '/c', 'GEMINI_API_KEY': 'g'}
+        self.assertEqual(runtime.cli_env({'kind': 'codex'}, source), {'PATH': '/bin', 'HOME': '/h', 'LC_ALL': 'C', 'CODEX_HOME': '/c'})
+        self.assertEqual(runtime.cli_env({'kind': 'gemini', 'env_passthrough': ['GEMINI_API_KEY']}, source)['GEMINI_API_KEY'], 'g')
+        with self.assertRaises(ValueError): runtime.cli_env({'kind': 'gemini', 'env_passthrough': ['bad name']}, source)
+
+    def test_free_preset_install_writes_reset_rule_and_rejects_same_service_review(self):
+        self.save()
+        providers.install_custom(self.cfg, {'name': 'or-a', 'preset': 'openrouter-free', 'roles': []}, key='k1')
+        providers.install_custom(self.cfg, {'name': 'or-b', 'preset': 'openrouter-free', 'model': 'google/gemma-4-31b-it:free'}, key='k2')
+        saved = json.loads((self.root/'config/profiles.json').read_text())
+        entry = saved['providers']['or-b']
+        self.assertEqual(entry['transport']['base_url'], 'https://openrouter.ai/api/v1')
+        self.assertEqual(entry['transport']['model'], 'google/gemma-4-31b-it:free')
+        self.assertEqual(entry['quota_reset'], {'tz': 'UTC', 'at': '00:00', 'period': 'daily'})
+        self.assertNotIn('k2', json.dumps(saved))
+        providers.assign_role(self.cfg, self.conn, 'research', 'or-a')
+        with self.assertRaisesRegex(ValueError, '同一服务'):
+            providers.assign_role(self.cfg, self.conn, 'review', 'or-b')
+        with self.assertRaises(ValueError):
+            providers.install_custom(self.cfg, {'name': 'x', 'preset': 'no-such-preset'}, key='k')
+
+    def test_every_free_preset_passes_transport_validation(self):
+        from wq import free_apis
+        for name, item in free_apis.PRESETS.items():
+            with self.subTest(preset=name):
+                api, reset = free_apis.api_spec(name)
+                self.assertTrue(api['base_url'].startswith('https://'))
+                self.assertIn(item['model'], item['models'])
+                if reset:
+                    from wq import routing
+                    self.assertIsNotNone(routing.next_reset(reset))
 
     def test_api_rejects_incomplete_output(self):
         item=providers.api_definition('openai','fixture')
@@ -92,8 +164,39 @@ class ProviderWorkflowTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'incomplete'):runtime.api_generate(item,'hi')
 
     def test_url_and_private_key_rules(self):
-        for url in ('https://user:key@host/v1', 'http://example.com/v1', 'https://example.com/v1?key=secret'):
+        for url in ('https://user:key@host/v1', 'http://example.com/v1', 'https://example.com/v1?key=secret', 'http://8.8.8.8/v1'):
             with self.assertRaises(ValueError): providers.api_definition('openai','fixture',url)
+        providers.api_definition('openai', 'fixture', 'http://192.168.1.20:8000/v1')
+        providers.api_definition('anthropic', 'fixture', 'http://10.0.0.8/v1')
+        # link-local（含云主机元数据地址）不是用户自己的服务，不给明文 HTTP
+        for url in ('http://169.254.169.254/v1', 'http://[fe80::1]/v1'):
+            with self.assertRaises(ValueError): providers.api_definition('openai', 'fixture', url)
+    def test_custom_endpoint_stores_the_key_outside_profiles_and_leads_the_route(self):
+        self.save()
+        added = providers.install_custom(self.cfg, {
+            'name': 'homelab', 'protocol': 'openai', 'model': 'qwen',
+            'base_url': 'http://192.168.1.20:8000/v1', 'roles': ['research'],
+        }, key='local-secret')
+        self.assertEqual(added['name'], 'homelab')
+        saved = json.loads((self.root/'config/profiles.json').read_text())
+        self.assertNotIn('local-secret', json.dumps(saved))
+        self.assertEqual(saved['providers']['homelab']['transport']['base_url'], 'http://192.168.1.20:8000/v1')
+        self.assertTrue(saved['providers']['homelab']['transport']['api_key_file'])
+        self.assertEqual(saved['presets']['test']['routes']['research'][0], 'api')
+        assigned = providers.assign_role(self.cfg, self.conn, 'research', 'homelab')
+        self.assertEqual(assigned['provider'], 'homelab')
+        routed = json.loads((self.root/'config/profiles.json').read_text())
+        self.assertEqual(routed['presets']['test']['routes']['research'][0], 'homelab')
+        with self.assertRaisesRegex(ValueError, '不同'):
+            providers.assign_role(self.cfg, self.conn, 'review', 'homelab')
+        self.assertEqual(self.cfg.data['budgets']['homelab']['remaining'], 10000)
+        self.assertTrue(self.cfg.data['models']['homelab']['enabled'])
+        with self.assertRaises(ValueError):
+            providers.install_custom(self.cfg, {
+                'name': 'homelab', 'protocol': 'openai', 'model': 'qwen',
+                'base_url': 'http://127.0.0.1:11434/v1', 'roles': ['research'], 'allow_no_key': True,
+            })
+
         path = providers.save_key(str(self.root/'private'), 'example', 'test-secret')
         self.assertEqual(Path(path).stat().st_mode & 0o777, 0o600)
         with self.assertRaises(FileExistsError): providers.save_key(str(self.root/'private'), 'example', 'new')
@@ -124,6 +227,17 @@ class ProviderWorkflowTests(unittest.TestCase):
         self.assertEqual(runtime.cli_response('claude',json.dumps({'result':json.dumps(RESULT)}))[0],json.dumps(RESULT))
         with self.assertRaises(ValueError): runtime.cli_response('codex','{}')
         self.assertEqual(runtime.parse_result('```json\n'+json.dumps(RESULT)+'\n```'),RESULT)
+        # qwen 0.18 的 json 输出是消息数组，终态为最后一条 type=result。
+        qwen=[{'type':'system','subtype':'session_start'},{'type':'assistant','message':{}},
+              {'type':'result','subtype':'success','is_error':False,'result':json.dumps(RESULT),'usage':{'input_tokens':3,'output_tokens':4}}]
+        self.assertEqual(runtime.cli_response('qwen',json.dumps(qwen)),(json.dumps(RESULT),{'input_tokens':3,'output_tokens':4}))
+        for bad in ([{'type':'assistant'}], [{'type':'result','subtype':'error_max_turns','is_error':True}], ['x']):
+            with self.assertRaises(ValueError): runtime.cli_response('qwen',json.dumps(bad))
+        with self.assertRaises(ValueError):
+            runtime.cli_response('claude',json.dumps({'type':'result','subtype':'error_max_turns','result':''}))
+        codex='\n'.join(json.dumps(e) for e in ({'type':'item.completed','item':{'type':'agent_message','text':'done'}},
+                                                   {'type':'turn.completed','usage':{'input_tokens':5,'cached_input_tokens':1,'output_tokens':2}}))
+        self.assertEqual(runtime.cli_response('codex',codex),('done',{'input_tokens':5,'output_tokens':2,'total_tokens':7}))
         with self.assertRaises(ValueError):runtime.parse_result('{"status":"completed"}')
 
     def test_discovery_does_not_run_cli_and_manual_catalog_is_honest(self):

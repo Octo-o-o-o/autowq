@@ -62,6 +62,31 @@ class TestGates(unittest.TestCase):
         out = run_agent(conn, cfg, stub_spec(self.tmp), "p.md", "t", allow=False)
         self.assertEqual(out.status, "blocked_policy")
 
+    def test_spend_cap_blocks_known_dollars_only(self):
+        cfg, conn = make_env(self.tmp, {**GATES, 'limits': {'model_spend_cap_usd': 1.0, 'model_spend_as_of': '2000-01-01T00:00:00Z'}})
+        log = os.path.join(self.tmp, 'spent.log')
+        with open(log, 'w', encoding='utf-8') as handle:
+            handle.write('{"wq_usage": {"cost_usd": 1.25}}\n')
+        store.record_agent_call_terminal(conn, 'grok', 'old', None, 'succeeded', 'done')
+        conn.execute("UPDATE agent_calls SET log_path=?, started_at=? WHERE agent='grok'", (log, '2020-01-01T00:00:00Z'))
+        conn.commit()
+        blocked = run_agent(conn, cfg, stub_spec(self.tmp), "p.md", "t", allow=True)
+        self.assertEqual(blocked.status, "blocked_budget")
+        self.assertIn('$', blocked.detail)
+        unknown = os.path.join(self.tmp, 'unknown.log')
+        with open(unknown, 'w', encoding='utf-8') as handle:
+            handle.write('no price here\n')
+        cfg.data['limits']['model_spend_cap_usd'] = 10
+        store.record_agent_call_terminal(conn, 'devin', 'old2', None, 'succeeded', 'done')
+        conn.execute("UPDATE agent_calls SET log_path=? WHERE agent='devin'", (unknown,))
+        conn.commit()
+        from wq import usage
+        spend = usage.known_spend(conn, '2000-01-01T00:00:00Z')
+        self.assertAlmostEqual(spend['known_usd'], 1.25)
+        self.assertEqual(spend['unknown_calls'], 1)
+        allowed = run_agent(conn, cfg, stub_spec(self.tmp), "p.md", "t", allow=True)
+        self.assertEqual(allowed.status, "succeeded")
+
     def test_weekly_quota(self):
         cfg, conn = make_env(self.tmp, GATES)
         cfg.data["limits"]["grok_calls_per_week"] = 1

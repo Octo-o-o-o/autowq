@@ -12,6 +12,59 @@ import sys
 from .assets import path as asset_path
 
 
+def write_runtime_files(runtime, binaries=None, verified_versions=None, root=None, work_dirs=()):
+    """（重新）生成 launchers、agents.sb 与 provider_entry.py。幂等：`wq providers
+    refresh-runtime` 在应用更新或源码修复后调用，保证部署 runtime 与源码一致，
+    不触碰 jobs/ 与既有配置。root 为项目根（沙箱禁读边界），缺省取当前目录。
+    work_dirs 为配置中实际使用的任务目录（routing.work_root、models.*.workdir）；
+    不放行就写不出 result.json。位于禁读边界内的目录无法放行，由 doctor 报错。"""
+    runtime = Path(runtime).expanduser().resolve()
+    launchers = runtime / 'launchers'
+    launchers.mkdir(parents=True, exist_ok=True, mode=0o700)
+    jobs = runtime / 'jobs'
+    jobs.mkdir(parents=True, exist_ok=True, mode=0o700)
+    entry = launchers / 'provider_entry.py'
+    shutil.copyfile(asset_path('provider_entry.py'), entry)
+    entry.chmod(0o700)
+    home = Path.home()
+    private = home/'.worldquant-pilot'
+    denied = [Path(root).resolve() if root else Path.cwd(), private,
+              home/'Downloads', home/'Library/Application Support/Google/Chrome']
+    # 只放行任务目录，不放行 launchers：沙箱内进程不得改写启动器自身。
+    tasks = [jobs]
+    for d in work_dirs:
+        d = Path(d).expanduser().resolve()
+        # runtime 本身或其祖先会连带放行 launchers/agents.sb，同样拒绝。
+        if (d not in tasks and not d.is_relative_to(launchers) and not runtime.is_relative_to(d)
+                and not any(d.is_relative_to(x) for x in denied)):
+            tasks.append(d)
+    writes = [*tasks, home/'.grok', home/'.local/share/devin', home/'.config/devin',
+              home/'.claude', home/'.claude.json', home/'.codex', home/'.gemini', home/'.copilot', home/'.qwen', home/'.config/opencode', home/'.local/share/opencode',
+              home/'.cache', home/'.cursor', home/'.local/share/cursor-agent',
+              home/'.zcode', home/'.zcode-ai', home/'.zai',
+              home/'Library/Application Support/ZCode', home/'Library/Logs/ZCode',
+              home/'Library/Caches/ZCode', home/'Library/Caches/cursor-compile-cache',
+              Path('/private/tmp'), Path('/private/var/folders')]
+    sb = '(version 1)\n(allow default)\n(deny file-write*)\n'
+    sb += '(allow file-write* '+ ' '.join('(subpath '+json.dumps(str(p))+')' for p in writes)
+    sb += ' (literal "/dev/null") (literal "/dev/tty"))\n'
+    sb += '(deny file-read* file-write* '+' '.join('(subpath '+json.dumps(str(p))+')' for p in denied)+')\n'
+    sandbox = runtime/'agents.sb'
+    sandbox.write_text(sb)
+    binaries = {**{'grok':home/'.grok/bin/grok', 'devin':home/'.local/bin/devin'}, **(binaries or {})}
+    verified = str((verified_versions or {}).get('zcode', '') or '')
+    for name in ('grok','devin','cursor','zcode'):
+        argv = ['/usr/bin/sandbox-exec','-f',str(sandbox)]
+        argv += [str(binaries[name])] if name in ('grok','devin') else [sys.executable,str(entry),name]
+        if name=='cursor' and binaries.get('cursor'):
+            argv=['/usr/bin/env','WQ_CURSOR_BIN='+str(binaries['cursor'])]+argv
+        if name=='zcode' and verified:
+            # 版本核对在入口脚本内完成；应用更新后版本不符会在发调用前阻断。
+            argv=['/usr/bin/env','WQ_ZCODE_VERIFIED_VERSION='+verified]+argv
+        f = launchers/name
+        f.write_text('#!/bin/sh\nexec '+shlex.join(argv)+' "$@"\n');f.chmod(0o700)
+
+
 def render(root, runtime, binaries=None):
     root, runtime = Path(root).resolve(), Path(runtime).expanduser().resolve()
     if runtime.is_relative_to(root):
@@ -23,36 +76,11 @@ def render(root, runtime, binaries=None):
     home = Path.home()
     private = home/'.worldquant-pilot'
     runtime.mkdir(parents=True, mode=0o700)
-    launchers = runtime/'launchers';launchers.mkdir(mode=0o700)
-    jobs = runtime/'jobs';jobs.mkdir(mode=0o700)
-    entry = launchers/'provider_entry.py'
-    shutil.copyfile(asset_path('provider_entry.py'), entry)
     # This matches the project's targeted macOS isolation, not a whole-machine sandbox.
-    quote = lambda p: json.dumps(str(p))
-    denied = [root, private, home/'Downloads', home/'Library/Application Support/Google/Chrome']
-    writes = [jobs, home/'.grok', home/'.local/share/devin', home/'.config/devin',
-              home/'.claude', home/'.claude.json', home/'.codex', home/'.gemini', home/'.copilot', home/'.qwen', home/'.config/opencode', home/'.local/share/opencode',
-              home/'.cache', home/'.cursor', home/'.local/share/cursor-agent',
-              home/'.zcode', home/'.zcode-ai', home/'.zai',
-              home/'Library/Application Support/ZCode', home/'Library/Logs/ZCode',
-              home/'Library/Caches/ZCode', home/'Library/Caches/cursor-compile-cache',
-              Path('/private/tmp'), Path('/private/var/folders')]
-    sb = '(version 1)\n(allow default)\n(deny file-write*)\n'
-    sb += '(allow file-write* '+ ' '.join('(subpath '+quote(p)+')' for p in writes)
-    sb += ' (literal "/dev/null") (literal "/dev/tty"))\n'
-    sb += '(deny file-read* file-write* '+' '.join('(subpath '+quote(p)+')' for p in denied)+')\n'
-    sandbox = runtime/'agents.sb';sandbox.write_text(sb)
-    binaries = {**{'grok':home/'.grok/bin/grok', 'devin':home/'.local/bin/devin'}, **(binaries or {})}
-    for name in ('grok','devin','cursor','zcode'):
-        argv = ['/usr/bin/sandbox-exec','-f',str(sandbox)]
-        argv += [str(binaries[name])] if name in ('grok','devin') else [sys.executable,str(entry),name]
-        if name=='cursor' and binaries.get('cursor'):
-            argv=['/usr/bin/env','WQ_CURSOR_BIN='+str(binaries['cursor'])]+argv
-        f = launchers/name
-        f.write_text('#!/bin/sh\nexec '+shlex.join(argv)+' "$@"\n');f.chmod(0o700)
+    write_runtime_files(runtime, binaries, root=root)
     cfg = json.loads(asset_path('config.example.json').read_text())
-    cfg['routing']['work_root'] = str(jobs)
-    profiles = json.loads(asset_path('profiles.example.json').read_text().replace('{launcher_dir}',str(launchers)))
+    cfg['routing']['work_root'] = str(runtime/'jobs')
+    profiles = json.loads(asset_path('profiles.example.json').read_text().replace('{launcher_dir}',str(runtime/'launchers')))
     (root/'config').mkdir(parents=True,exist_ok=True)
     for path, data in zip(targets[:2], (cfg, profiles)):
         path.write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n');path.chmod(0o600)

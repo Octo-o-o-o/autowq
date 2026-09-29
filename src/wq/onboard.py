@@ -22,6 +22,15 @@ def assignments(items, providers):
     return result
 
 
+def _same_service(a, b, apis):
+    """两个 API 渠道指向同一服务地址时视为同一渠道（CLI 名称本身唯一）。"""
+    from .routing import channel_id
+    apis = apis or {}
+    if a in apis and b in apis:
+        return channel_id({'transport': apis[a]}) == channel_id({'transport': apis[b]})
+    return False
+
+
 def configure(root, runtime, selected, models, binaries, roles, efforts, platform=None, apis=None):
     platform = platform or sys.platform
     apis = apis or {}
@@ -31,13 +40,19 @@ def configure(root, runtime, selected, models, binaries, roles, efforts, platfor
             from wq.provider_runtime import validate_api
             validate_api(apis[name])
     if platform not in ('darwin', 'linux'): raise ValueError('Use macOS, Linux or Windows WSL2.')
-    if not selected or len(set(selected)) != len(selected) or any(n not in NAMES for n in selected):
+    if not selected or len(set(selected)) != len(selected):
         raise ValueError('Choose supported, non-duplicate providers.')
-    if platform == 'linux' and any(n not in ('grok','devin','cursor',*PROTOCOLS) for n in selected):
+    custom = [n for n in selected if n not in NAMES]
+    if any(n not in apis for n in custom):
+        raise ValueError('Custom endpoint missing API definition.')
+    import re
+    if any(not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,31}', n) or n in CLI or n in PROTOCOLS for n in custom):
+        raise ValueError('Custom endpoint name is invalid or reserved.')
+    if platform == 'linux' and any(n not in ('grok','devin','cursor',*PROTOCOLS) and n not in custom for n in selected):
         raise ValueError('Linux wizard supports grok/devin/cursor Docker and standard APIs; other CLI adapters currently require macOS.')
     if any(n not in selected for n in roles.values()): raise ValueError('Role provider must be selected.')
-    if len(selected)>1 and roles['research']==roles['review']:
-        raise ValueError('Choose a different provider for review.')
+    if len(selected)>1 and (roles['research']==roles['review'] or _same_service(roles['research'], roles['review'], apis)):
+        raise ValueError('Choose a different provider for review (two names for one service count as one).')
     for name in selected:
         if name != 'zcode' and not models.get(name): raise ValueError('Explicit model ID required: '+name)
         if name=='zcode' and models.get(name): raise ValueError('ZCode uses its app configuration; model override is unsupported.')
@@ -63,10 +78,11 @@ def configure(root, runtime, selected, models, binaries, roles, efforts, platfor
         'routes':routes,'retries':3,'retry_delays_s':[30,60,120]}}
     profiles['default']='local'
     containers=json.loads((runtime/'containers.json').read_text()) if platform=='linux' else None
-    if platform=='darwin': install_runtime(runtime)
+    if platform=='darwin': install_runtime(runtime, binaries, root=root)
     for name in selected:
         if name not in LEGACY:
-            profiles['providers'][name]=definition(name,models[name],binaries.get(name),apis.get(name))
+            kind = apis[name]['protocol'] if name in apis and name not in PROTOCOLS else name
+            profiles['providers'][name]=definition(kind,models[name],binaries.get(name),apis.get(name))
             cfg['models'][name]={'enabled':False,'timeout_s':profiles['providers'][name]['timeout_s']}
             cfg['budgets'][name]={'enabled':False,'remaining':None,'unit':'calls'}
         provider_def=profiles['providers'][name]
@@ -113,6 +129,7 @@ def login_flow(root, lang, persist=None):
     say('请在浏览器自行注册、验证邮箱并接受条款；已有账号可直接登录。','Register, verify your email and accept terms yourself in the browser, or sign in with your existing account.')
     status=info.get('login',{})
     for name in providers:
+        login_env=None
         if name in PROTOCOLS:
             say(name+'：使用API Key，非订阅登录；环境变量或私有文件。',name+': API key, separate from subscription login; environment variable or private file.');continue
         print(name+': '+PROVIDER_URLS.get(name,''))
@@ -124,13 +141,24 @@ def login_flow(root, lang, persist=None):
             from .assets import path as asset_path
             cmd=[sys.executable,str(asset_path('provider_login.py')),name,'--config',str(Path(runtime)/'containers.json')]
             say('使用已构建的Docker镜像；缺镜像时先按文档构建。','Uses the configured Docker image; build it first if missing.')
+        elif name=='zcode':
+            # ZCode CLI 自带 OAuth 登录子命令，但入口是 node 脚本，不能直接 exec。
+            import shutil as _shutil
+            node=os.environ.get('WQ_NODE_BIN') or _shutil.which('node')
+            binary=info.get('binaries',{}).get('zcode') or discover().get('zcode')
+            if not node or not binary:
+                say('缺少 node 或 ZCode 应用 CLI，先安装后用 --login-only 重试。','Missing node or the ZCode app CLI. Install them and retry with --login-only.');status[name]='pending';continue
+            cmd=[node,binary,'login']
+            # 与 provider_entry 运行时相同的内置 provider 配置，登录态才对应实际调用渠道。
+            from .assets.provider_entry import ZCODE_PROVIDER_CONFIG
+            login_env={**os.environ,'ZCODE_BUILTIN_PROVIDER_CONFIG_FILE':ZCODE_PROVIDER_CONFIG}
         elif name in CLI and CLI[name]['login'] is not None:
             binary=info.get('binaries',{}).get(name) or discover().get(name)
             if not binary: say('未找到CLI，先安装后用 --login-only 重试。','CLI missing. Install it and retry with --login-only.');status[name]='pending';continue
             cmd=[binary]+CLI[name]['login']
         else:
             say('请在供应商应用中完成登录；此向导不能验证该应用会话。','Sign in inside the vendor app; this wizard cannot verify its session.');status[name]='manual_unverified';continue
-        try: code=subprocess.call(cmd,cwd=root)
+        try: code=subprocess.call(cmd,cwd=root,env=login_env)
         except OSError: code=1
         status[name]='login_command_succeeded_unverified' if code==0 else 'failed'
         say('登录命令结束；模型权限需后续单轮验证。' if code==0 else '登录未完成，可稍后继续。',
@@ -161,12 +189,15 @@ def main(argv=None):
     p.add_argument('--list',action='store_true',help='Detect host executables only; no writes or model calls')
     p.add_argument('--non-interactive',action='store_true')
     p.add_argument('--providers',help='Comma-separated: '+','.join(NAMES))
+    p.add_argument('--custom',action='append',default=[],metavar='NAME=openai|anthropic')
+    p.add_argument('--allow-no-key',action='append',default=[],metavar='NAME')
     p.add_argument('--base-url',action='append',default=[],metavar='PROVIDER=URL')
     p.add_argument('--key-env',action='append',default=[],metavar='PROVIDER=ENV_VAR')
     p.add_argument('--model',action='append',default=[],metavar='PROVIDER=MODEL_ID')
     p.add_argument('--binary',action='append',default=[],metavar='PROVIDER=/ABS/PATH')
     p.add_argument('--reasoning-effort',action='append',default=[],metavar='grok=xhigh')
-    for role in ('research','review','engineering'): p.add_argument('--'+role,choices=NAMES)
+    p.add_argument('--free',action='append',default=[],metavar='PRESET',help='Official free API preset, see `wq providers free`')
+    for role in ('research','review','engineering'): p.add_argument('--'+role)
     a=p.parse_args(argv);found=discover()
     if a.lang is None:
         a.lang=preferred_language(a.root/'config/config.json') if a.login_only else default_language()
@@ -193,12 +224,46 @@ def main(argv=None):
         chosen=a.providers
         if not chosen and not a.non_interactive:chosen=ask('选择渠道，逗号分隔（'+','.join(NAMES)+'）：','Providers, comma separated ('+','.join(NAMES)+'): ')
         selected=[n.strip() for n in (chosen or '').split(',') if n.strip()]
+        from . import free_apis
+        free=[n.strip() for n in a.free if n.strip()]
+        if not a.non_interactive and not a.free and not a.providers and sys.stdin.isatty():
+            say('没有订阅或 API Key？下面是官方免费 API 预设，只需注册拿一个 Key：','No subscription or API key? These official free API presets only need one key:')
+            for row in free_apis.listing(lang='zh' if zh else 'en'):
+                print(f"  {row['preset']:<18}[{row['region']}] {row['label']}：{row['limits']}")
+            extra=ask('添加免费预设，逗号分隔（回车跳过）：','Add free presets, comma separated (Enter to skip): ')
+            free=[n.strip() for n in extra.split(',') if n.strip()]
+        for name in free:
+            if name not in free_apis.PRESETS or name in selected: raise ValueError('Unknown or duplicate free preset: '+name)
+            selected.append(name)
+        custom=[(name,'openai') for name in free]
+        for item in a.custom:
+            cname, _, cprotocol = item.partition('=')
+            cname, cprotocol = cname.strip(), cprotocol.strip()
+            if not cname or cprotocol not in ('openai','anthropic') or cname in selected:
+                raise ValueError('Expected NAME=openai or NAME=anthropic for each --custom')
+            custom.append((cname, cprotocol))
+            selected.append(cname)
         if not selected: raise ValueError('Select at least one provider.')
+        if not a.non_interactive and not a.providers and sys.stdin.isatty():
+            while True:
+                extra=ask('再添加一个自建兼容接口的名称（回车跳过）：','Add a self-hosted compatible endpoint name (Enter to skip): ')
+                if not extra: break
+                protocol=ask(extra+' 协议 openai 或 anthropic：',extra+' protocol, openai or anthropic: ')
+                if protocol not in ('openai','anthropic'): raise ValueError('Protocol must be openai or anthropic')
+                if extra in selected: raise ValueError('Duplicate provider: '+extra)
+                custom.append((extra, protocol))
+                selected.append(extra)
         models=assignments(a.model,selected);binaries=assignments(a.binary,selected);efforts=assignments(a.reasoning_effort,selected)
         binaries={**found,**binaries}
         urls=assignments(a.base_url,selected);key_envs=assignments(a.key_env,selected);apis={}
+        for name in free:
+            item=free_apis.PRESETS[name]
+            models.setdefault(name,item['model']);urls.setdefault(name,item['base_url']);key_envs.setdefault(name,free_apis.key_env(name))
+            say(f"{name}：{item['caveats'][0 if zh else 1]}｜申请 Key：{item['signup']}",f"{name}: {item['caveats'][1]} | Get a key: {item['signup']}")
+        custom_protocol=dict(custom)
+        no_key=set(a.allow_no_key)
         for name in selected:
-            if name not in NAMES:raise ValueError('Unsupported provider: '+name)
+            if name not in NAMES and name not in custom_protocol:raise ValueError('Unsupported provider: '+name)
             if name!='zcode' and name not in models and not a.non_interactive:
                 if name in CLI:
                     try: print(json.dumps(list_models(name,binary=binaries.get(name)),ensure_ascii=False))
@@ -206,11 +271,22 @@ def main(argv=None):
                 models[name]=ask(name+' 模型ID（使用本人CLI列出的可用ID）：',name+' model ID (as listed by your CLI): ')
             if sys.platform=='darwin' and name in CLI and name!='zcode' and name not in binaries and not a.non_interactive:
                 binaries[name]=os.path.expanduser(ask(name+' 可执行文件绝对路径：',name+' executable absolute path: '))
-            if name in PROTOCOLS:
+            if name in PROTOCOLS or name in custom_protocol:
+                protocol=custom_protocol.get(name, name)
                 if not a.non_interactive:
-                    urls[name]=urls.get(name) or ask(name+' Base URL（回车官方默认，包含/v1）：',name+' Base URL (Enter for official default, include /v1): ')
-                    key_envs[name]=key_envs.get(name) or ask(name+' Key环境变量名（回车默认）：',name+' key environment variable (Enter for default): ')
-                apis[name]=api_definition(name,models.get(name,''),urls.get(name),key_envs.get(name))
+                    urls[name]=urls.get(name) or ask(name+' Base URL（回车官方默认；自建地址请含 /v1。本机和内网可用 http）：',name+' Base URL (Enter for official default; include /v1. http is allowed on localhost and private networks): ')
+                    if name in custom_protocol and name not in free and ask(name+' 这个服务不需要 API Key？[y/N]：',name+' does this service need no API key? [y/N]: ').lower()=='y':
+                        no_key.add(name)
+                    elif name not in no_key:
+                        key_envs[name]=key_envs.get(name) or ask(name+' Key环境变量名（回车默认）：',name+' key environment variable (Enter for default): ')
+                apis[name]=api_definition(protocol,models.get(name,''),urls.get(name) or None,key_envs.get(name))
+                if name in free:
+                    spec,_=free_apis.api_spec(name,models.get(name))
+                    apis[name].update({k:spec[k] for k in ('token_parameter','max_tokens','timeout_s')})
+                if name in no_key:
+                    apis[name]['allow_no_key']=True
+                    from .provider_runtime import validate_api
+                    validate_api(apis[name])
         if 'grok' in selected and 'grok' not in efforts and not a.non_interactive:
             value=ask('Grok 思考强度 low/medium/high/xhigh（回车使用 CLI 默认）：','Grok effort low/medium/high/xhigh (Enter for CLI default): ')
             if value:efforts['grok']=value
@@ -226,10 +302,20 @@ def main(argv=None):
         if not a.non_interactive and ask('写入？[y/N]：','Write configuration? [y/N]: ').lower()!='y':
             say('已取消，没有写入。','Cancelled; no files written.');return 0
         cfg=configure(a.root,a.runtime,selected,models,binaries,roles,efforts,apis=apis)
+        if free:
+            # 免费预设的额度重置规则写在渠道层，额度暂停据此等到重置时刻。
+            pp=a.root/'config/profiles.json';profiles=json.loads(pp.read_text())
+            for name in free:
+                item=free_apis.PRESETS[name];entry=profiles['providers'][name]
+                entry['free_preset']=name;entry['timeout_s']=item['timeout_s']+60
+                cfg['models'][name]['timeout_s']=entry['timeout_s']
+                if item.get('quota_reset'): entry['quota_reset']=item['quota_reset']
+            pp.write_text(json.dumps(profiles,ensure_ascii=False,indent=2)+'\n')
         if apis and not a.non_interactive:
             import getpass
             pp=a.root/'config/profiles.json';profiles=json.loads(pp.read_text())
             for name in apis:
+                if apis[name].get('allow_no_key'): continue
                 if ask(name+' 现在隐藏输入API Key并存到仓库外？[y/N]：',name+' enter hidden API key and save outside repository? [y/N]: ').lower()=='y':
                     key_path=save_key(cfg['paths']['private_dir'],name,getpass.getpass('API key: '))
                     profiles['providers'][name]['transport']['api_key_file']=key_path

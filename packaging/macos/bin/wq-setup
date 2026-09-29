@@ -1,0 +1,19 @@
+#!/bin/sh
+# wq-setup — 不开菜单栏应用时的安装/调度入口（与菜单栏「首次设置」「启用调度」同一份 app_setup.py）。
+#   wq-setup setup --workspace DIR                      安装运行时到 ~/Library/Application Support/WorldQuant
+#   wq-setup activate --workspace DIR --runner-only     只注册后台调度（LaunchAgent），不启用菜单栏
+#   wq-setup deactivate                                 移除调度与菜单栏自启，不动工作区数据
+# 输出为单行 JSON；失败时含 error 字段且退出码非 0。
+set -eu
+SELF="$0"
+while [ -L "$SELF" ]; do
+    LINK="$(readlink "$SELF")"
+    case "$LINK" in /*) SELF="$LINK" ;; *) SELF="$(dirname "$SELF")/$LINK" ;; esac
+done
+RES="$(cd "$(dirname "$SELF")/.." && pwd -P)"
+if [ "$(uname -m)" = arm64 ] || [ "$(sysctl -n hw.optional.arm64 2>/dev/null || echo 0)" = 1 ]; then
+    ARCH=arm64
+else
+    ARCH=x86_64
+fi
+PYTHONDONTWRITEBYTECODE=1 exec "$RES/runtime/$ARCH/bin/python3" "$RES/app_setup.py" "$@"

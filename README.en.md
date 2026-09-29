@@ -8,7 +8,7 @@ A local WorldQuant BRAIN research workflow: propose a hypothesis → review thro
 
 ## Install
 
-Requirements: Python 3.11+ and your own CLI subscription accounts or API keys. The core runtime uses the Python standard library only. macOS is supported; Linux and Windows WSL2 use Docker-isolated providers. Native Windows has experimental support for the tray and scheduler control layer (see the Windows note under Option 2).
+Requirements: your own CLI subscription accounts or API keys. Without a subscription you can start on official free API tiers (`wq providers free` lists Gemini, OpenRouter, BigModel, SiliconFlow and other presets that need only one key). The macOS DMG bundles its runtime; every other install method needs Python 3.11+. The core runtime uses the Python standard library only. macOS is supported; Linux and Windows WSL2 use Docker-isolated providers. Native Windows has experimental support for the tray and scheduler control layer (see the Windows note under Option 2).
 
 ```sh
 # Option 1: pipx (recommended; see https://pipx.pypa.io)
@@ -23,7 +23,7 @@ brew tap Octo-o-o-o/autowq && brew install wq-pilot
 brew install --cask Octo-o-o-o/autowq/worldquant   # optional menu-bar app
 ```
 
-Option 3: macOS menu-bar app. Download `WorldQuant-<version>.dmg` from [Releases](https://github.com/Octo-o-o-o/autowq/releases), drag it into Applications and double-click; the first-launch wizard picks a workspace, prepares the runtime and starts onboarding. If the build is not notarized, install via `brew install --cask` (which removes quarantine) or right-click Open once.
+Option 3: macOS, DMG only (works out of the box). Download `WorldQuant-<version>.dmg` from [Releases](https://github.com/Octo-o-o-o/autowq/releases) and drag the app into Applications. The DMG ships its own Python runtime and engine; no system Python, Xcode Command Line Tools or pip needed. Use the menu-bar app (open it and follow the first-launch wizard to pick a workspace and finish onboarding), or skip the menu bar entirely and drive the bundled CLI at `WorldQuant.app/Contents/Resources/bin/wq` (suited to AI agents). Full commands for both: **[macOS bundle guide](docs/app-bundle.md)**. If the build is not notarized, install via `brew install --cask` (which removes quarantine) or right-click Open once.
 
 Windows (experimental): the tray shares the same control layer and feature set as the macOS menu bar. Download `WorldQuantTray.exe` (single file, engine bundled) from [Releases](https://github.com/Octo-o-o-o/autowq/releases) and run it inside a workspace that has completed `wq onboard`, optionally with `--workspace <dir>`; or from source, `pip install pystray Pillow` then `python scripts/setup_windows.py` to register the Task Scheduler runner and login autostart. Providers are not bundled with the exe — configure profiles.json yourself; the full research stack still recommends Linux / Windows WSL2, see the cross-platform guide.
 

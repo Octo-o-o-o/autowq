@@ -79,6 +79,24 @@ class OnboardingTests(unittest.TestCase):
         self.assertNotEqual(r.returncode,0)
         self.assertEqual(before,(self.root/'config/config.json').read_bytes())
 
+    def test_noninteractive_free_presets_only(self):
+        # 没有任何 CLI 或订阅：只用两个免费 API 预设完成初始化，研究与审查落在不同服务上。
+        args=[sys.executable,str(SCRIPTS/'onboard.py'),'--non-interactive','--lang','en',
+              '--root',str(self.root),'--runtime',str(self.runtime),'--providers','',
+              '--free','gemini-free','--free','bigmodel-free','--skip-login']
+        r=subprocess.run(args,stdin=subprocess.DEVNULL,capture_output=True,text=True,timeout=20)
+        self.assertEqual(r.returncode,0,r.stderr)
+        profiles=json.loads((self.root/'config/profiles.json').read_text())
+        gemini=profiles['providers']['gemini-free']
+        self.assertEqual(gemini['transport']['base_url'],'https://generativelanguage.googleapis.com/v1beta/openai')
+        self.assertEqual(gemini['transport']['api_key_env'],'WQ_GEMINI_FREE_API_KEY')
+        self.assertEqual(gemini['quota_reset']['tz'],'America/Los_Angeles')
+        self.assertNotIn('quota_reset',profiles['providers']['bigmodel-free'])
+        self.assertEqual(profiles['presets']['local']['routes']['research'],['gemini-free'])
+        self.assertEqual(profiles['presets']['local']['routes']['review'],['bigmodel-free'])
+        saved=json.loads((self.root/'config/config.json').read_text())
+        self.assertFalse(saved['models']['gemini-free']['enabled'])   # 初始化仍不启动推理
+
     def test_cli_help_forwards_options(self):
         import os
         env={**os.environ,'PYTHONPATH':str(SCRIPTS.parent/'src')}

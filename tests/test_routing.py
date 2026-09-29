@@ -181,6 +181,43 @@ class RoutingTests(unittest.TestCase):
         self.assertFalse(_verify_terminal(str(f),'cursor')[0])
         f.write_text('{"stopReason":"max_turns"}')
         self.assertFalse(_verify_terminal(str(f),'grok')[0])
+        # ZCode 无头 --json 终态：{"type":"result",...,"projection":{"status":"completed"}}
+        f.write_text('{"type":"result","sessionId":"sess_1","response":"ok","projection":{"status":"completed","turnCount":2}}')
+        self.assertTrue(_verify_terminal(str(f),'zcode')[0])
+        f.write_text('{"type":"result","projection":{"status":"failed"}}')
+        self.assertFalse(_verify_terminal(str(f),'zcode')[0])
+        f.write_text('{"type":"assistant","text":"partial"}')
+        self.assertFalse(_verify_terminal(str(f),'zcode')[0])
+
+    def test_capacity_patterns(self):
+        for tail in ('[1310] Weekly/Monthly Limit Exhausted',
+                     'API Error: quota exceeded for this key',
+                     'rate limit reached', '余额不足', '429 too many requests'):
+            self.assertTrue(routing._CAPACITY_RE.search(tail), tail)
+        for tail in ('max_turns reached', 'exit 1', 'JSON decode error',
+                     'turn limit exhausted', 'context token limit exhausted'):
+            self.assertFalse(routing._CAPACITY_RE.search(tail), tail)
+
+    def test_limit_exhausted_falls_back_and_sets_not_before(self):
+        # ZCode 实测形态：重试耗尽后须判为容量故障 → 切下一渠道并设 provider_not_before。
+        capacity = self.root/'capacity.py'
+        capacity.write_text("import sys\nprint('[1310] Weekly/Monthly Limit Exhausted')\nsys.exit(1)\n")
+        self.data['providers']['a'] = {'argv': [sys.executable, str(capacity)]}
+        self.write_config()
+        tid,_=self.enqueue()
+        for _ in range(4): self.tick()
+        self.assertEqual(self.status(tid),'queued')
+        self.tick()
+        self.assertEqual(self.status(tid),'succeeded')
+        self.assertIsNotNone(store.get_flag(self.conn,'provider_quota_until:a'))  # 容量故障转为额度暂停，到点自动恢复
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM agent_calls WHERE agent='a'").fetchone()[0],4)
+
+    def test_generic_failure_after_retries_is_terminal_without_fallback(self):
+        self.script.write_text("import sys\nprint('unexpected boom')\nsys.exit(1)\n")
+        tid,_=self.enqueue()
+        for _ in range(4): self.tick()
+        self.assertEqual(self.status(tid),'failed')
+        self.assertIsNone(store.get_flag(self.conn,'provider_not_before:a'))
 
     def test_expired_route_window_blocks_all_fallbacks(self):
         self.cfg.data['routing']['authorized_until']=(util.now()-dt.timedelta(seconds=1)).isoformat()
@@ -197,3 +234,114 @@ class RoutingTests(unittest.TestCase):
             self.tick()
         self.assertEqual(self.status(tid),'blocked')
         self.assertEqual(self.conn.execute('SELECT count(*) FROM agent_calls').fetchone()[0],1)
+
+
+class QuotaPauseTests(RoutingTests):
+    """额度暂停：适配器报告 limit=quota 时不耗重试，暂停渠道；无可用渠道时排队到恢复时刻，到点自动继续。"""
+
+    def quota_stub(self, wait='600'):
+        path = self.root/'quota.py'
+        suffix = f' retry_after={wait}' if wait else ''
+        path.write_text(f"import sys\nprint('Provider adapter failed: API HTTP 429 limit=quota{suffix}', file=sys.stderr)\nsys.exit(2)\n")
+        return [sys.executable, str(path)]
+
+    def test_quota_pauses_without_retries_and_falls_back(self):
+        self.data['providers']['a'] = {'argv': self.quota_stub()}
+        self.write_config()
+        tid, _ = self.enqueue()
+        self.tick(); self.tick()
+        self.assertEqual(self.status(tid), 'succeeded')
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM agent_calls WHERE agent='a'").fetchone()[0], 1)
+        until = store.get_flag(self.conn, 'provider_quota_until:a')
+        self.assertGreater(util.parse_iso(until), util.now() + dt.timedelta(seconds=500))
+        self.assertIn('额度暂停至', routing._unavailable(self.conn, self.cfg, 'a'))
+
+    def test_all_paused_waits_then_resumes_automatically(self):
+        self.data['providers']['a'] = {'argv': self.quota_stub()}
+        self.data['presets']['first']['routes'] = {r: ['a'] for r in routing.ROLES}
+        self.write_config()
+        tid, _ = self.enqueue()
+        self.tick()          # 调用 a → 额度用尽，暂停
+        self.tick()          # 链上无可用渠道 → 排队等恢复，不是 blocked
+        row = self.conn.execute('SELECT status,not_before,attempts,last_error FROM tasks WHERE task_id=?', (tid,)).fetchone()
+        self.assertEqual(row['status'], 'queued')
+        self.assertEqual(row['not_before'], store.get_flag(self.conn, 'provider_quota_until:a'))
+        self.assertEqual(row['attempts'], 0)   # 额度拒绝与等待都不消耗任务尝试次数
+        self.assertIn('恢复后自动继续', row['last_error'])
+        for _ in range(3): self.tick()        # 未到恢复时刻，不会再调用
+        self.assertEqual(self.conn.execute('SELECT count(*) FROM agent_calls').fetchone()[0], 1)
+        # 额度恢复：供应商恢复服务，时间走到暂停结束之后
+        # 快照冻结了渠道定义，这里改写同一脚本模拟供应商恢复服务
+        (self.root/'quota.py').write_text("import json\nfrom pathlib import Path\nPath('result.json').write_text(json.dumps({'status':'completed','summary':'ok','findings':[]}))\n")
+        later = util.parse_iso(row['not_before']) + dt.timedelta(seconds=1)
+        with patch('wq.util.now', return_value=later), patch('wq.store.util.now', return_value=later):
+            self.tick()
+        self.assertEqual(self.status(tid), 'succeeded')
+
+    def test_reset_rule_used_when_vendor_gives_no_wait(self):
+        self.data['providers']['a'] = {'argv': self.quota_stub(wait=None),
+                                       'quota_reset': {'tz': 'America/Los_Angeles', 'at': '00:00'}}
+        self.write_config()
+        tid, _ = self.enqueue(); self.tick()
+        until = util.parse_iso(store.get_flag(self.conn, 'provider_quota_until:a'))
+        from zoneinfo import ZoneInfo
+        local = until.astimezone(ZoneInfo('America/Los_Angeles'))
+        self.assertEqual((local.hour, local.minute), (0, 0))
+        self.assertLessEqual(until - util.now(), dt.timedelta(days=1, minutes=1))
+
+    def test_manual_resume_clears_pause(self):
+        self.data['providers']['a'] = {'argv': self.quota_stub()}
+        self.write_config()
+        self.enqueue(); self.tick()
+        self.assertEqual([p['provider'] for p in routing.quota_pauses(self.conn, self.cfg)], ['a'])
+        routing.clear_quota_pause(self.conn, 'a')
+        self.assertEqual(routing.quota_pauses(self.conn, self.cfg), [])
+        self.assertIsNone(routing._unavailable(self.conn, self.cfg, 'a'))
+
+    def test_auth_failure_stops_without_retry(self):
+        path = self.root/'auth.py'
+        path.write_text("import sys\nprint('Provider adapter failed: API HTTP 401 limit=auth', file=sys.stderr)\nsys.exit(2)\n")
+        self.data['providers']['a'] = {'argv': [sys.executable, str(path)]}
+        self.write_config()
+        tid, _ = self.enqueue(); self.tick()
+        self.assertEqual(self.status(tid), 'blocked')
+        self.assertEqual(self.conn.execute('SELECT count(*) FROM agent_calls').fetchone()[0], 1)
+
+    def test_next_reset_daily_and_monthly(self):
+        now = dt.datetime(2026, 9, 29, 12, 0, tzinfo=dt.timezone.utc)
+        self.assertEqual(routing.next_reset({'tz': 'UTC', 'at': '00:00'}, now), dt.datetime(2026, 9, 30, tzinfo=dt.timezone.utc))
+        self.assertEqual(routing.next_reset({'tz': 'Asia/Shanghai', 'at': '00:00'}, now),
+                         dt.datetime(2026, 9, 29, 16, tzinfo=dt.timezone.utc))
+        self.assertEqual(routing.next_reset({'tz': 'UTC', 'at': '00:00', 'period': 'monthly'}, now),
+                         dt.datetime(2026, 10, 1, tzinfo=dt.timezone.utc))
+        self.assertIsNone(routing.next_reset({'tz': 'Nowhere/Zone'}, now))
+
+
+class ChannelIdentityTests(unittest.TestCase):
+    def test_aliases_of_one_service_are_one_channel(self):
+        api = lambda url, model: {'transport': {'kind': 'api', 'protocol': 'openai', 'base_url': url, 'model': model}}
+        data = {'providers': {
+            'free-research': api('https://openrouter.ai/api/v1', 'x:free'),
+            'free-review': api('https://OpenRouter.ai/api/v1/', 'y:free'),
+            'glm': api('https://open.bigmodel.cn/api/paas/v4', 'glm-4.7-flash'),
+            'local-a': api('http://127.0.0.1:11434/v1', 'm'), 'local-b': api('http://127.0.0.1:8080/v1', 'm'),
+            'claude': {'transport': {'kind': 'claude', 'model': 'a'}}, 'claude-opus': {'transport': {'kind': 'claude', 'model': 'b'}},
+            'grok': {'argv': ['/x/launchers/grok', '{prompt}']}, 'devin': {'argv': ['/x/launchers/devin', '{prompt}']}}}
+        self.assertTrue(routing.same_channel(data, 'free-research', 'free-review'))
+        self.assertTrue(routing.same_channel(data, 'claude', 'claude-opus'))
+        self.assertFalse(routing.same_channel(data, 'free-research', 'glm'))
+        self.assertFalse(routing.same_channel(data, 'local-a', 'local-b'))
+        self.assertFalse(routing.same_channel(data, 'grok', 'devin'))
+
+    def test_review_snapshot_excludes_aliases_of_research_provider(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg, c = make_env(tmp)
+            api = lambda url: {'transport': {'kind': 'api', 'protocol': 'openai', 'base_url': url, 'model': 'm'}}
+            data = {'default': 'p', 'presets': {'p': {'routes': {'research': ['or1'], 'review': ['or2', 'glm']}}},
+                    'providers': {'or1': api('https://openrouter.ai/api/v1'), 'or2': api('https://openrouter.ai/api/v1'),
+                                  'glm': api('https://open.bigmodel.cn/api/paas/v4')}}
+            with patch('wq.routing.catalog', return_value=data), patch('wq.routing.active_preset', return_value='p'):
+                tid, _ = store.enqueue_task(c, 'agent_call', {'role': 'review'}, dedup_key='j')
+                row = routing._snapshot(c, cfg, tid, {'role': 'review', 'excluded_providers': ['or1']})
+                self.assertEqual(json.loads(row['snapshot_json'])['chain'], ['glm'])
+            c.close()

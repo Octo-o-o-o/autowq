@@ -217,6 +217,21 @@ class AutopilotTests(unittest.TestCase):
         for _ in range(4):self.tick()
         self.assertEqual(self.cycle()['state'],'closed');self.assertEqual(self.posts,0)
 
+    def test_final_review_rejection_feeds_quotes_into_next_prompt(self):
+        # 最终否决的否决项与候选原句进入事件表，下一轮生成提示以硬约束回流，避免同类映射换措辞重提。
+        self.reject_review=True
+        for _ in range(4):self.tick()
+        row=self.cycle()
+        self.assertIn('模型审查拒绝',row['outcome'])
+        ctx=autopilot.rejection_context(self.c)
+        self.assertEqual(ctx[0]['轮次'],row['cycle_id'])
+        self.assertIn('economic_rationale',ctx[0]['否决项'])
+        self.assertTrue(ctx[0]['被否决原句'])
+        prompt=autopilot.generate_prompt(self.c)
+        self.assertIn('最近审查否决记录',prompt)
+        self.assertIn(json.loads(row['candidate_json'])['hypothesis'],prompt)
+        self.assertIsInstance(autopilot.occupied_neighborhoods(self.c), list)
+
     def test_same_provider_cannot_approve_itself(self):
         self.same_provider=True
         for _ in range(3):self.tick()

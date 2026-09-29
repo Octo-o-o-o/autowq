@@ -86,11 +86,30 @@ class VariantTests(AutopilotTests):
 
     def test_invalid_variants_block_policy(self):
         for bad in ([{'label': 'x', 'universe': 'TOP500'}], [{'label': 'same', 'decay': 0}],
-                    [{'label': 'a', 'decay': 1}, {'label': 'b', 'decay': 2}, {'label': 'c', 'decay': 3}],
+                    [{'label': 'a', 'decay': 1}, {'label': 'b', 'decay': 2}, {'label': 'c', 'decay': 3}, {'label': 'd', 'decay': 4}],
                     [{'label': 'n', 'neutralization': 'PLANET'}], [{'label': 'base', 'decay': 4}]):
             self.p['setting_variants'] = bad; self.save_policy()
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 autopilot.policy(self.cfg)
+
+    def test_decay_tiers_are_exclusive_and_gated_on_base_sharpe(self):
+        # 三档互斥换手区间 + 基础Sharpe≥1.25门槛：只救官方Sharpe已过、只差换手/适应度的近失候选。
+        for v in autopilot.DECAY_VARIANT_TIERS:
+            self.p['setting_variants'] = [dict(v)]
+            self.save_policy()
+            self.assertEqual(autopilot.policy(self.cfg)['setting_variants'][0]['when'], v['when'])
+        for turnover, expected in ((0.1, []), (0.125, ['decay2']), (0.2999, ['decay2']),
+                                   (0.3, ['decay8']), (0.3999, ['decay8']),
+                                   (0.4, ['decay16']), (1.3, ['decay16'])):
+            fired = [v['label'] for v in autopilot.DECAY_VARIANT_TIERS
+                     if autopilot.condition_met(v['when'], {'turnover': turnover, 'sharpe': 1.5})]
+            self.assertEqual(fired, expected, turnover)
+        # 基础Sharpe未过官方门槛时不触发任何档：decay救不了机制本身弱的候选
+        for turnover in (0.2, 0.35, 0.6):
+            fired = [v['label'] for v in autopilot.DECAY_VARIANT_TIERS
+                     if autopilot.condition_met(v['when'], {'turnover': turnover, 'sharpe': 1.24})]
+            self.assertEqual(fired, [], turnover)
+        self.assertEqual(len({v['label'] for v in autopilot.DECAY_VARIANT_TIERS}), 3)
 
 
 for _name in list(vars(AutopilotTests)):

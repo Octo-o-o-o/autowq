@@ -42,6 +42,37 @@ class AppSetupTests(unittest.TestCase):
         self.wheel.write_bytes(b'fixture repaired same version')
         self.install(); self.assertEqual(self.run.call_count, 2)
 
+    def test_busy_engine_can_open_without_replacing_the_wheel(self):
+        config = self.workspace/'config'; config.mkdir()
+        (config/'config.json').write_text(json.dumps({'paths': {'run_dir': 'custom-run'}}))
+        run = self.workspace/'custom-run'; run.mkdir()
+        out = io.StringIO()
+        with (run/'agent-runner.lock').open('a') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with contextlib.redirect_stdout(out):
+                setup.setup(str(self.workspace), allow_busy=True)
+        self.run.assert_not_called()
+        payload = json.loads(out.getvalue())
+        self.assertTrue(payload['engine_pending'])
+        self.assertFalse((self.support/'engine-wheel.sha256').exists())
+
+    def test_stop_after_cycle_is_only_a_flag_while_a_cycle_is_open(self):
+        config = self.workspace/'config'; config.mkdir()
+        (config/'config.json').write_text(json.dumps({'paths': {'db': 'var/wq.db'}}))
+        db = self.workspace/'var'; db.mkdir()
+        import sqlite3
+        conn = sqlite3.connect(db/'wq.db')
+        conn.execute('CREATE TABLE state_flags(key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)')
+        conn.execute("CREATE TABLE research_cycles(cycle_id INTEGER PRIMARY KEY, state TEXT NOT NULL)")
+        conn.execute("INSERT INTO research_cycles(state) VALUES('researching')")
+        conn.commit(); conn.close()
+        self.assertTrue(setup.mark_stop_after_cycle(self.workspace))
+        conn = sqlite3.connect(db/'wq.db')
+        flags = dict(conn.execute('SELECT key, value FROM state_flags'))
+        conn.close()
+        self.assertEqual(flags['autopilot_stop_after_cycle'], '1')
+        self.assertNotEqual(flags.get('paused'), '1')
+
     def test_running_queue_blocks_upgrade_without_changing_marker(self):
         config = self.workspace/'config'; config.mkdir()
         (config/'config.json').write_text(json.dumps({'paths': {'run_dir': 'custom-run'}}))
@@ -63,3 +94,60 @@ class AppSetupTests(unittest.TestCase):
         with patch.object(setup.Path, 'home', return_value=self.root), patch.object(setup, 'loaded', return_value=True), patch.object(setup, 'bootout') as bootout, contextlib.redirect_stdout(io.StringIO()):
             setup.activate(str(self.workspace), str(app))
         bootout.assert_not_called(); self.run.assert_not_called()
+
+    def test_activate_runner_only_skips_menu_agent(self):
+        with patch.object(setup.Path, 'home', return_value=self.root), patch.object(setup, 'loaded', return_value=False), contextlib.redirect_stdout(io.StringIO()) as out:
+            setup.activate(str(self.workspace), None, runner_only=True)
+        agents = self.root/'Library/LaunchAgents'
+        self.assertTrue((agents/f'{setup.RUNNER_LABEL}.plist').exists())
+        self.assertFalse((agents/f'{setup.MENU_LABEL}.plist').exists())
+        self.assertEqual(self.run.call_count, 1)
+        self.assertNotIn('menubar', json.loads(out.getvalue()))
+
+
+class BundledRuntimeTests(unittest.TestCase):
+    """应用自带运行时：不找系统 Python，复制到 Application Support 后再建 venv。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.resources = self.root / 'Resources'
+        self.support = self.root / 'Application Support'
+        self.workspace = self.root / 'workspace'; self.workspace.mkdir()
+        (self.resources).mkdir()
+        (self.resources/'wq_pilot-0.2.4-py3-none-any.whl').write_bytes(b'fixture')
+        for arch in ('arm64', 'x86_64'):
+            runtime = self.resources/'runtime'/arch
+            (runtime/'bin').mkdir(parents=True)
+            (runtime/'bin/python3').write_text(arch)
+            (runtime/'WQ-RUNTIME-ID').write_text(f'cpython-fixture-{arch}\n')
+        for name, value in [('RESOURCES', self.resources), ('APP_SUPPORT', self.support),
+                            ('VENV', self.support/'venv'), ('STAGED_PYTHON', self.support/'python')]:
+            p = patch.object(setup, name, value); p.start(); self.addCleanup(p.stop)
+        p = patch.object(setup, 'usable', side_effect=lambda python: Path(python).exists()); p.start(); self.addCleanup(p.stop)
+        p = patch.object(setup, 'run'); self.run = p.start(); self.addCleanup(p.stop)
+        self.system = patch.object(setup, 'find_python', return_value=None); self.system.start(); self.addCleanup(self.system.stop)
+
+    def test_setup_uses_staged_runtime_without_system_python(self):
+        created = []
+
+        def fake_venv(base):
+            created.append(base)
+            python = self.support/'venv/bin/python'; python.parent.mkdir(parents=True, exist_ok=True); python.touch()
+            return python
+        with patch.object(setup, 'ensure_venv', side_effect=fake_venv), contextlib.redirect_stdout(io.StringIO()):
+            setup.setup(str(self.workspace))
+        staged = self.support/'python'
+        self.assertEqual(created, [str(staged/'bin/python3')])
+        self.assertIn((staged/'bin/python3').read_text(), ('arm64', 'x86_64'))
+        marker = (self.support/'engine-wheel.sha256').read_text()
+        self.assertIn('+cpython-fixture-', marker)
+
+    def test_new_runtime_replaces_staged_copy_and_old_venv(self):
+        runtime = setup.bundled_runtime()
+        setup.stage_runtime(runtime)
+        (self.support/'venv').mkdir(); (self.support/'venv/stale').touch()
+        (runtime/'WQ-RUNTIME-ID').write_text('cpython-next\n')
+        setup.stage_runtime(runtime)
+        self.assertEqual((self.support/'python/WQ-RUNTIME-ID').read_text().strip(), 'cpython-next')
+        self.assertFalse((self.support/'venv').exists())

@@ -1,5 +1,70 @@
 # Changelog
 
+## 0.2.14
+
+- The submission standby list drops Alphas the platform has already accepted, and menu rows for submitted and standby Alphas lead with their cycle number so they line up with cycle history.
+- Official free API presets for users without a subscription: `wq providers free`, `wq providers add-free PRESET --save-key`, `wq onboard --free PRESET`, and the menu's custom-model path accept ten presets (Gemini, OpenRouter `:free`, Z.ai, Mistral, Groq; BigModel, SiliconFlow, Spark Lite, ModelScope, Bailian trial). Limits and caveats were compiled from vendor docs on 2026-09-29.
+- Quota pause and automatic resume: an exhausted quota no longer burns retries. The provider pauses until the vendor's `Retry-After`/reset header, the preset reset time, or an hourly probe; routing falls back to another provider, or the task waits in the queue and continues automatically at the earliest resume time without spending attempts. Authentication failures stop without retry. `wq provider quota` and `wq provider resume NAME` show and lift pauses; menu provider status and autopilot status show the resume time.
+- Research and review must use different services, not just different names: aliases of one API host, one CLI adapter or one launcher command count as the same channel across routing, fallback review, workflow validation, onboarding and menu role selection.
+- CLI adapters inherit only basic and config-dir environment variables; other API keys on the host are no longer passed to CLIs (opt in per provider with `transport.env_passthrough`). `Retry-After` accepts HTTP-date values. Plain HTTP stays allowed for loopback and private networks but no longer for link-local addresses such as cloud metadata; the provider guide now states the private-network rule.
+- The macOS DMG now works on its own: it bundles pinned python-build-standalone 3.12 runtimes (arm64 and x86_64) with the engine preinstalled, so first-run setup no longer needs system Python ≥ 3.11 or Xcode Command Line Tools. Setup copies the runtime into `~/Library/Application Support/WorldQuant/` before building the venv, so replacing the app does not disturb a running scheduler. The app also ships `Contents/Resources/bin/wq` (full CLI) and `bin/wq-setup` (`activate --runner-only` registers the scheduler without the menu bar) for CLI-only and AI-driven use; see `docs/app-bundle.md`. The DMG grows from about 1 MB to about 56 MB.
+- CLI provider hardening across all launcher channels (grok/devin/cursor/zcode): `wq providers refresh-runtime` now idempotently rebuilds `provider_entry.py`, the four launchers and `agents.sb`, closing the drift where the deployed runtime ran a stale entry script and hand-maintained sandbox profiles that source could not regenerate. The sandbox write-list allows `runtime/jobs`, the configured `routing.work_root` and `models.*.workdir`, and CLI state dirs, but never `launchers/`, the runtime itself or anything inside the project; `wq doctor` verifies each work dir with a real in-sandbox write probe. On Linux/WSL2 the command refreshes `docker_provider.py` instead of writing sandbox-exec launchers.
+- Capacity-failure detection now recognizes `[1310] Weekly/Monthly Limit Exhausted` (real ZCode failure): retries-exhausted capacity errors fall through to the next provider and set `provider_not_before` instead of terminating the task.
+- ZCode headless runs gain a `terminal_protocol` check on the `--json` result event (`projection.status == completed`), an updated `--disallowed-tools` list covering persistence/delegation tools (Cron*, OffPeak*, SendMessage, Skill, ReadSessionContext, workflow tools, AskUserQuestion), preflight existence checks for the app bundle and builtin provider config, a 200k prompt guard, and a verified-version pin (`onboarding.verified_versions.zcode`, enforced via `WQ_ZCODE_VERIFIED_VERSION`) that blocks dispatch before a model call when the app updates.
+- CLI inference adapters: qwen's JSON array output is parsed via its final `result` message, non-`success` result subtypes fail the call, and codex token usage is recorded from `turn.completed`.
+- `wq doctor` reports zcode prerequisites (node, CLI bundle, builtin provider config, version match) and `doctor --probe` version probes pass through launcher-based providers instead of crashing; `wq onboard --login-only` can drive `zcode login`.
+
+## 0.2.13
+
+- Reopening the menu while a task or cycle is already running only shows the menu. It does not replace the engine, resume, or stop that work.
+
+## 0.2.12
+
+- Each routing preset shows the research model and the review model on the row itself. The full fallback order stays in the tooltip.
+
+## 0.2.11
+
+- Opening the menu no longer aborts when the saved interface language differs from the system language. Menu rows are detached before the menu is rebuilt.
+
+## 0.2.10
+
+- The menu leads with the WorldQuant account name or email and level. Scheduling install is shown only when those login items are missing. Check for updates and the run log moved into Settings.
+- Custom models are saved as templates. Settings → Models chooses the research model and the review model separately; those two slots must be different providers, and the choice applies from the next cycle.
+
+## 0.2.9
+
+- Add a self-hosted OpenAI-compatible or Anthropic-compatible model from onboarding, `wq providers add`, or the menu’s “Add a custom model…”. The key is stored outside the repository. HTTP is accepted only for loopback and private-network addresses.
+- The settings row that looked like a research switch is the login-item installer. Once installed it shows that scheduling and login auto-start are already in place. The gray submission line now matches the queue: a passing Alpha is queued automatically while the submission queue is on and authorization is valid.
+
+## 0.2.8
+
+- Quitting the menu asks whether to close the menu only, stop after the current research cycle, or stop local tasks immediately. A simulation already sent to the platform is not withdrawn.
+- If a new app cannot replace the bundled engine because a cycle still holds the scheduler lock, the same choices are offered at launch: open the menu and update later, stop after this cycle, or stop now and update. An explicit stop stays stopped until Start is pressed.
+
+## 0.2.7
+
+- The menu-bar icon is dimmed only while automatic research is paused. Opening the app starts research by default; Settings has “Start automatic research on launch” to turn that off.
+- Start and Stop are one button. While a cycle is open, “Run next cycle now” becomes “Cancel current cycle”. A simulation already sent to the platform is not withdrawn. Successful controls update the menu instead of showing a dialog.
+- Menu pause reasons and the update check follow the interface language. Check for Updates sends an app user agent so the site no longer answers 403. Settings shows the current language and can switch among Chinese, English and the system locale.
+
+## 0.2.6
+
+- The menu bar and tray list standby Alphas under submitted Alphas, with the same metrics, settings and expression detail. A standby Alpha is one that passed internal gates and is waiting for a 24-hour submission slot.
+- Check for Updates compares the installed build with https://autowq.octoooo.com/version.json and opens the download page when a newer notarized DMG is published. It does not install anything by itself.
+
+- Research funnel quality fixes grounded in the local ledger (57 cycles after submission `rKO9JAW9`, 0 submittable): generation prompt and `failure_playbook` no longer steer toward `group_rank(...,industry)` products under an already INDUSTRY-neutralized setting (31 product-form cycles since #90: median Sharpe 0.23, heavy sub-universe failures). Rank-sums of different data clusters and slow observables' long-window time-rank positions are the preferred forms; products require a stated conjunction mechanism.
+- Split the single `decay8` setting variant into three mutually exclusive turnover tiers, each gated on base Sharpe ≥ 1.25 (rescue only official-Sharpe-passing near-misses): `decay2` for turnover 12.5%–29.99% (LLNzJGK9/XgbVwvEl class, fitness missed by 0.01), `decay8` for 30%–39.99%, `decay16` for ≥40% (88jVvlpX class, 60% turnover after decay8). `MAX_SETTING_VARIANTS` raised to 3; tiers stay preregistered and fully accounted.
+- Final review rejections now record their failed checks and the candidate's own quoted sentences into `research_events`; the next research prompt receives them as hard constraints (repeat mapping errors should return `blocked` instead of reworded retries).
+- Feedback adds a coarse `最近测试年收益风险比为负` label (no precise values) and revokes complementarity retention for candidates whose latest test segment is negative (9qjVXgN1/KPNgk2xk passed official checks but lost money in 2023).
+- Combination parents now require Sharpe ≥ 1.2 (was 0.9), submitted-correlation < 0.5 (existing) and a non-negative test segment; near-miss healthy candidates are the preferred parents over fresh single-role probes. Combination plans that never produced a simulation no longer count toward parent exhaustion.
+- The research prompt lists role sets of already accepted submissions, without scores or expressions, so new proposals do not rediscover those neighborhoods by changing a window.
+- The menu bar and tray show that passing an Alpha does not auto-submit, and can arm or disarm `brain_submission.enabled`. Arming the queue still requires a per-candidate review before any POST.
+- “Run next cycle” no longer fails while the scheduler is inside a model call. A click during an open cycle is kept and starts the following cycle as soon as the current one ends, skipping the usual wait. The menu shows the result of each action.
+- The menu bar and tray can set a model spend cap in dollars (`limits.model_spend_cap_usd`). New model calls stop when known spend since the cap was set reaches it. Calls without a price are not counted as `$0`.
+- An Alpha whose official checks all PASS is no longer blocked from submission by a weak or negative test segment. The test-segment result stays on the report, and a negative test year still cannot be a combination parent.
+- Cycle history has a standby-submission state: an Alpha that passed internal gates but was not posted because the 24-hour submission cap is full. The scheduler submits it automatically once a slot opens, after a fresh official check. A previous official FAIL is not retried.
+- Routing preset temporary overrides now cover a configurable number of new research cycles (1–100) instead of exactly one: `wq preset use NAME --once --cycles N`, a stepper in the macOS menu dialog, and 1/3/5/10-cycle entries in the Windows/Linux tray submenu. The remaining count is shown in panel headers and can be cancelled at any time (`wq preset cancel-once`); each new cycle claims one round and the permanent preset resumes automatically when the quota is used up.
+
 ## 0.2.5
 
 - Add Chinese, English and system-language preferences shared by the CLI, macOS menu bar and Windows tray. Preserve raw ledger records and translate known messages only at display time.

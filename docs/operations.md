@@ -145,7 +145,7 @@ UNKNOWN 对账先查官方历史，并保留核实依据。以下命令中的 ID
 - `add-role` 要求每个字段都有与策略 region/universe/delay 一致的证据快照，写入 `bindings` 与 `evidence_files` 哈希并刷新 `verified_at`；`description` 是模型看到的全部说明，必须写明它不代表什么，且不要写平台字段名。分组字段用 `--group-field`，名字必须是 market/sector/industry/subindustry 之一。
 - 策略 `setting_variants`（最多 2 个，只允许 decay/neutralization/truncation）在每轮准入时与基础请求一起预登记进 `allowed_request_hashes`。不带 `when` 的变体与基础同时派发；带 `when`（如 `{"min_turnover":0.2}`，键为 min/max_turnover|sharpe|fitness）的变体在基础结果入账后按条件派发。条件、翻转阈值在准入时冻结进当轮 `protocol.json`，之后改配置不影响已开轮次。基础结果 Sharpe 低于 `autopilot.sign_flip_rescue_sharpe`（默认 -0.8，设 null 关闭）时派发一次预登记的符号翻转复核。基础与全部变体统一判定终态：任一在途、UNKNOWN 或带远端回执的阻断都会让整轮等待或冻结。`autopilot.max_simulations_per_week` 现在按已登记请求数（基础+变体+翻转）计，余额不足时变体记为跳过。每轮最多 `2+变体数` 次平台请求，请相应设置 `limits.sims_per_week` 与 `brain_api.max_posts_per_24h`。
 - 模型上下文新增粗档位（收益风险比/收益效率/换手各 5 档）和角色/数据簇使用统计；精确数值、字段名与序列仍不外发。
-- `research_feedback.segment_rules` 可覆盖本地分段门槛（`min_sharpe`、`min_fitness`、`min_years`、`max_negative_years`，须为非负有限数，年份为整数）；改动后执行 `./wq autopilot collect-feedback --local-only` 用已有资料本地重算（不入队、不联网；不带该参数会为缺资料的 Alpha 入队只读收集）。报告里 `platform_blockers` 是平台合格状态，`validation_gaps` 是本地稳健性状态，两者分开记账；重算结果带 `recomputed_at`，属于事后裁决。放宽是研究裁决，不改变平台检查与逐候选提交验收。
+- `research_feedback.segment_rules` 可覆盖本地分段门槛（`min_sharpe`、`min_fitness`、`min_years`、`max_negative_years`，须为非负有限数，年份为整数）；改动后执行 `./wq autopilot collect-feedback --local-only` 用已有资料本地重算（不入队、不联网；不带该参数会为缺资料的 Alpha 入队只读收集）。报告里 `platform_blockers` 是平台合格状态，`validation_gaps` 是本地稳健性状态，两者分开记账；重算结果带 `recomputed_at`，属于事后裁决。官方检查已全部 PASS 时，测试段低于本地门槛只记说明，不写入提交缺口；测试段为负的信号仍不能作组合父信号。训练段和年度缺口仍阻断提交。放宽是研究裁决，不改变平台检查与逐候选提交验收。
 - `wq policy add-role` 会解析表达式：只允许声明字段与已知算子、不允许负数参数、证据快照类型须为 MATRIX（分组为 GROUP）且含当前设置的覆盖记录；完整策略校验通过后才落盘。角色名、说明、数据簇与变体标签不得含任何已绑定字段 ID，否则策略拒绝加载。`wq brain field-evidence` 重生成已被引用的快照时会同步刷新策略里的摘要。
 - 修改策略或角色会改变策略 hash：活动轮次结束，新轮次才使用新范围。复盘与缺口清单见 [2026-09-23 流程复盘](plan/2026-09-23-gap-review.md)。
 
@@ -157,9 +157,9 @@ UNKNOWN 对账先查官方历史，并保留核实依据。以下命令中的 ID
 - **提交频率可配置**：`brain_submission.max_posts_per_24h`（默认 1）控制滚动 24 小时 POST 次数；平台自身的提交限额未核验，放大前自行确认。
 - **单角色探测汇总进提示词**：每个角色单独回测的最佳档位与最近诊断进入研究提示词，要求模型不再单独重测档位 <1.0 的角色，转向有机制解释的跨簇交互/比率。`research_feedback.max_combination_plans` 现为 12。
 - 节奏参数（2026-09-25 复盘后）：`autopilot.max_cycles_per_day` 按 UTC 日计数，设得太低会在北京时间凌晨触顶空转到 08:00；`models.grok.timeout_s` 需覆盖提案的实际耗时（近期 9–13 分钟）；`research_feedback.max_combination_plans` 是终身配额，用完后不再有组合实验，而组合轮与自由探索轮现在自动交替（上一轮是组合则本轮必为探索）。
-- 组合父信号配对只比较影响持仓的设置（忽略 `testPeriod`/`visualization`），并要求双方 Sharpe ≥ 0.9（`feedback.MIN_PARENT_SHARPE`；历史 16 次组合中弱父信号从未通过）。2026-09-25 前 `testPeriod` 差异曾让 9 月 22 日之前的强父信号无法参与配对。
-- decay 变体触发阈值 2026-09-25 起为基础换手 ≥ 12.5%（Fitness 公式中换手的下限；低于它 decay 不能提高 Fitness）。第 80 轮组合 Sharpe 1.42 / 换手 17.6% 仅 Fitness 未过，就是这类情况。
-- 父信号参与 ≥3 次失败组合（组合 Sharpe<1.25，或不高于父信号自身与 0.9 中的较大者，二者满足其一即算失败）后视为"已挖尽"，不再登记组合（`feedback.MAX_FAILED_BLENDS`）。2026-09-25 复盘：同一批 6 个父信号反复配对，第 72–82 轮 6 次组合全部未过；组合枯竭时轮次自动回到自由探索，产出新的强单信号才是根本。
+- 组合父信号配对只比较影响持仓的设置（忽略 `testPeriod`/`visualization`），并要求双方 Sharpe ≥ 1.2、与已提交信号的本地相关 ≤ 0.5、测试段 Sharpe 不为负。审查拒绝或未回测的组合不计入父信号的失败次数。
+- decay 变体按基础结果分三档，且都要求基础 Sharpe ≥ 1.25：换手 12.5%–30% 用 decay 2，30%–40% 用 decay 8，≥40% 用 decay 16。低于 12.5% 不再提高 Fitness，不触发。
+- 父信号参与 ≥3 次**已回测且未超过门槛**的组合（组合 Sharpe<1.25，或不高于父信号自身与 1.2 中的较大者）后视为"已挖尽"（`feedback.MAX_FAILED_BLENDS`）。没有 Alpha 结果的组合轮不算。
 - `focus_roles`（策略）：聚焦角色队列。有未做过单角色基线的聚焦角色时，本轮不登记组合，提示词要求候选只用该角色，提案含其它角色即按输入错误关闭本轮、不回测。用于新角色批次的前 N 轮基线。
 - `paused_clusters`（策略）：检查点判定无独立信号的数据簇；自由探索提案含其角色即按输入错误关闭本轮，聚焦基线不受影响。符号翻转复核（`sign_flip`）的结果可作组合父信号。
 
@@ -177,11 +177,15 @@ UNKNOWN 对账先查官方历史，并保留核实依据。以下命令中的 ID
 - **设置 ▸**：
     - **界面语言**：跟随系统（zh* 中文，其余英文）/ 中文 / English 三选一，写入 config.json 的 `ui.language`（等价 `wq config language`），与 CLI 及 Windows/Linux 托盘共用同一份偏好；切换后菜单立即重建。
     - **系统通知**：Alpha 提交成功或任务失败时发送 macOS 系统通知（右上角横幅，需在系统设置中允许本应用通知）。默认开启；关闭期间事件仍记录在账本并被消费，重新开启后不回放积压。菜单栏未运行期间的事件会在下次检查时补报（每次最多 10 条）。
-    - **路由预设**：切换 `profiles.json` 中的整套餐路（等价 `wq preset use`）。下一项任务首次领取时生效，在途任务及其重试保持原预设。
+    - **自动提交**：菜单里是一条不可点的状态，固定为关闭。没有“达标即提交”的开关；官方检查通过后仍须逐个验收。
+    - **提交队列**：写入 `brain_submission.enabled`。打开后才允许 `wq brain submit` 入队，由既有 `run-once` 执行；不改授权期限，也不对其他 Alpha 自动 POST。关闭后不再入队。Windows/Linux 托盘同一项。
+    - **路由预设**：切换 `profiles.json` 中的整套餐路（等价 `wq preset use`）。点击预设后选择“临时切换 N 轮”（步进器调整轮数，用完自动恢复永久预设，可随时取消）或“永久切换”；下一项任务首次领取时生效，在途任务及其重试保持原预设。
     - **渠道**：临时停用/恢复单个渠道（等价 `wq provider enable/disable`），勾选表示参与路由；不打断在途调用，预算闸门保留。
+    - **立刻运行下一轮**：跳过轮间等待。当前若已有一轮在跑，请求会记到该轮结束，结束后立即开始下一轮；不要求调度器先空闲。授权、预算、平台冷却和在途任务仍然有效。
+    - **模型花费上限**：写入 `limits.model_spend_cap_usd`。从设置当下起累计已知美元金额，达到后停止新的模型调用。金额未知的调用不记成 `$0`，也不计入这个上限。选「不限」则取消。
     - **运行间隔**：调整 `config.json` 的 `autopilot.interval_s`（60 秒–24 小时），下一次调度起采用；写入为原子替换。
     - **每日/累计轮数上限**：调整 `autopilot.max_cycles_per_day` 与 `max_cycles_total`（累计上限可选“不限”）。达到上限的行为与 CLI 相同：停止启动新轮次，在途任务照常收尾。
-- **轮次历史 ▸**：每轮标注预登记的核心指令（单角色基线／组合实验／自由探索）；进行中、失败、成功提交的轮次带状态标注，成功提交高亮显示；正常完结的轮次不写状态。悬停可见完整明细（模型、成本、结果）。
+- **轮次历史 ▸**：每轮标注预登记的核心指令（单角色基线／组合实验／自由探索）；进行中、失败、成功提交的轮次带状态标注，成功提交高亮显示；正常完结的轮次不写状态。内部已经通过、但因 24 小时提交上限还没发出的轮次标为「备选提交」；限额窗口腾出空位后由调度自动入队，提交前仍会重新读取官方检查。悬停可见完整明细（模型、成本、结果）。
 - **已提交 Alpha ▸**：平台已接收的提交列表，接收条目高亮；明细含模拟指标、设置与表达式。
 
 开机并登录后自动显示图标和加载调度；休眠、注销期间不运行。手动暂停/退出状态跨重启保留，需要点“开始”恢复。退出后可从 `~/Applications/WorldQuant.app` 再次打开；单实例文件锁防止多个图标。原命令 `wq pause` 仍会终止本地模型，温和暂停用 `wq pause --graceful`。
@@ -190,10 +194,11 @@ UNKNOWN 对账先查官方历史，并保留核实依据。以下命令中的 ID
 
 同一套菜单功能在原生 Windows 上由 `scripts/desktop_tray.py`（pystray 托盘）提供，安装与调度见 [跨平台部署](linux-windows.md) 的原生 Windows 章节。
 
-### 单模型独立轮次与"仅一轮"预设（2026-09-26）
+### 单模型独立轮次与临时轮数预设（2026-09-26，2026-09-27 扩展为 N 轮）
 
 - 新预设 `fable-only` / `opus-only` / `astra-only`（`solo: true`）：研究、工程、审查都由同一渠道（Claude Fable 5.1 / Claude Opus 5.5 / Codex gpt-6-astra，effort 均为 medium，写在 `providers.<name>.transport.effort`）完成。solo 预设下审查是同一模型的另一次独立 CLI 会话，独立性低于异渠道审查；其它门禁（预登记、分段、自相关预筛、逐候选提交验收）不变。
-- `wq preset use NAME --once`：只让下一个新建的研究轮次使用该预设（登记在 `preset_once`，轮次创建时绑定为 `cycle_preset_<id>`），该轮结束后自动回到永久预设；不带 `--once` 为永久切换并清除未领取的一轮登记。菜单栏应用点击预设时弹出"仅切换一轮 / 永久切换 / 取消"，菜单头显示永久预设、本轮临时预设与下一轮临时预设。
+- `wq preset use NAME --once [--cycles N]`：让接下来 N 个（默认 1）新建研究轮次使用该预设。登记在 `preset_once` 与 `preset_once_cycles`（1–100），轮次创建时绑定为 `cycle_preset_<id>` 并递减剩余轮数，额度用尽后自动回到永久预设；不带 `--once` 为永久切换并清除未领取的临时登记。`wq preset cancel-once` 随时取消待生效登记，已绑定到进行中轮次的预设不受影响。
+- 菜单栏应用点击预设时弹出“临时切换（步进器调整 1–100 轮，按钮标题实时显示所选轮数）/ 永久切换 / 取消”；Windows/Linux 托盘的预设子菜单提供“永久切换”与“临时 1/3/5/10 轮”（任意轮数用 CLI `--cycles`）。菜单头显示永久预设、本轮临时预设与临时待用（预设名 ×剩余轮数），有待用登记时附“取消临时切换”入口。
 - Claude/Codex CLI 渠道运行在生成的 macOS 沙箱（`<runtime>/agents.sb`）内，允许写各自的登录/会话目录；登录态过期时需本人在终端重新登录（`claude login` / `codex login`）。
 ## 探索审查拒绝与待复核
 

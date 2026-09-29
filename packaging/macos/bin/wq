@@ -1,0 +1,16 @@
+#!/bin/sh
+# wq — WorldQuant.app 内置的命令行入口：用 app 自带的 Python 运行 app 自带的引擎，
+# 不需要系统 Python、pip 或源码。可以直接调用，也可以软链到 PATH（软链会被正确解析）。
+set -eu
+SELF="$0"
+while [ -L "$SELF" ]; do
+    LINK="$(readlink "$SELF")"
+    case "$LINK" in /*) SELF="$LINK" ;; *) SELF="$(dirname "$SELF")/$LINK" ;; esac
+done
+RES="$(cd "$(dirname "$SELF")/.." && pwd -P)"
+if [ "$(uname -m)" = arm64 ] || [ "$(sysctl -n hw.optional.arm64 2>/dev/null || echo 0)" = 1 ]; then
+    ARCH=arm64
+else
+    ARCH=x86_64
+fi
+PYTHONDONTWRITEBYTECODE=1 exec "$RES/runtime/$ARCH/bin/python3" -m wq "$@"

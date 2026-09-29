@@ -370,6 +370,64 @@ class PresetOnceAndSoloTests(VariantTests):
         self.assertEqual(store.get_flag(self.c, 'preset_once'), '')
         with self.assertRaises(ValueError): routing.choose_preset(self.c, self.cfg, 'nope', once=True)
 
+    def test_once_cycles_span_multiple_cycles_then_revert(self):
+        from wq import routing
+        routing.choose_preset(self.c, self.cfg, 'solo-a', once=True, cycles=3)
+        self.assertEqual(store.get_flag(self.c, 'preset_once_cycles'), '3')
+        self.assertEqual(autopilot.status(self.c, self.cfg)['preset_once_cycles'], 3)
+        for cid in (1, 2, 3):
+            self.tick()
+            self.assertEqual(self.cycle()['cycle_id'], cid)
+            self.assertEqual(store.get_flag(self.c, f'cycle_preset_{cid}'), 'solo-a')
+            self.assertEqual(routing.active_preset(self.c, self.cfg), 'solo-a')
+            left = 3 - cid
+            if left:
+                self.assertEqual(store.get_flag(self.c, 'preset_once'), 'solo-a')
+                self.assertEqual(store.get_flag(self.c, 'preset_once_cycles'), str(left))
+            else:   # 最后一个名额被领取后登记清空
+                self.assertEqual(store.get_flag(self.c, 'preset_once'), '')
+                self.assertEqual(store.get_flag(self.c, 'preset_once_cycles'), '')
+            detail = self.c.execute('SELECT detail FROM research_events WHERE kind="preset_once" AND cycle_id=?',
+                                    (cid,)).fetchone()[0]
+            self.assertEqual(detail, 'solo-a' if not left else f'solo-a（临时，剩余 {left} 轮）')
+            for _ in range(60):
+                if self.cycle()['state'] == 'closed': break
+                self.tick()
+            self.assertEqual(self.cycle()['state'], 'closed')
+            self.assertEqual(routing.active_preset(self.c, self.cfg), 'steady')   # 无活动轮次时回到永久预设
+            store.set_flag(self.c, 'autopilot_next_at', '2000-01-01T00:00:00Z')
+        self.tick()   # 第 4 轮：临时额度已用尽，不再领取
+        self.assertEqual(self.cycle()['cycle_id'], 4)
+        self.assertIsNone(store.get_flag(self.c, 'cycle_preset_4'))
+        self.assertEqual(routing.active_preset(self.c, self.cfg), 'steady')
+        self.assertIsNone(autopilot.status(self.c, self.cfg)['preset_once_cycles'])
+
+    def test_once_cycles_bounds_and_cancel(self):
+        from wq import routing
+        for bad in (0, 101, '3', True):
+            with self.assertRaises(ValueError): routing.choose_preset(self.c, self.cfg, 'solo-a', once=True, cycles=bad)
+        routing.choose_preset(self.c, self.cfg, 'solo-a', once=True, cycles=5)
+        routing.cancel_once(self.c)
+        self.assertEqual(store.get_flag(self.c, 'preset_once') or None, None)
+        self.assertEqual(store.get_flag(self.c, 'preset_once_cycles') or None, None)
+        routing.choose_preset(self.c, self.cfg, 'solo-a', once=True, cycles=5)
+        routing.choose_preset(self.c, self.cfg, 'steady')   # 永久切换同时清除临时登记
+        self.assertEqual(store.get_flag(self.c, 'preset_once') or None, None)
+        self.assertEqual(store.get_flag(self.c, 'preset_once_cycles') or None, None)
+
+    def test_cancel_once_after_partial_claim(self):
+        from wq import routing
+        routing.choose_preset(self.c, self.cfg, 'solo-a', once=True, cycles=3)
+        self.tick()   # 第 1 轮领取，剩 2 轮
+        self.assertEqual(store.get_flag(self.c, 'preset_once_cycles'), '2')
+        routing.cancel_once(self.c)
+        for _ in range(60): self.tick()
+        store.set_flag(self.c, 'autopilot_next_at', '2000-01-01T00:00:00Z')
+        self.tick()   # 第 2 轮：取消后回到永久预设
+        self.assertEqual(self.cycle()['cycle_id'], 2)
+        self.assertIsNone(store.get_flag(self.c, 'cycle_preset_2'))
+        self.assertEqual(routing.active_preset(self.c, self.cfg), 'steady')
+
 
 for _name in list(vars(VariantTests)):
     if _name.startswith('test_'):

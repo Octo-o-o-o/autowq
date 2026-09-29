@@ -32,8 +32,13 @@ def validate(doc, providers=None):
             raise ValueError('Invalid route: ' + role)
         if providers is not None and any(n not in providers for n in chain):
             raise ValueError('Route contains unconfigured provider: ' + role)
-    if not any(a != b for a in routes['research'] for b in routes['review']):
-        raise ValueError('Research and review require distinct providers')
+    if providers is not None:
+        from .routing import same_channel
+        distinct = any(not same_channel({'providers': providers}, a, b) for a in routes['research'] for b in routes['review'])
+    else:
+        distinct = any(a != b for a in routes['research'] for b in routes['review'])
+    if not distinct:
+        raise ValueError('Research and review require distinct providers (aliases of one service count as one)')
     stages = doc['stages']
     if not isinstance(stages, list) or [s.get('id') for s in stages if isinstance(s, dict)] != list(STAGES):
         raise ValueError('Required stage order: research -> review -> simulate -> feedback -> pre_submit')

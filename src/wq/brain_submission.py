@@ -16,8 +16,14 @@ DDL = '''CREATE TABLE IF NOT EXISTS brain_submissions (
  started_at TEXT NOT NULL, updated_at TEXT NOT NULL)'''
 
 
+STANDBY_DDL = '''CREATE TABLE IF NOT EXISTS submission_standby (
+ alpha_id TEXT PRIMARY KEY, cycle_id INTEGER, state TEXT NOT NULL,
+ created_at TEXT NOT NULL, updated_at TEXT NOT NULL)'''
+
+
 def setup(conn):
     conn.execute(DDL)
+    conn.execute(STANDBY_DDL)
 
 
 def source(conn, alpha_id):
@@ -80,6 +86,183 @@ def validate_review(review, alpha):
         raise ValueError('提交验收过期或来自未来')
 
 
+def _same_instant(stamp, stamps, seconds=2):
+    return any(abs((stamp - item).total_seconds()) <= seconds for item in stamps)
+
+
+def submission_quota(conn, cfg):
+    """滚动 24 小时里已经占用的提交次数，以及距下一个空位的秒数。checking 尚未 POST，不计入。"""
+    setup(conn)
+    limit = int(cfg.get('brain_submission', 'max_posts_per_24h', default=1))
+    starts = []
+    for (raw,) in conn.execute("SELECT started_at FROM brain_submissions WHERE state!='checking' AND started_at IS NOT NULL"):
+        try:
+            starts.append(util.parse_iso(raw))
+        except (TypeError, ValueError):
+            continue
+    recent = [t for t in starts if util.now() - t < dt.timedelta(hours=24)]
+    last = store.get_flag(conn, 'brain_last_submit_at')
+    if last:
+        try:
+            stamp = util.parse_iso(last)
+        except (TypeError, ValueError):
+            stamp = None
+        # POST 前写入的标记和提交行的 started_at 常相差 1 毫秒，不能算成两次。
+        if stamp and not _same_instant(stamp, recent) and util.now() - stamp < dt.timedelta(hours=24):
+            recent.append(stamp)
+    wait = 0
+    if limit > 0 and len(recent) >= limit:
+        oldest = sorted(recent)[-limit]
+        wait = max(0, (oldest + dt.timedelta(hours=24) - util.now()).total_seconds())
+    return {'limit': limit, 'used': len(recent), 'wait_s': wait, 'open': limit > 0 and len(recent) < limit}
+
+
+def _submission_disposition(conn, alpha_id):
+    """已接收、在途、或官方检查 FAIL 后停住的，不再自动提交。"""
+    row = conn.execute('SELECT state, task_id FROM brain_submissions WHERE alpha_id=?', (alpha_id,)).fetchone()
+    if not row:
+        return None
+    if row['state'] in ('accepted', 'rejected', 'post_started', 'polling', 'verifying'):
+        return row['state']
+    task = conn.execute('SELECT status, last_error FROM tasks WHERE task_id=?', (row['task_id'],)).fetchone()
+    if task and task['status'] in ('queued', 'claimed', 'running'):
+        return 'queued'
+    if task and task['status'] == 'blocked' and 'FAIL' in (task['last_error'] or ''):
+        return 'blocked'
+    return row['state']
+
+
+def standby_review(alpha, report):
+    diagnosis = '；'.join(report.get('diagnosis') or []) or '官方检查已通过'
+    return {'schema': 'wq.submission-review/v1', 'alpha_id': alpha['id'], 'request_hash': identity(alpha),
+            'decision': 'approved_for_submission', 'reviewer': 'autopilot-standby', 'reviewed_at': util.now_iso(),
+            'originality': {'accepted': True, 'evidence': '内部提交候选：官方检查没有 FAIL 或 PENDING，且没有本地提交缺口。不是已接收 Alpha 的原样重提。'},
+            'robustness': {'accepted': True, 'evidence': '诊断保留为：' + diagnosis + '。测试段偏弱时仍写在诊断里；官方检查已通过，只在 24 小时提交限额允许时自动提交。'},
+            'data_timing': {'accepted': True, 'evidence': '沿用该 Alpha 已经回测的表达式和 Delay 设置，不改字段，也不引入未来数据。'}}
+
+
+def _authorized(cfg):
+    if cfg.get('brain_submission', 'enabled') is not True:
+        return False
+    deadline = cfg.get('brain_submission', 'authorized_until')
+    return bool(deadline) and util.now() < util.parse_iso(deadline)
+
+
+def close_standby(conn, alpha_id, state='submitted'):
+    """平台已接收后离开备选清单。入队后、接收前仍保持 queued。"""
+    setup(conn)
+    conn.execute("""UPDATE submission_standby SET state=?, updated_at=?
+                    WHERE alpha_id=? AND state IN ('waiting','queued')""",
+                 (state, util.now_iso(), alpha_id))
+
+
+def retire_submitted_standby(conn):
+    """已经出现在已提交账本里的 Alpha，不再留在备选。"""
+    setup(conn)
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='submissions'").fetchone():
+        return []
+    rows = conn.execute("""SELECT s.alpha_id FROM submission_standby s
+        WHERE s.state IN ('waiting','queued') AND EXISTS (
+            SELECT 1 FROM submissions sub WHERE sub.remote_id=s.alpha_id
+            AND sub.status IN ('accepted','final_valid','final_invalid'))""").fetchall()
+    for row in rows:
+        close_standby(conn, row['alpha_id'])
+    return [row['alpha_id'] for row in rows]
+
+
+def mark_standby_outcome(conn, cycle_id):
+    row = conn.execute('SELECT outcome FROM research_cycles WHERE cycle_id=?', (cycle_id,)).fetchone()
+    if not row:
+        return
+    outcome = row['outcome'] or ''
+    if '备选提交' in outcome:
+        return
+    conn.execute('UPDATE research_cycles SET outcome=?, updated_at=? WHERE cycle_id=?',
+                 (outcome + ('；' if outcome else '') + '备选提交', util.now_iso(), cycle_id))
+
+
+def offer_submission(conn, cfg, cycle_id, alpha_id, report):
+    """内部通过则入队；24 小时上限已满则记为备选提交，不 POST。"""
+    setup(conn)
+    if not report.get('submission_candidate') or not _authorized(cfg):
+        return None
+    if _submission_disposition(conn, alpha_id):
+        return None
+    existing = conn.execute('SELECT state FROM submission_standby WHERE alpha_id=?', (alpha_id,)).fetchone()
+    if existing and existing['state'] == 'waiting':
+        mark_standby_outcome(conn, cycle_id)
+        return 'standby'
+    if existing:
+        return None
+    quota = submission_quota(conn, cfg)
+    now = util.now_iso()
+    if not quota['open']:
+        conn.execute('INSERT INTO submission_standby VALUES(?,?,?,?,?)', (alpha_id, cycle_id, 'waiting', now, now))
+        mark_standby_outcome(conn, cycle_id)
+        return 'standby'
+    sim, alpha = source(conn, alpha_id)
+    from .feedback import require_submission_evidence
+    require_submission_evidence(conn, alpha)
+    enqueue(conn, cfg, alpha_id, standby_review(alpha, report))
+    conn.execute('INSERT INTO submission_standby VALUES(?,?,?,?,?)', (alpha_id, cycle_id, 'queued', now, now))
+    return 'queued'
+
+
+def sync_standby(conn, cfg):
+    """把已经内部通过、尚未提交的结果补记为备选或立即入队。不重试官方 FAIL。"""
+    setup(conn)
+    retire_submitted_standby(conn)
+    if not _authorized(cfg):
+        return []
+    from .feedback import setup as feedback_setup
+    feedback_setup(conn)
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='research_feedback'").fetchone():
+        return []
+    actions = []
+    rows = conn.execute('SELECT alpha_id, report_json FROM research_feedback').fetchall()
+    for row in rows:
+        report = json.loads(row['report_json'])
+        if not report.get('submission_candidate'):
+            continue
+        cycle = conn.execute('''SELECT c.cycle_id FROM brain_runs b JOIN research_cycles c ON c.simulation_task=b.task_id
+            WHERE b.alpha_id=? UNION SELECT c.cycle_id FROM brain_runs b JOIN cycle_simulations v ON v.task_id=b.task_id
+            JOIN research_cycles c ON c.cycle_id=v.cycle_id WHERE b.alpha_id=?''', (row['alpha_id'], row['alpha_id'])).fetchone()
+        if not cycle:
+            continue
+        try:
+            action = offer_submission(conn, cfg, cycle['cycle_id'], row['alpha_id'], report)
+        except (ValueError, OSError, KeyError, TypeError):
+            continue
+        if action:
+            actions.append((row['alpha_id'], action))
+    return actions
+
+
+def release_standby(conn, cfg):
+    """限额窗口腾出空位后，把最早的备选提交入队。真正 POST 仍由提交任务重新检查官方结果。"""
+    setup(conn)
+    if not _authorized(cfg) or not submission_quota(conn, cfg)['open']:
+        return None
+    if conn.execute("SELECT 1 FROM tasks WHERE kind='brain_submission' AND status IN ('queued','claimed','running')").fetchone():
+        return None
+    row = conn.execute("SELECT alpha_id, cycle_id FROM submission_standby WHERE state='waiting' ORDER BY created_at LIMIT 1").fetchone()
+    if not row:
+        return None
+    from .feedback import setup as feedback_setup
+    feedback_setup(conn)
+    stored = conn.execute('SELECT report_json FROM research_feedback WHERE alpha_id=?', (row['alpha_id'],)).fetchone()
+    report = json.loads(stored['report_json']) if stored else {}
+    if not report.get('submission_candidate'):
+        conn.execute("UPDATE submission_standby SET state='dropped', updated_at=? WHERE alpha_id=?", (util.now_iso(), row['alpha_id']))
+        return None
+    sim, alpha = source(conn, row['alpha_id'])
+    from .feedback import require_submission_evidence
+    require_submission_evidence(conn, alpha)
+    enqueue(conn, cfg, row['alpha_id'], standby_review(alpha, report))
+    conn.execute("UPDATE submission_standby SET state='queued', updated_at=? WHERE alpha_id=?", (util.now_iso(), row['alpha_id']))
+    return row['alpha_id']
+
+
 def enqueue(conn, cfg, alpha_id, review):
     setup(conn)
     sim, alpha = source(conn, alpha_id)
@@ -137,6 +320,8 @@ def _save_acceptance(conn, row, alpha, path):
                  (json.dumps({'evidence': str(path), 'dateSubmitted': alpha['dateSubmitted'],
                               'platform_status': alpha['status'], 'stage': alpha['stage']}, ensure_ascii=False), util.now_iso(), sid))
     set_state(conn, row['task_id'], 'accepted')
+    close_standby(conn, row['alpha_id'])
+    store.set_flag(conn, 'brain_identity_refresh_at', util.now_iso())
     conn.execute("UPDATE candidates SET status='submitted' WHERE candidate_id=(SELECT candidate_id FROM simulations WHERE sim_id=?)", (row['sim_id'],))
     return 'succeeded', {'alpha_id': row['alpha_id'], 'submission_id': sid, 'platform_status': alpha['status']}, None
 
@@ -236,8 +421,10 @@ def step(conn, cfg, task, payload):
         starts = sorted(util.parse_iso(r[0]) for r in conn.execute("SELECT started_at FROM brain_submissions WHERE state!='checking' AND task_id!=?", (tid,)))
         recent = [t for t in starts if util.now()-t < dt.timedelta(hours=24)]
         last = store.get_flag(conn, 'brain_last_submit_at')
-        if last and util.parse_iso(last) not in recent and util.now()-util.parse_iso(last) < dt.timedelta(hours=24):
-            recent.append(util.parse_iso(last))
+        if last:
+            stamp = util.parse_iso(last)
+            if not _same_instant(stamp, recent) and util.now()-stamp < dt.timedelta(hours=24):
+                recent.append(stamp)
         if len(recent) >= limit:
             oldest = sorted(recent)[-limit]
             return later(conn, tid, (oldest+dt.timedelta(hours=24)-util.now()).total_seconds(), f'本地24小时提交上限（{limit}次）')

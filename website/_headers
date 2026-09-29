@@ -23,3 +23,10 @@
 
 /apple-touch-icon.png
   Cache-Control: public, max-age=604800
+
+/version.json
+  Cache-Control: public, max-age=60
+
+/downloads/*
+  Content-Type: application/octet-stream
+  Cache-Control: public, max-age=3600

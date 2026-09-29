@@ -154,6 +154,71 @@ def for_call(call: dict, usage_dirs: list[str] | None = None) -> dict | None:
     return None
 
 
+def call_cost_usd(call: dict):
+    """一次调用的已知美元金额。没有单价时返回 None，调用方不得把它当成 0。"""
+    log = call.get("log_path")
+    if log and Path(log).is_file():
+        try:
+            with open(log, encoding="utf-8", errors="replace") as handle:
+                for line in handle:
+                    if not line.startswith('{"wq_usage":'):
+                        continue
+                    cost = json.loads(line)["wq_usage"].get("cost_usd")
+                    if isinstance(cost, (int, float)) and cost >= 0 and cost == cost:
+                        return float(cost)
+        except (OSError, ValueError, KeyError):
+            pass
+        if call.get("agent") == "grok":
+            parsed = grok_log(log)
+            cost = parsed.get("cost_usd") if parsed else None
+            if isinstance(cost, (int, float)) and cost >= 0 and cost == cost:
+                return float(cost)
+    return None
+
+
+_SPEND_TERMINAL = {"succeeded", "failed", "timeout", "crashed", "aborted", "artifact_invalid"}
+
+
+def known_spend(conn, since: str = "") -> dict:
+    """自 since 起已结束调用的已知美元合计。金额未知的次数单独计数，不加进合计。"""
+    known = 0.0
+    unknown = 0
+    for row in conn.execute(
+            "SELECT agent, status, log_path FROM agent_calls WHERE started_at>=?", (since or "",)):
+        status = row["status"] if isinstance(row, sqlite3.Row) else row[1]
+        if status not in _SPEND_TERMINAL:
+            continue
+        call = dict(row) if isinstance(row, sqlite3.Row) else {"agent": row[0], "status": row[1], "log_path": row[2]}
+        cost = call_cost_usd(call)
+        if cost is None:
+            unknown += 1
+        else:
+            known += cost
+    return {"known_usd": round(known, 6), "unknown_calls": unknown}
+
+
+def spend_cap(cfg):
+    """用户设置的模型花费上限。未配置或 null 表示不限制。"""
+    cap = cfg.get("limits", "model_spend_cap_usd", default=None) if cfg else None
+    if cap is None:
+        return None
+    if isinstance(cap, bool) or not isinstance(cap, (int, float)) or cap < 0 or cap != cap:
+        raise ValueError("limits.model_spend_cap_usd 必须是非负有限数或 null")
+    return float(cap)
+
+
+def spend_block_reason(conn, cfg) -> str | None:
+    """已知花费达到上限时返回阻断原因。未知金额不记成 0，也不单独放行或拦截。"""
+    cap = spend_cap(cfg)
+    if cap is None:
+        return None
+    since = cfg.get("limits", "model_spend_as_of", default="") or ""
+    spend = known_spend(conn, since)
+    if spend["known_usd"] + 1e-9 >= cap:
+        return f"模型已知花费 ${spend['known_usd']:.4f} 已达上限 ${cap:.4f}"
+    return None
+
+
 def zero() -> dict:
     return {"input_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0,
             "output_tokens": 0, "total_tokens": 0, "cost_usd": 0.0,

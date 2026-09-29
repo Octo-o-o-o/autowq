@@ -40,6 +40,30 @@ class FeedbackTests(unittest.TestCase):
         # 年度fitness <1本身不伪造为官方FAIL。
         self.assertFalse(feedback.diagnose(a,y)['platform_blockers'])
 
+    def test_negative_test_year_gets_coarse_label_and_loses_parent_eligibility(self):
+        # 9qjVXgN1/KPNgk2xk型：官方全过、训练段强，但最近测试年为负——只给档位标签不给数值，且不得作组合父信号。
+        a={'id':'test','is':{'sharpe':1.41,'checks':[{'name':n,'result':'PASS'} for n in REQUIRED]},
+           'train':{'sharpe':1.8,'fitness':1.2},'test':{'sharpe':-0.10,'fitness':0.2}}
+        y=recordset(['year','sharpe','fitness','pnl'],[['2021',1.8,1.2,100],['2022',1.9,1.3,120],['2023',-0.1,0.2,-30]])
+        r=feedback.diagnose(a,y)
+        self.assertIn('平台快照通过',r['diagnosis'])
+        self.assertIn('最近测试年收益风险比为负',r['diagnosis'])
+        self.assertIn('测试段未达本地分段门槛，官方检查已通过，不阻断提交',r['diagnosis'])
+        self.assertNotIn('-0.10',json.dumps(r['diagnosis']))
+        self.assertFalse(r['retain_for_complementarity'])
+        self.assertFalse(any('test未达' in g for g in r['validation_gaps']))
+        # 默认最多 0 个负收益年，年度缺口仍阻断。线上配置允许 1 个负收益年，这时官方全过即可提交。
+        self.assertFalse(r['submission_candidate'])
+        live = dict(feedback.SEGMENT_RULES); live['max_negative_years'] = 1
+        submitted = feedback.diagnose(a, y, live)
+        self.assertTrue(submitted['submission_candidate'])
+        self.assertFalse(submitted['retain_for_complementarity'])
+        a['test']={'sharpe':1.54,'fitness':1.1}
+        y['records'][2]=[2023,1.5,1.1,90]
+        r2=feedback.diagnose(a,y)
+        self.assertNotIn('最近测试年收益风险比为负',r2['diagnosis'])
+        self.assertTrue(r2['retain_for_complementarity'])
+
     def test_model_feedback_has_no_platform_values_and_fixed_plan(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg,c=make_env(tmp);autopilot.setup(c)
@@ -116,7 +140,7 @@ class CombinationRankingTests(unittest.TestCase):
                 c.execute("INSERT INTO candidates(candidate_id,family_id,expression,config_json,config_hash,synthetic,created_at) VALUES(?,?,?,?,?,?,?)",('cand'+aid,'fam'+aid,'x','{}','ch'+aid,0,util.now_iso()))
                 c.execute("INSERT INTO simulations(sim_id,candidate_id,remote_id,source,synthetic,status,stats_json,imported_at) VALUES(?,?,?,?,?,?,?,?)",('sim'+aid,'cand'+aid,aid,'api',0,'failed',json.dumps({'sharpe':sharpe}),util.now_iso()))
             roles=list(research_dsl.ROLES)
-            for i,(aid,sharpe) in enumerate([('strongA',1.3),('strongB',1.1),('weakA',0.2),('weakB',0.1)]): add(i+1,aid,sharpe,roles[i])
+            for i,(aid,sharpe) in enumerate([('strongA',1.5),('strongB',1.3),('weakA',0.2),('weakB',0.1)]): add(i+1,aid,sharpe,roles[i])
             pairs=[{'parents':['strongA','strongB'],'value':0.25,'worth_combination_review':True},
                    {'parents':['weakA','weakB'],'value':0.01,'worth_combination_review':True}]
             with patch('wq.feedback.report',return_value={'pairs':pairs}):
@@ -135,7 +159,7 @@ class CombinationRankingTests(unittest.TestCase):
             tsub=store.enqueue_task(c,'brain_submission',{},'ksub')[0]
             c.execute("INSERT INTO brain_submissions(task_id,alpha_id,sim_id,state,started_at,updated_at) VALUES(?,?,?,?,?,?)",(tsub,'strongA','simstrongA','accepted',util.now_iso(),util.now_iso()))
             with patch('wq.feedback.report',return_value={'pairs':pairs}):
-                self.assertIsNone(feedback.next_combination(c,max_plans=4))          # 默认最低父强度 0.9 挡住 weak 对
+                self.assertIsNone(feedback.next_combination(c,max_plans=4))          # 默认最低父强度 1.2 挡住 weak 对
                 plan=feedback.next_combination(c,max_plans=4,min_parent_sharpe=0)
             self.assertEqual(plan['parents'],['weakA','weakB'])
             # 祖先含已提交信号的组合轮 alpha 也不能再作父信号
@@ -145,6 +169,37 @@ class CombinationRankingTests(unittest.TestCase):
             with patch('wq.feedback.report',return_value={'pairs':pairs}):
                 plan=feedback.next_combination(c,max_plans=6,min_parent_sharpe=0)
             self.assertEqual(plan['parents'],['weakA','weakB'])
+            c.close()
+
+
+class NegativeTestYearParentTests(unittest.TestCase):
+    def test_negative_test_year_parent_is_excluded_until_healthy(self):
+        from unittest.mock import patch
+        from wq import store, research_dsl
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg,c=make_env(tmp);autopilot.setup(c);feedback.setup(c);autopilot.brain_jobs.setup(c)
+            bindings={n:{'expression':f'f{i}','fields':[f'f{i}'],'source':'s'} for i,n in enumerate(research_dsl.ROLES)}
+            policy=json.dumps({'settings':{'decay':0},'bindings':bindings}); roles=list(research_dsl.ROLES)
+            def add(cid,aid,sharpe,role,test_sharpe):
+                tid=store.enqueue_task(c,'brain_simulation',{},'k'+aid)[0]
+                c.execute("INSERT INTO research_cycles(cycle_id,state,policy_json,policy_hash,simulation_task,candidate_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+                          (cid,'closed',policy,'h',tid,json.dumps({'ast':{'op':'mean','arg':{'op':'field','name':role},'window':20}}),util.now_iso(),util.now_iso()))
+                c.execute("INSERT INTO brain_runs(task_id,state,alpha_id,started_at,updated_at) VALUES(?,?,?,?,?)",(tid,'complete',aid,util.now_iso(),util.now_iso()))
+                c.execute("INSERT INTO families(family_id,family_key,origin,synthetic,created_at) VALUES(?,?,?,?,?)",('fam'+aid,'fk'+aid,'t',0,util.now_iso()))
+                c.execute("INSERT INTO candidates(candidate_id,family_id,expression,config_json,config_hash,synthetic,created_at) VALUES(?,?,?,?,?,?,?)",('cand'+aid,'fam'+aid,'x','{}','ch'+aid,0,util.now_iso()))
+                c.execute("INSERT INTO simulations(sim_id,candidate_id,remote_id,source,synthetic,status,stats_json,imported_at) VALUES(?,?,?,?,?,?,?,?)",('sim'+aid,'cand'+aid,aid,'api',0,'failed',json.dumps({'sharpe':sharpe}),util.now_iso()))
+                report={'retain_for_complementarity':True,'temporal':[{'segment':'train','sharpe':1.8},{'segment':'test','sharpe':test_sharpe}]}
+                c.execute("INSERT INTO research_feedback VALUES(?,?,?,?)",(aid,'id'+aid,json.dumps(report),util.now_iso()))
+            add(1,'decayed',1.4,roles[0],-0.57)   # 训练段强、最近测试年为负
+            add(2,'healthy',1.5,roles[1],1.32)
+            pairs=[{'parents':['decayed','healthy'],'value':0.1,'worth_combination_review':True}]
+            with patch('wq.feedback.report',return_value={'pairs':pairs}):
+                self.assertIsNone(feedback.next_combination(c,max_plans=5))
+            # 测试段转正后同一对可登记
+            c.execute("UPDATE research_feedback SET report_json=? WHERE alpha_id='decayed'",
+                      (json.dumps({'retain_for_complementarity':True,'temporal':[{'segment':'train','sharpe':1.8},{'segment':'test','sharpe':0.6}]}),))
+            with patch('wq.feedback.report',return_value={'pairs':pairs}):
+                self.assertEqual(feedback.next_combination(c,max_plans=5)['parents'],['decayed','healthy'])
             c.close()
 
 
@@ -165,12 +220,38 @@ class ExhaustedParentTests(unittest.TestCase):
                 c.execute("INSERT INTO candidates(candidate_id,family_id,expression,config_json,config_hash,synthetic,created_at) VALUES(?,?,?,?,?,?,?)",('cand'+aid,'fam'+aid,'x','{}','ch'+aid,0,util.now_iso()))
                 c.execute("INSERT INTO simulations(sim_id,candidate_id,remote_id,source,synthetic,status,stats_json,imported_at) VALUES(?,?,?,?,?,?,?,?)",('sim'+aid,'cand'+aid,aid,'api',0,'failed',json.dumps({'sharpe':sharpe}),util.now_iso()))
                 if plan: c.execute("INSERT INTO combination_plans VALUES(?,?,?,?)",(plan,cid,'{}',util.now_iso()))
-            add(1,'tired',1.2,roles[0]); add(2,'fresh',1.0,roles[1]); add(3,'other',1.0,roles[2])
+            add(1,'tired',1.2,roles[0]); add(2,'fresh',1.3,roles[1]); add(3,'other',1.3,roles[2])
             for k,(cid,aid) in enumerate([(4,'b1'),(5,'b2'),(6,'b3')]): add(cid,aid,0.5,roles[3],plan=f'tired:x{k}')
             pairs=[{'parents':['fresh','tired'],'value':0.01,'worth_combination_review':True},
                    {'parents':['fresh','other'],'value':0.2,'worth_combination_review':True}]
             with patch('wq.feedback.report',return_value={'pairs':pairs}):
                 plan=feedback.next_combination(c,max_plans=10)
             self.assertEqual(plan['parents'],['fresh','other'])
+            c.close()
+
+    def test_unsimulated_blends_do_not_exhaust_parent(self):
+        from unittest.mock import patch
+        from wq import store, research_dsl
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg,c=make_env(tmp);autopilot.setup(c);feedback.setup(c);autopilot.brain_jobs.setup(c)
+            bindings={n:{'expression':f'f{i}','fields':[f'f{i}'],'source':'s'} for i,n in enumerate(research_dsl.ROLES)}
+            policy=json.dumps({'settings':{'decay':0},'bindings':bindings}); roles=list(research_dsl.ROLES)
+            def add(cid,aid,sharpe,role):
+                tid=store.enqueue_task(c,'brain_simulation',{},'k'+aid)[0]
+                c.execute("INSERT INTO research_cycles(cycle_id,state,policy_json,policy_hash,simulation_task,candidate_json,outcome,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                          (cid,'closed',policy,'h',tid,json.dumps({'ast':{'op':'mean','arg':{'op':'field','name':role},'window':20}}),'筛选未通过',util.now_iso(),util.now_iso()))
+                c.execute("INSERT INTO brain_runs(task_id,state,alpha_id,started_at,updated_at) VALUES(?,?,?,?,?)",(tid,'complete',aid,util.now_iso(),util.now_iso()))
+                c.execute("INSERT INTO families(family_id,family_key,origin,synthetic,created_at) VALUES(?,?,?,?,?)",('fam'+aid,'fk'+aid,'t',0,util.now_iso()))
+                c.execute("INSERT INTO candidates(candidate_id,family_id,expression,config_json,config_hash,synthetic,created_at) VALUES(?,?,?,?,?,?,?)",('cand'+aid,'fam'+aid,'x','{}','ch'+aid,0,util.now_iso()))
+                c.execute("INSERT INTO simulations(sim_id,candidate_id,remote_id,source,synthetic,status,stats_json,imported_at) VALUES(?,?,?,?,?,?,?,?)",('sim'+aid,'cand'+aid,aid,'api',0,'failed',json.dumps({'sharpe':sharpe}),util.now_iso()))
+            add(1,'kept',1.5,roles[0]); add(2,'peer',1.4,roles[1])
+            for k in range(3):
+                c.execute("INSERT INTO research_cycles(cycle_id,state,policy_json,policy_hash,outcome,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+                          (10+k,'closed',policy,'h','模型审查拒绝，不回测',util.now_iso(),util.now_iso()))
+                c.execute("INSERT INTO combination_plans VALUES(?,?,?,?)",(f'kept:ghost{k}',10+k,'{}',util.now_iso()))
+            pairs=[{'parents':['kept','peer'],'value':0.1,'worth_combination_review':True}]
+            with patch('wq.feedback.report',return_value={'pairs':pairs}):
+                plan=feedback.next_combination(c,max_plans=10)
+            self.assertEqual(plan['parents'],['kept','peer'])
             c.close()
 

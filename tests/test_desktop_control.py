@@ -39,10 +39,11 @@ class DesktopTests(unittest.TestCase):
             self.assertEqual(call.call_count, 1)
             command.assert_not_called()
 
-    def test_quit_pauses_and_does_not_unload_inflight_runner(self):
-        with patch.object(desktop, 'wq', return_value={}) as call, patch.object(desktop, 'command') as command:
-            desktop.control('quit')
-            self.assertEqual(call.call_args.args[:2], ('pause','--graceful'))
+    def test_quit_app_leaves_the_runner_and_the_queue_alone(self):
+        with patch.object(desktop, 'wq') as call, patch.object(desktop, 'command') as command:
+            result = desktop.control('quit-app')
+            self.assertTrue('研究继续' in result['message'] or 'research continues' in result['message'])
+            call.assert_not_called()
             command.assert_not_called()
 
     def test_start_reuses_loaded_runner_without_kickstart(self):
@@ -50,6 +51,91 @@ class DesktopTests(unittest.TestCase):
             desktop.control('start')
             self.assertEqual([x.args for x in call.call_args_list], [('status',),('autopilot','start','--json'),('resume',)])
             command.assert_not_called()
+
+
+class UpdateCheckTests(unittest.TestCase):
+    def test_identity_line_uses_name_then_level(self):
+        view = desktop._identity_view({'bound': True, 'nickname': 'Alex', 'email': 'a@b.c', 'level': 'GOLD', 'geniusLevel': 2}, 'zh')
+        self.assertEqual(view['title'], 'Alex · GOLD · Genius 2')
+        self.assertIn('a@b.c', view['detail'])
+        scored = desktop._identity_view({'bound': True, 'nickname': 'Alex', 'email': 'a@b.c', 'level': 'SILVER', 'score': 9674}, 'zh')
+        self.assertEqual(scored['title'], 'Alex · SILVER · 分数 9674')
+        self.assertIn('分数 9674', scored['detail'])
+        english = desktop._identity_view({'bound': True, 'nickname': 'Alex', 'level': 'SILVER', 'score': '9674.0'}, 'en')
+        self.assertEqual(english['title'], 'Alex · SILVER · Score 9674.0')
+        missing = desktop._identity_view({'bound': False}, 'en')
+        self.assertEqual(missing['title'], 'Not signed in')
+
+    def test_leaderboard_score_prefers_challenge_and_drops_fraction(self):
+        data = {'results': [
+            {'id': 'other', 'leaderboard': {'score': 10}},
+            {'id': 'challenge', 'scoring': 'CHALLENGE', 'leaderboard': {'score': 9674.0}},
+        ]}
+        self.assertEqual(desktop._leaderboard_score(data), '9674')
+        self.assertEqual(desktop._leaderboard_score({'results': [{'id': 'cup', 'leaderboard': {'score': 3.5}}]}), '3.5')
+        self.assertIsNone(desktop._leaderboard_score({'results': []}))
+
+    def test_identity_refreshes_after_local_eight_or_submission_not_on_a_warm_cache(self):
+        import datetime as dt
+        beijing = dt.timezone(dt.timedelta(hours=8))
+        morning = dt.datetime(2026, 9, 29, 7, 30, tzinfo=beijing)
+        later = dt.datetime(2026, 9, 29, 10, 0, tzinfo=beijing)
+        after_yesterday = {'queried_at': '2026-09-28T23:30:00+00:00'}  # 北京 07:30，已过昨天 8 点
+        before_today = {'queried_at': '2026-09-28T23:00:00+00:00'}    # 北京 07:00
+        self.assertFalse(desktop.identity_due(after_yesterday, morning))
+        self.assertTrue(desktop.identity_due(before_today, later))
+        self.assertFalse(desktop.identity_due({'queried_at': '2026-09-29T01:30:00+00:00'}, later))
+        self.assertTrue(desktop.identity_due({'queried_at': '2026-09-29T01:30:00+00:00'}, later, '2026-09-29T02:00:00+00:00'))
+        self.assertTrue(desktop.identity_due(None, later))
+
+    def test_version_tuple_orders_releases(self):
+        self.assertLess(desktop._version_tuple('0.2.5'), desktop._version_tuple('0.2.6'))
+        self.assertFalse(desktop._version_tuple('v0.2.6') < desktop._version_tuple('0.2.6'))
+
+    def test_update_check_does_not_use_the_python_urllib_agent(self):
+        from wq import __version__
+        body = json.dumps({'version': __version__}).encode()
+
+        class Response:
+            def read(self):
+                return body
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+
+        seen = {}
+
+        def opener(req, timeout=15):
+            seen['ua'] = req.get_header('User-agent')
+            return Response()
+
+        with patch('urllib.request.urlopen', opener):
+            result = desktop.check_update('en')
+        self.assertTrue(seen['ua'].startswith('autowq/'))
+        self.assertNotIn('Python-urllib', seen['ua'])
+        self.assertFalse(result['update'])
+        self.assertIn('latest', result['message'].lower())
+
+    def test_warm_identity_cache_does_not_call_brain(self):
+        from wq import util
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg, _conn = make_env(tmp)
+            private = Path(cfg.private_dir) / 'brain-account'
+            private.mkdir(parents=True)
+            (Path(cfg.private_dir) / 'brain-session.cookies').write_text('session')
+            cache = private / 'menu-identity.json'
+            cache.write_text(json.dumps({'bound': True, 'queried_at': util.now_iso(),
+                                         'nickname': 'Alex', 'level': 'SILVER', 'score': '9674'}))
+            with patch.object(desktop, '_fetch_identity', side_effect=AssertionError('should stay cached')):
+                view, refreshed = desktop.menu_identity(cfg, 'zh')
+            self.assertFalse(refreshed)
+            self.assertEqual(view['title'], 'Alex · SILVER · 分数 9674')
+            with patch.object(desktop, '_fetch_identity', return_value={
+                    'bound': True, 'queried_at': util.now_iso(), 'nickname': 'Alex', 'level': 'SILVER', 'score': '9700'}):
+                again, refreshed = desktop.menu_identity(cfg, 'zh', refresh=True)
+            self.assertTrue(refreshed)
+            self.assertEqual(again['title'], 'Alex · SILVER · 分数 9700')
 
 
 class SettingsControlTests(unittest.TestCase):
@@ -74,6 +160,10 @@ class SettingsControlTests(unittest.TestCase):
         self.assertEqual(result['active_preset'], 'p')
         self.assertEqual([p['name'] for p in result['presets']], ['p', 'q'])
         self.assertIn('研究：a → b', result['presets'][0]['routes'])
+        self.assertEqual(result['presets'][0]['research'], 'a · A')
+        self.assertEqual(result['presets'][0]['review'], 'b · B')
+        self.assertEqual(result['presets'][1]['research'], 'b · B')
+        self.assertEqual(result['presets'][1]['review'], 'a · A')
         self.assertEqual(result['interval_s'], 3600)
         self.assertTrue(all(p['reason'] == '' for p in result['providers']))
         self.assertTrue(result['notifications'])                       # 默认开启
@@ -107,6 +197,19 @@ class SettingsControlTests(unittest.TestCase):
             self.assertFalse(desktop.control('settings')['notifications'])
             desktop.control('config', 'notifications=on')
             self.assertTrue(desktop.control('settings')['notifications'])
+            self.assertFalse(desktop.control('settings')['automatic_submission'])
+            self.assertFalse(desktop.control('settings')['submission_enabled'])
+            desktop.control('config', 'submission=on')
+            self.assertTrue(desktop.control('settings')['submission_enabled'])
+            self.assertFalse(desktop.control('settings')['automatic_submission'])
+            desktop.control('config', 'submission=off')
+            self.assertFalse(desktop.control('settings')['submission_enabled'])
+            desktop.control('config', 'model_spend_cap_usd=20')
+            snap = desktop.control('settings')
+            self.assertEqual(snap['spend_cap_usd'], 20)
+            self.assertEqual(snap['spend_known_usd'], 0)
+            desktop.control('config', 'model_spend_cap_usd=none')
+            self.assertIsNone(desktop.control('settings')['spend_cap_usd'])
             with self.assertRaises(ValueError):
                 desktop.control('config', 'notifications=maybe')
         data = json.loads(Path(self.cfg.path).read_text())
@@ -120,6 +223,26 @@ class SettingsControlTests(unittest.TestCase):
         with patch.object(desktop, '_cfg', return_value=self.cfg), patch('wq.routing.catalog', return_value=self.data):
             with self.assertRaises(ValueError):
                 desktop.control('preset', 'missing')
+
+    def test_preset_once_parses_cycles_suffix_and_snapshots_remaining(self):
+        with patch.object(desktop, '_cfg', return_value=self.cfg), patch('wq.routing.catalog', return_value=self.data), \
+             patch('wq.routing._unavailable', return_value=None):
+            result = desktop.control('preset-once', 'q:3')
+            self.assertIn('接下来 3 个新建轮次', result['message'])
+            snapshot = desktop.control('settings')
+            desktop.control('preset-once', 'q')   # 无后缀按 1 轮，覆盖旧登记
+            after = desktop.control('settings')
+        self.assertEqual((store.get_flag(self.c, 'preset_once'), store.get_flag(self.c, 'preset_once_cycles')), ('q', '1'))
+        self.assertEqual((snapshot['preset_once'], snapshot['preset_once_cycles']), ('q', 3))
+        self.assertEqual(after['preset_once_cycles'], 1)
+
+    def test_preset_cancel_reports_and_clears(self):
+        with patch.object(desktop, '_cfg', return_value=self.cfg), patch('wq.routing.catalog', return_value=self.data):
+            self.assertIn('没有待生效', desktop.control('preset-cancel')['message'])
+            desktop.control('preset-once', 'q:5')
+            result = desktop.control('preset-cancel')
+        self.assertIn('已取消临时预设 q', result['message'])
+        self.assertEqual((store.get_flag(self.c, 'preset_once') or None, store.get_flag(self.c, 'preset_once_cycles') or None), (None, None))
 
     def test_provider_toggle_round_trip(self):
         with patch.object(desktop, '_cfg', return_value=self.cfg), patch('wq.routing.catalog', return_value=self.data):
@@ -252,3 +375,115 @@ class LanguageTests(unittest.TestCase):
             result = desktop.control('status')
         self.assertIn('Waiting for existing tasks', result['message'])
         self.assertEqual(result['language'], 'en')
+        self.assertFalse(result['cycle_open'])
+        self.assertTrue(result['enabled'])
+
+    def test_menu_pause_reason_is_english_when_the_ui_is_english(self):
+        auto = {'enabled': True, 'message': '全部任务已暂停：菜单栏退出', 'next_cycle_at': None,
+                'last_tick_at': None, 'total_cycles': 1, 'max_cycles_total': None}
+        self.set_language('en')
+        with patch.object(desktop, '_cfg', side_effect=self.fresh_cfg), \
+             patch.object(desktop, 'wq', side_effect=[{'paused': True, 'pause_reason': '菜单栏退出', 'unknown_pending': 0}, auto]), \
+             patch.object(desktop, 'loaded', return_value=True), \
+             patch('wq.desktop.connect_readonly', return_value=self.c), \
+             patch('wq.routing.catalog', return_value=self.data), \
+             patch('wq.routing.active_preset', return_value='p'), \
+             patch('wq.routing._unavailable', return_value=None):
+            result = desktop.control('status')
+        self.assertNotRegex(result['message'], r'[\u4e00-\u9fff]')
+        self.assertIn('menu bar', result['message'].lower())
+
+    def test_launch_research_defaults_on_and_can_be_turned_off(self):
+        with patch.object(desktop, '_cfg', side_effect=self.fresh_cfg), \
+             patch('wq.routing.catalog', return_value=self.data), \
+             patch('wq.routing._unavailable', return_value=None):
+            self.assertTrue(desktop.control('settings')['launch_research'])
+            desktop.control('config', 'launch_research=off')
+            self.assertFalse(desktop.control('settings')['launch_research'])
+            desktop.control('config', 'launch_research=on')
+            self.assertTrue(desktop.control('settings')['launch_research'])
+
+    def test_cancel_open_cycle_stops_local_work_without_pausing(self):
+        from wq import autopilot, util
+        autopilot.setup(self.c)
+        tid, _ = store.enqueue_task(self.c, 'agent_call', {'autopilot_cycle': 1})
+        now = util.now_iso()
+        self.c.execute("INSERT INTO research_cycles(state,policy_json,policy_hash,research_task,created_at,updated_at) VALUES('researching','{}','x',?,?,?)",
+                       (tid, now, now))
+        result = autopilot.cancel_open_cycle(self.c, self.cfg)
+        self.assertTrue(result['cancelled'])
+        self.assertEqual(self.c.execute("SELECT state, outcome FROM research_cycles").fetchone()[0], 'closed')
+        self.assertEqual(self.c.execute('SELECT status FROM tasks WHERE task_id=?', (tid,)).fetchone()[0], 'aborted')
+        self.assertFalse(store.is_paused(self.c))
+        self.assertEqual(autopilot.cancel_open_cycle(self.c, self.cfg)['reason'], 'idle')
+
+    def test_launch_leaves_a_running_task_alone(self):
+        def fake(*args):
+            if args == ('status',):
+                return {'paused': False, 'pause_reason': '', 'unknown_pending': 0,
+                        'live_agent_calls': [{'call_id': 'running'}]}
+            return {'latest_cycle': {'state': 'researching'}, 'enabled': True}
+        with patch.object(desktop, '_cfg', side_effect=self.fresh_cfg), \
+             patch.object(desktop, 'loaded', return_value=True), \
+             patch.object(desktop, 'wq', side_effect=fake) as call:
+            result = desktop.control('launch')
+        self.assertFalse(result['started'])
+        self.assertEqual([c.args for c in call.call_args_list], [('status',)])
+
+    def test_launch_keeps_an_explicit_stop(self):
+        with patch.object(desktop, '_cfg', side_effect=self.fresh_cfg), \
+             patch.object(desktop, 'loaded', return_value=True), \
+             patch.object(desktop, 'wq', return_value={'paused': True, 'pause_reason': 'menu:stop-now', 'unknown_pending': 0}) as call:
+            result = desktop.control('launch')
+        self.assertFalse(result['started'])
+        self.assertEqual(call.call_args.args, ('status',))
+
+    def test_stop_after_cycle_waits_for_the_open_cycle(self):
+        from wq import autopilot, util
+        autopilot.setup(self.c)
+        now = util.now_iso()
+        self.c.execute("INSERT INTO research_cycles(state,policy_json,policy_hash,created_at,updated_at) VALUES('researching','{}','x',?,?)",
+                       (now, now))
+        result = autopilot.stop_after_cycle(self.c)
+        self.assertTrue(result['deferred'])
+        self.assertFalse(store.is_paused(self.c))
+        self.assertEqual(store.get_flag(self.c, 'autopilot_stop_after_cycle'), '1')
+        self.c.execute("UPDATE research_cycles SET state='closed'")
+        self.assertTrue(autopilot.apply_deferred_stop(self.c))
+        self.assertTrue(store.is_paused(self.c))
+        self.assertEqual(store.get_flag(self.c, 'pause_reason'), 'menu:stop-after-cycle')
+
+    def test_stop_now_closes_local_work_and_leaves_a_sent_simulation(self):
+        from wq import autopilot, brain_jobs, util
+        autopilot.setup(self.c)
+        local, _ = store.enqueue_task(self.c, 'agent_call', {})
+        remote, _ = store.enqueue_task(self.c, 'brain_simulation', {})
+        self.c.execute("UPDATE tasks SET status='running' WHERE task_id=?", (remote,))
+        now = util.now_iso()
+        self.c.execute("INSERT INTO research_cycles(state,policy_json,policy_hash,research_task,simulation_task,created_at,updated_at) VALUES('simulating','{}','x',?,?,?,?)",
+                       (local, remote, now, now))
+        brain_jobs.setup(self.c)
+        self.c.execute("INSERT INTO brain_runs(task_id,state,started_at,updated_at) VALUES(?,'polling',?,?)", (remote, now, now))
+        result = autopilot.stop_now(self.c, self.cfg)
+        self.assertEqual(result['remote_left'], 1)
+        self.assertEqual(self.c.execute('SELECT state FROM research_cycles').fetchone()[0], 'closed')
+        self.assertEqual(self.c.execute('SELECT status FROM tasks WHERE task_id=?', (local,)).fetchone()[0], 'aborted')
+        self.assertEqual(self.c.execute('SELECT status FROM tasks WHERE task_id=?', (remote,)).fetchone()[0], 'running')
+        self.assertTrue(store.is_paused(self.c))
+        self.assertEqual(store.get_flag(self.c, 'pause_reason'), 'menu:stop-now')
+
+    def test_cancel_leaves_an_in_flight_platform_simulation_alone(self):
+        from wq import autopilot, brain_jobs, util
+        autopilot.setup(self.c)
+        tid, _ = store.enqueue_task(self.c, 'brain_simulation', {})
+        self.c.execute("UPDATE tasks SET status='running' WHERE task_id=?", (tid,))
+        now = util.now_iso()
+        self.c.execute("INSERT INTO research_cycles(state,policy_json,policy_hash,simulation_task,created_at,updated_at) VALUES('simulating','{}','x',?,?,?)",
+                       (tid, now, now))
+        brain_jobs.setup(self.c)
+        self.c.execute("INSERT INTO brain_runs(task_id,state,started_at,updated_at) VALUES(?,'polling',?,?)", (tid, now, now))
+        result = autopilot.cancel_open_cycle(self.c, self.cfg)
+        self.assertFalse(result['cancelled'])
+        self.assertEqual(result['reason'], 'remote')
+        self.assertEqual(self.c.execute('SELECT state FROM research_cycles').fetchone()[0], 'simulating')
+        self.assertEqual(self.c.execute('SELECT status FROM tasks WHERE task_id=?', (tid,)).fetchone()[0], 'running')

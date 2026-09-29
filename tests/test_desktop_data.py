@@ -41,13 +41,19 @@ class RunNextTests(unittest.TestCase):
         self.assertEqual(f.counter, 0)
         self.assertTrue(autopilot.run_next_requested(f.c))
 
-    def test_active_cycle_rejected_and_automatic_mode_preserved(self):
+    def test_active_cycle_queues_immediate_follow_up(self):
         f = self.f
         autopilot.request_run_next(f.c, f.cfg)
         self.assertTrue(autopilot.enabled(f.c, f.cfg))
         f.tick()
-        with self.assertRaisesRegex(ValueError, '在途'):
-            autopilot.request_run_next(f.c, f.cfg)
+        self.assertNotEqual(f.cycle()['state'], 'closed')
+        autopilot.request_run_next(f.c, f.cfg)
+        self.assertTrue(autopilot.enabled(f.c, f.cfg))
+        self.assertTrue(autopilot.run_next_requested(f.c))
+        autopilot.finish(f.c, f.cfg, f.cycle(), '测试结束')
+        nxt = util.parse_iso(store.get_flag(f.c, 'autopilot_next_at'))
+        self.assertLess(abs((nxt - util.now()).total_seconds()), 5)
+        self.assertFalse(autopilot.run_next_requested(f.c))
 
     def test_unknown_rejected_without_unpausing(self):
         f = self.f
@@ -156,6 +162,7 @@ class DesktopDataTests(unittest.TestCase):
         store.add_submission(self.c,sid,'alpha-one','accepted',{'dateSubmitted':'2026-09-25T20:01:00Z','platform_status':'ACTIVE'})
         direct = desktop.submitted(self.c)['entries'][0]
         self.assertEqual(direct['badge'],'submitted')
+        self.assertNotIn('第 ', direct['title'])
         self.assertIn('未关联自动轮次','\n'.join(direct['lines']))
         tid,_ = store.enqueue_task(self.c,'agent_call',{})
         snap = {'chain':['grok'],'providers':{'grok':{'model':'historic-model'}}}
@@ -165,10 +172,31 @@ class DesktopDataTests(unittest.TestCase):
         self.c.execute("INSERT INTO brain_runs(task_id,state,alpha_id,started_at,updated_at) VALUES('sim-task','complete','alpha-one',?,?)",(util.now_iso(),util.now_iso()))
         result=desktop.submitted(self.c)['entries'][0]
         text='\n'.join(result['lines'])
+        cycle_id = self.c.execute('SELECT MAX(cycle_id) FROM research_cycles').fetchone()[0]
         self.assertIn('historic-model',text)
-        self.assertIn('2026年09月26日 04:01:00',result['title'])
+        self.assertIn(f'第 {cycle_id} 轮 · alpha-one · 2026年09月26日 04:01:00', result['title'])
+        self.assertIn(f'轮次：第 {cycle_id} 轮', text)
+        english = desktop.submitted(self.c, lang='en')['entries'][0]
+        self.assertIn(f'Cycle {cycle_id} · alpha-one', english['title'])
         self.assertIn('decay：8',text)
         self.assertNotIn('extra：',text)
+
+    def test_standby_list_matches_submitted_shape(self):
+        from wq import brain_submission
+        brain_submission.setup(self.c)
+        fid = store.insert_family(self.c, None, 'family', 'hypothesis', 'test', False, None)
+        cid = store.insert_candidate(self.c, fid, 'rank(cash)', {'extra': {'brain_settings': {'delay': 1}}}, 'hash', False)
+        store.insert_simulation(self.c, cid, 'standby-one', 'api', False, 'passed', {'stats': {'sharpe': 1.5, 'fitness': 1.2}}, None, None)
+        cycle_id = self.cycle()
+        self.c.execute("INSERT INTO submission_standby VALUES(?,?,?,?,?)",
+                       ('standby-one', cycle_id, 'waiting', util.now_iso(), util.now_iso()))
+        listed = desktop.standby(self.c)
+        self.assertEqual(listed['count'], 1)
+        self.assertEqual(listed['entries'][0]['badge'], 'standby')
+        self.assertIn(f'第 {cycle_id} 轮 · standby-one', listed['entries'][0]['title'])
+        lines = '\n'.join(listed['entries'][0]['lines'])
+        self.assertIn('rank(cash)', lines)
+        self.assertIn(f'轮次：第 {cycle_id} 轮', lines)
 
     def test_history_cost_unknown_is_not_zero(self):
         tid,_=store.enqueue_task(self.c,'agent_call',{'purpose':'missing-usage'})

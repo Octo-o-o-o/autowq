@@ -35,15 +35,33 @@
   },
   "evidence_files": [],
   "settings": {},
-  "limits": "Only exploratory screens. No automatic submission. Register more roles with `wq policy add-role`; setting_variants are preregistered per cycle (max 2, decay/neutralization/truncation only).",
+  "limits": "Only exploratory screens. No automatic submission. Register more roles with `wq policy add-role`; setting_variants are preregistered per cycle (max 3, decay/neutralization/truncation only). Conditions are evaluated on the base result; mutually exclusive turnover tiers with a min_sharpe gate rescue near-miss candidates without letting the model tune decay itself.",
   "setting_variants": [
     {
-      "label": "decay8",
-      "decay": 8
+      "label": "decay2",
+      "decay": 2,
+      "when": {
+        "min_turnover": 0.125,
+        "max_turnover": 0.2999,
+        "min_sharpe": 1.25
+      }
     },
     {
-      "label": "subindustry",
-      "neutralization": "SUBINDUSTRY"
+      "label": "decay8",
+      "decay": 8,
+      "when": {
+        "min_turnover": 0.3,
+        "max_turnover": 0.3999,
+        "min_sharpe": 1.25
+      }
+    },
+    {
+      "label": "decay16",
+      "decay": 16,
+      "when": {
+        "min_turnover": 0.4,
+        "min_sharpe": 1.25
+      }
     }
   ]
 }

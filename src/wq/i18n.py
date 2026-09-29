@@ -61,6 +61,18 @@ def write_language(config_path, value):
 
 _EXACT_EN = {
     '尚未启用': 'Not enabled yet',
+    '菜单栏退出': 'Quit from the menu bar',
+    '菜单栏手动暂停': 'Paused from the menu bar',
+    'menu:quit': 'Quit from the menu bar',
+    'menu:pause': 'Paused from the menu bar',
+    '用户取消当前轮次': 'Current cycle cancelled',
+    '用户立即停止': 'Stopped immediately by the user',
+    '已立刻停止自动研究': 'Automatic research stopped immediately',
+    '当前轮次结束后停止自动研究': 'Automatic research stops when the current cycle ends',
+    '没有进行中的轮次，已停止自动研究': 'No cycle is running; automatic research is stopped',
+    '当前轮次已结束，自动研究已停止': 'The current cycle ended; automatic research is stopped',
+    'menu:stop-now': 'All tasks stopped immediately',
+    'menu:stop-after-cycle': 'Stopped after the current cycle',
     '尚未启动': 'Not started',
     '等待现有任务完成': 'Waiting for existing tasks to finish',
     '等待UNKNOWN对账完成': 'Waiting for UNKNOWN reconciliation',
@@ -70,6 +82,10 @@ _EXACT_EN = {
     '自动补充任务已启用，等待本地调度': 'Automatic research enabled; waiting for the local scheduler',
     '已停止创建新轮次；现有任务继续执行，全部暂停用 wq pause': 'No new cycles will be created; existing tasks continue. Use wq pause to pause everything',
     '已请求立刻运行一轮；仍需通过授权、预算、平台冷却及队列闸门': 'Immediate run requested; still gated by authorization, budget, platform cooldown and the queue',
+    '备选提交': 'Queued to submit',
+    '已登记立刻接下一轮：当前轮次结束后不再等待间隔。在途任务、授权、预算和平台冷却仍然有效':
+        'Immediate follow-up registered: the next cycle starts when the current one ends, without the usual wait. In-flight work, authorization, budget and platform cooldown still apply',
+    '模型已知花费': 'Known model spend',
     '回测已入账，等待程序收集PnL/年度表现并诊断': 'Backtest recorded; collecting PnL/yearly performance and diagnosing',
     '授权已到期：不启动新研究或模拟；更新预算/有效期后自动继续': 'Authorization expired: no new research or simulations; resumes automatically once budget/validity is updated',
     '达到本次累计研究轮数上限；停止新轮次，等待检查结果': 'Total cycle limit reached; no new cycles, awaiting review results',
@@ -188,6 +204,7 @@ _EXACT_EN = {
 
 _PATTERN_EN = (
     (r'^本轮结束：(.*)；下一轮由本地调度自动领取$', r'Cycle finished: \1; the next cycle will be claimed by the local scheduler'),
+    (r'^本轮结束：(.*)；已按立刻运行跳过间隔$', r'Cycle finished: \1; the interval was skipped because an immediate run was requested'),
     (r'^本轮结束：(.*)；单轮请求已完成，自动运行未开启$', r'Cycle finished: \1; one-off request complete, continuous research is off'),
     (r'^需要对账：(\S+?)结果不明；本轮冻结，不重发、不新开轮次$', r'Reconciliation needed: \1 has an unknown outcome; this cycle is frozen — no retries, no new cycles'),
     (r'^需要恢复已有平台请求：(\S+?)；不会新发模拟$', r'Existing platform request to resume: \1; no new simulations will be sent'),

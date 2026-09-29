@@ -37,11 +37,55 @@ OpenAI 兼容方式可配置支持该协议的 xAI、DeepSeek、Qwen、OpenRoute
 ./wq providers add openai-responses --name responses --model EXACT_MODEL_ID --save-key
 ```
 
-`--save-key` 在交互终端隐藏输入，保存至 `private_dir/provider-keys/`，权限0600，禁止覆盖已有 Key。也可省略它，自己设置指定的环境变量。环境变量优先于文件；launchd/systemd 不一定继承终端变量，无人值守建议使用私有文件。Key 不进入 Prompt、JSON配置、命令参数或日志；配置仅保存 Key 引用。API Base URL 包含版本前缀（通常 `/v1`），不要填完整 `/chat/completions` 路径。只允许 HTTPS，localhost 可以 HTTP；不跟随 HTTP 重定向。
+`--save-key` 在交互终端隐藏输入，保存至 `private_dir/provider-keys/`，权限0600，禁止覆盖已有 Key。也可省略它，自己设置指定的环境变量。环境变量优先于文件；launchd/systemd 不一定继承终端变量，无人值守建议使用私有文件。Key 不进入 Prompt、JSON配置、命令参数或日志；配置仅保存 Key 引用。API Base URL 包含版本前缀（通常 `/v1`），不要填完整 `/chat/completions` 路径。只允许 HTTPS；本机回环地址和私有网段（10/8、172.16/12、192.168/16 等自建服务）可以 HTTP，link-local（169.254/16、fe80::/10，含云主机元数据地址）不允许；不跟随 HTTP 重定向。
 
 模型列表失败不阻断手填。官方 OpenAI 默认发送 `max_completion_tokens`；兼容服务默认 `max_tokens`。可以在私有 `profiles.json` 的 `transport.token_parameter` 中调整这两个值，`max_tokens` 是输出上限。`allow_no_key: true` 仅用于用户明确配置的无需鉴权服务。API token 数来自响应；未提供账单价格时美元成本显示“未知”，不填零。
 
 新渠道默认禁用，预算默认未知；添加、模型选择不会启动研究，也不会增加预算。按现有运行手册设置 `models.<name>.enabled`、预算和研究输入授权，再通过 `job enqueue`/`run-once` 做单轮验证。新增渠道使用路由队列；旧版 `invoke` 直连入口不支持新的 transport。将其分配给角色可用下面的高级流程。
+
+### 官方免费 API 预设（无订阅起步）
+
+没有 CLI 订阅或付费 API Key 时，可以用供应商官方提供的免费层起步：只需注册拿一个 Key，其余地址、模型、token 参数和额度重置规则由预设填好，全部走现有 OpenAI 兼容 transport。预设只收官方免费层 / 免费模型 / 新人额度，不包含网页版逆向、Cookie 转 API 或账号池。
+
+```bash
+./wq providers free                 # 全部预设；--region global 或 --region cn 过滤
+./wq providers add-free bigmodel-free --save-key --roles review
+./wq providers add-free gemini-free --save-key --roles research
+./wq onboard --free gemini-free --free bigmodel-free   # 新用户初始化时直接选
+```
+
+| 预设 | 地区 | 默认模型 | 免费额度（2026-09-29 官方文档） | 注意 |
+|---|---|---|---|---|
+| `gemini-free` | 海外 | `gemini-3.8-flash` | RPM/TPM/RPD 在 AI Studio 查看，太平洋时间午夜重置 | 免费层内容用于改进产品；大陆、香港不可用 |
+| `openrouter-free` | 海外 | `qwen/qwen3.8-27b:free` | 20 次/分钟；50 次/天（累计购买满 10 credits 后 1000 次/天），UTC 零点重置 | 免费模型会变动 |
+| `zai-free` | 海外 | `glm-4.7-flash` | 标为免费，按并发限流 | 默认开启思考 |
+| `mistral-free` | 海外 | `mistral-small-latest` | Free 档每月 10 美元额度 | 可在 Privacy 关闭训练 |
+| `groq-free` | 海外 | `openai/gpt-oss-120b` | 约 30 RPM、1000 RPD、8K TPM | 只适合短输入 |
+| `bigmodel-free` | 大陆 | `glm-4.7-flash` | 永久免费，只按并发限流 | 只有列出的 ID 免费 |
+| `siliconflow-free` | 大陆 | `Qwen/Qwen3-8B` | 免费模型固定限流 | 须实名；小模型 |
+| `spark-lite` | 大陆 | `lite` | 官方标注免费 | 输出 ≤4096，建议作审查兜底 |
+| `modelscope-free` | 大陆 | `Qwen/Qwen3.5-35B-A3B` | 每天约 125–500 次（魔粒） | 须绑定已实名阿里云账号 |
+| `bailian-trial` | 大陆 | `qwen3.7-flash` | 新人每模型 100 万 tokens / 90 天（限时） | **先在控制台打开“免费额度用完即停”** |
+
+`add-free` 与菜单“添加自定义模型”一样把 Key 存到仓库外（0600）并启用该渠道；研究和审查请选不同服务（同一服务的两个名字算一个渠道，例如两个 OpenRouter 模型）。免费层数据政策、地区和额度由供应商决定并可能随时变化，免费 ≠ 无限、≠ 永久。GitHub Models（2026-07-30 退役）、腾讯 hunyuan-lite、百度 ERNIE Speed/Lite、智谱 glm-4.5-flash 已下线，不再列入。
+
+### 额度暂停与自动恢复
+
+推理适配器把供应商错误归成固定类别（`limit=quota|rate|auth`），正文不写入日志：
+
+- **额度用尽**（日/月额度、赠额、余额，如 Gemini `PerDay`、OpenRouter `free-models-per-day`、智谱 1113/1308/1310、百炼 `AllocationQuota.FreeTierOnly`、讯飞 11201、HTTP 402）：不消耗重试次数，该渠道进入“额度暂停”。暂停到：供应商给的 `Retry-After`（秒数或 HTTP-date）/`x-ratelimit-reset*` → 预设的重置时刻（如 Gemini 太平洋时间午夜、OpenRouter UTC 零点）→ 都没有时每小时复查一次（`routing.quota_probe_s`）。
+- 链上还有可用渠道就切换；全部暂停时任务留在队列里等最早的恢复时刻，到点自动继续。等待与被额度拒绝的调用都不计入任务尝试次数；授权期限到期仍按原规则停止。
+- **短时限流**按 `Retry-After` 走原有 3 次重试；**认证失败**（401、未登录、需实名）直接停止，不重试。
+- 旧 launcher 渠道（Grok/Devin/Cursor/ZCode）没有分类输出，仍按“3 次重试后判定容量故障”再进入额度暂停。
+- 查看与手动解除：`./wq provider quota`、`./wq provider resume <渠道>`（例如已经充值）。菜单渠道状态显示“额度暂停至 …”，自动研究状态的下一次时间取最早恢复时刻。
+
+### 研究与审查的“不同渠道”
+
+按服务身份判断，不按名字：API 按服务主机（本机回环地址另含端口），CLI 按适配器种类（例如 `claude` 与 `claude-opus` 同为 Claude Code CLI），旧 launcher 按完整启动命令。路由排除提案渠道、补充审查、workflow 校验、初始化与菜单选择都用同一规则；solo 预设仍由用户显式允许同渠道。
+
+### CLI 的环境变量
+
+新增 CLI 适配器只继承运行所需的变量（PATH、HOME、语言、代理、证书、`XDG_*` 与各 CLI 自己的配置目录变量，如 `CODEX_HOME`、`CLAUDE_CONFIG_DIR`），不再把宿主上的 `OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`WQ_*_API_KEY` 等带进 CLI，避免 CLI 改走计费 API。确实需要环境变量认证时，在该渠道的 `transport.env_passthrough` 写变量名列表。更新源码后运行 `./wq providers refresh-runtime` 让部署的适配器生效。
 
 ### 高级流程 JSON
 
@@ -87,7 +131,15 @@ Provider installation, authentication, model listings and successful inference a
 
 `providers add openai|openai-responses|anthropic --name NAME --model ID [--base-url URL] [--key-env ENV_NAME] [--save-key]` adds a disabled API provider. Base URLs include the version prefix, usually `/v1`. Chat Completions, Responses and Messages are supported; compatible services may require different model IDs. Azure-specific authentication, tools, multimodal and streaming are outside this adapter. Official OpenAI uses `max_completion_tokens`; compatible Chat APIs default to `max_tokens`, configurable through `transport.token_parameter`.
 
-`--save-key` prompts without echo and stores the key outside the repository with mode0600. The JSON holds only a file/environment reference. Environment variables take precedence; background schedulers may not inherit terminal environments. Key files are never overwritten. HTTPS is required except for loopback. Redirects are not followed. `allow_no_key: true` explicitly permits an unauthenticated endpoint. Reported tokens come from API responses; missing dollar billing is unknown, not zero.
+`--save-key` prompts without echo and stores the key outside the repository with mode0600. The JSON holds only a file/environment reference. Environment variables take precedence; background schedulers may not inherit terminal environments. Key files are never overwritten. HTTPS is required except for loopback and private-network (10/8, 172.16/12, 192.168/16) self-hosted endpoints; link-local addresses (169.254/16, fe80::/10, including cloud metadata) are refused. Redirects are not followed. `allow_no_key: true` explicitly permits an unauthenticated endpoint. Reported tokens come from API responses; missing dollar billing is unknown, not zero.
+
+### Free official API presets, quota pause and channel identity
+
+`wq providers free [--region global|cn]` lists official free tiers compiled from vendor docs on 2026-09-29: `gemini-free`, `openrouter-free`, `zai-free`, `mistral-free`, `groq-free` (global) and `bigmodel-free`, `siliconflow-free`, `spark-lite`, `modelscope-free`, `bailian-trial` (mainland China; the last is a 90-day new-user trial — turn on "stop when free quota is used up" first). `wq providers add-free PRESET --save-key [--roles research]` or `wq onboard --free PRESET` needs only an API key; base URL, model, token parameter and reset rule come from the preset. No web-UI reverse engineering, cookie-to-API or account pools are included. Free is neither unlimited nor permanent; vendors decide data use, regions and limits.
+
+The inference adapter reports a fixed class (`limit=quota|rate|auth`) without logging response bodies. Exhausted quota does not consume retries: the provider is paused until the vendor's `Retry-After` (seconds or HTTP-date) / `x-ratelimit-reset*`, else the preset reset time (e.g. Pacific midnight for Gemini, UTC midnight for OpenRouter), else an hourly probe (`routing.quota_probe_s`). Routing falls back to another available provider; when every remaining provider is paused the task waits in the queue until the earliest resume time and continues automatically, without spending task attempts. Short rate limits keep the three Retry-After retries; authentication failures stop immediately. Legacy launchers still reach the pause after three retries. `wq provider quota` lists pauses and `wq provider resume NAME` lifts one early.
+
+"Different channel" for research and review is judged by service identity, not name: API host (plus port for loopback), CLI adapter kind, or the full launcher command. CLI adapters now inherit only basic variables and their own config-dir variables; host API keys are no longer passed through unless listed in `transport.env_passthrough`. Run `wq providers refresh-runtime` after updating source.
 
 Use the commands above for three advanced editing paths: manually edit JSON, `workflow edit` for a bilingual step-by-step wizard, or `workflow ai-edit --instruction '...'` for a queued model proposal. AI editing uses the existing engineering route and normal budgets; it does not apply changes. Validate, inspect the diff and apply the returned `result.json` or your own draft. `workflow show` displays the active document. Apply waits for an idle/reconciled queue and no active research cycle, shares the runner lock, and preserves budgets and execution gates. It never cancels work for you.
 

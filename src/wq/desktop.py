@@ -105,6 +105,22 @@ def cycle_directive(conn, cycle, lang='zh'):
     return text(lang, '自由探索', 'Free exploration')
 
 
+def standby_alphas(conn, cycle):
+    """内部已通过、因 24 小时提交上限还在等待自动提交的 Alpha。"""
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='submission_standby'").fetchone():
+        return []
+    rows = conn.execute('''SELECT b.alpha_id FROM brain_runs b JOIN submission_standby s ON s.alpha_id=b.alpha_id
+        WHERE b.task_id=? AND s.state IN ('waiting','queued')
+        AND NOT EXISTS (SELECT 1 FROM submissions sub WHERE sub.remote_id=s.alpha_id
+            AND sub.status IN ('accepted','final_valid','final_invalid'))
+        UNION SELECT b.alpha_id FROM cycle_simulations v JOIN brain_runs b ON b.task_id=v.task_id
+        JOIN submission_standby s ON s.alpha_id=b.alpha_id
+        WHERE v.cycle_id=? AND s.state IN ('waiting','queued')
+        AND NOT EXISTS (SELECT 1 FROM submissions sub WHERE sub.remote_id=s.alpha_id
+            AND sub.status IN ('accepted','final_valid','final_invalid'))''', (cycle['simulation_task'], cycle['cycle_id']))
+    return [row[0] for row in rows if row[0]]
+
+
 def submitted_alphas(conn, cycle):
     """本轮（含变体）产出且平台已接收的 Alpha。"""
     rows = conn.execute('''SELECT b.alpha_id FROM brain_runs b WHERE b.task_id=?
@@ -164,6 +180,8 @@ def cycle_badge(conn, cycle, lang='zh'):
         return 'progress', task_view.cycle_state(cycle['state'], lang)
     if submitted_alphas(conn, cycle):
         return 'submitted', text(lang, '已提交', 'Submitted')
+    if standby_alphas(conn, cycle):
+        return 'standby', text(lang, '备选提交', 'Queued to submit')
     outcome = cycle['outcome'] or ''
     if outcome.startswith(PROBLEM_PREFIXES) or '错误' in outcome or '未通过' in outcome:
         return 'failed', text(lang, '失败', 'Failed')
@@ -288,6 +306,19 @@ def pending_notifications(conn, lang='zh'):
     return items
 
 
+def cycle_phrase(cycle_id, lang='zh'):
+    if not cycle_id:
+        return None
+    return text(lang, f'第 {cycle_id} 轮', f'Cycle {cycle_id}')
+
+
+def alpha_menu_title(alpha_id, when, cycle_id, lang, missing):
+    """列表行要能和轮次历史对上：历史只显示轮号，这里把轮号放在 Alpha ID 前面。"""
+    stamp = beijing(when, missing, lang=lang)
+    phrase = cycle_phrase(cycle_id, lang)
+    return ' · '.join(part for part in (phrase, alpha_id, stamp) if part)
+
+
 def submitted(conn, lang='zh'):
     entries = []
     rows = conn.execute('''SELECT sub.*,s.stats_json,c.config_json,c.expression FROM submissions sub
@@ -307,11 +338,53 @@ def submitted(conn, lang='zh'):
         metrics = ' · '.join(f'{key} {stats.get(key, unknown)}' for key in ('sharpe', 'fitness', 'turnover', 'returns', 'drawdown', 'margin'))
         brain_settings = settings.get('extra', {}).get('brain_settings', settings)
         params = [f'{key}：{brain_settings[key]}' for key in ('region', 'universe', 'instrumentType', 'delay', 'decay', 'neutralization', 'truncation', 'testPeriod', 'nanHandling', 'pasteurization', 'unitHandling', 'language') if key in brain_settings]
-        entries.append({'title': row['remote_id'] + ' · ' + beijing(receipt.get('dateSubmitted'), text(lang, '提交时间未记录', 'submission time not recorded'), lang=lang),
+        cycle_id = cycle['cycle_id'] if cycle else None
+        entries.append({'title': alpha_menu_title(row['remote_id'], receipt.get('dateSubmitted'), cycle_id, lang,
+                                                   text(lang, '提交时间未记录', 'submission time not recorded')),
             'badge': 'submitted' if row['status'] in ('accepted', 'final_valid') else None,
             'lines': [text(lang, '状态：', 'Status: ') + row['status'] + ' / ' + str(receipt.get('platform_status', unknown)),
-                      text(lang, '轮次：', 'Cycle: ') + (str(cycle['cycle_id']) if cycle else text(lang, '直接／人工实验', 'direct / manual experiment')),
+                      text(lang, '轮次：', 'Cycle: ') + (cycle_phrase(cycle_id, lang) or text(lang, '直接／人工实验', 'direct / manual experiment')),
                       *model_lines, text(lang, '指标：', 'Metrics: ') + metrics, *params,
                       text(lang, '表达式：', 'Expression: ') + row['expression'],
                       text(lang, '本地接收账本，不代表平台现金收益。', 'Locally recorded receipt; not proof of platform cash income.')]})
+    return {'entries': entries, 'count': len(entries)}
+
+
+def standby(conn, lang='zh'):
+    """内部已通过、因提交上限尚未发出的 Alpha。明细结构与已提交列表一致。"""
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='submission_standby'").fetchone():
+        return {'entries': [], 'count': 0}
+    entries = []
+    rows = conn.execute('''SELECT s.alpha_id, s.cycle_id, s.state, s.created_at, s.updated_at, sim.stats_json, c.config_json, c.expression
+        FROM submission_standby s
+        LEFT JOIN simulations sim ON sim.remote_id=s.alpha_id AND sim.synthetic=0
+        LEFT JOIN candidates c ON c.candidate_id=sim.candidate_id
+        WHERE s.state IN ('waiting','queued')
+        AND NOT EXISTS (SELECT 1 FROM submissions sub WHERE sub.remote_id=s.alpha_id
+            AND sub.status IN ('accepted','final_valid','final_invalid'))
+        ORDER BY s.created_at''')
+    quota_note = text(lang, '等待 24 小时提交空位；空位出现后自动提交，发出前会再读官方检查。',
+                      'Waiting for a 24-hour submission slot; submitted automatically when one opens, after a fresh official check.')
+    for row in rows:
+        stats = json.loads(row['stats_json'] or '{}')
+        settings = json.loads(row['config_json'] or '{}')
+        cycle = alpha_cycle(conn, row['alpha_id'])
+        if cycle:
+            model_lines = [text(lang, '研究：', 'Research: ') + task_model(conn, cycle['research_task'], lang=lang),
+                           text(lang, '审查：', 'Review: ') + task_model(conn, cycle['review_task'], lang=lang)]
+        else:
+            model_lines = [text(lang, '模型：未关联自动轮次', 'Model: not linked to an automatic cycle')]
+        unknown = text(lang, '未知', 'unknown')
+        metrics = ' · '.join(f'{key} {stats.get(key, unknown)}' for key in ('sharpe', 'fitness', 'turnover', 'returns', 'drawdown', 'margin'))
+        brain_settings = settings.get('extra', {}).get('brain_settings', settings)
+        params = [f'{key}：{brain_settings[key]}' for key in ('region', 'universe', 'instrumentType', 'delay', 'decay', 'neutralization', 'truncation', 'testPeriod', 'nanHandling', 'pasteurization', 'unitHandling', 'language') if isinstance(brain_settings, dict) and key in brain_settings]
+        state = text(lang, '等待空位', 'waiting for a slot') if row['state'] == 'waiting' else text(lang, '已入队，等待发出', 'queued, waiting to post')
+        cycle_id = cycle['cycle_id'] if cycle else row['cycle_id']
+        entries.append({'title': alpha_menu_title(row['alpha_id'], row['created_at'], cycle_id, lang, unknown),
+            'badge': 'standby',
+            'lines': [text(lang, '状态：备选提交 / ', 'Status: queued to submit / ') + state,
+                      text(lang, '轮次：', 'Cycle: ') + (cycle_phrase(cycle_id, lang) or text(lang, '直接／人工实验', 'direct / manual experiment')),
+                      *model_lines, text(lang, '指标：', 'Metrics: ') + metrics, *params,
+                      text(lang, '表达式：', 'Expression: ') + (row['expression'] or unknown),
+                      quota_note]})
     return {'entries': entries, 'count': len(entries)}

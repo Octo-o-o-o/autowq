@@ -55,7 +55,8 @@
         "{model}"
       ],
       "model": "ZCode current configured model",
-      "timeout_s": 1200
+      "timeout_s": 1200,
+      "terminal_protocol": "zcode"
     }
   },
   "presets": {

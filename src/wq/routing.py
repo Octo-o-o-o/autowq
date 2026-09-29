@@ -15,6 +15,7 @@ from .config import Config
 from .wrappers import agent
 
 ROLES = ('research', 'engineering', 'review')
+MAX_ONCE_CYCLES = 100   # 临时预设最多覆盖的新建轮次数；更久的需求应使用永久切换
 
 
 def catalog(cfg):
@@ -58,6 +59,34 @@ def catalog(cfg):
     return data
 
 
+def channel_id(item):
+    """渠道身份：同一服务起多个名字仍是同一渠道，研究与审查的“不同渠道”按它判断。
+    API 按服务地址（主机，回环地址带端口），CLI 按适配器种类，旧 launcher 按完整启动命令；识别不了返回 None（按名字区分）。"""
+    transport = (item or {}).get('transport') or {}
+    if transport.get('kind') == 'api':
+        from urllib.parse import urlsplit
+        u = urlsplit(transport.get('base_url', ''))
+        host = (u.hostname or '').lower()
+        local = host in ('localhost', '127.0.0.1', '::1')
+        return 'api:' + host + (':' + str(u.port) if u.port and local else '')
+    if transport.get('kind'):
+        return 'cli:' + transport['kind']
+    argv = (item or {}).get('argv')
+    if isinstance(argv, list) and argv:
+        return 'exec:' + json.dumps([os.path.realpath(argv[0])] + argv[1:])
+    return None
+
+
+def same_channel(data, a, b):
+    providers = data.get('providers') or {}
+    if a == b:
+        return True
+    if a not in providers or b not in providers:
+        return False
+    ida, idb = channel_id(providers[a]), channel_id(providers[b])
+    return ida is not None and ida == idb
+
+
 def cycle_preset(conn):
     """当前活动研究轮次若带"仅一轮"预设覆盖，返回其名字；否则 None。"""
     try:
@@ -80,19 +109,30 @@ def active_preset(conn, cfg, data=None):
     return name
 
 
-def choose_preset(conn, cfg, name, once=False):
-    """永久切换写 active_preset；once=True 只登记到 preset_once，由下一个新建轮次领取并在其结束后自动失效。"""
+def choose_preset(conn, cfg, name, once=False, cycles=1):
+    """永久切换写 active_preset；once=True 登记到 preset_once，由接下来 cycles 个新建轮次
+    依次领取并递减 preset_once_cycles，用尽后自动回到永久预设。"""
     if cfg.get('workflow','file'):
         raise ValueError('Advanced workflow controls routes; edit its routes or remove workflow configuration while idle')
     data = catalog(cfg)
     if name not in data['presets']:
         raise ValueError(f'未知预设 {name}')
     if once:
+        if not isinstance(cycles, int) or isinstance(cycles, bool) or not 1 <= cycles <= MAX_ONCE_CYCLES:
+            raise ValueError(f'临时轮数需为 1..{MAX_ONCE_CYCLES} 的整数')
         store.set_flag(conn, 'preset_once', name)
+        store.set_flag(conn, 'preset_once_cycles', str(cycles))
     else:
         store.set_flag(conn, 'active_preset', name)
         store.set_flag(conn, 'preset_once', '')
+        store.set_flag(conn, 'preset_once_cycles', '')
     return name
+
+
+def cancel_once(conn):
+    """取消待生效的临时预设登记；已绑定到进行中轮次的预设不受影响。"""
+    store.set_flag(conn, 'preset_once', '')
+    store.set_flag(conn, 'preset_once_cycles', '')
 
 
 def preset_is_solo(cfg, name):
@@ -154,7 +194,9 @@ def _snapshot(conn, cfg, tid, payload):
     if isinstance(order, list) and order:
         # 任务级优先顺序（如单双轮互换研究/审查渠道）：只能重排预设已含的渠道，不能引入预设外渠道。
         routes = [n for n in order if n in routes] + [n for n in routes if n not in order]
-    chain = [n for n in routes if n not in payload.get('excluded_providers', [])]
+    excluded = payload.get('excluded_providers', [])
+    # 审查排除提案渠道时连同其别名（同一服务地址/同一 CLI）一起排除。
+    chain = [n for n in routes if not any(same_channel(data, n, e) for e in excluded)]
     if not chain:
         raise ValueError('排除提案渠道后没有可用审查渠道')
     if payload.get('single_attempt'): chain = chain[:1]
@@ -186,6 +228,13 @@ def _unavailable(conn, cfg, provider):
         return '用户已停用此渠道'
     if not cfg.model(provider).get('enabled'):
         return '渠道未配置或未启用'
+    paused = quota_paused_until(conn, provider)
+    if paused:
+        return QUOTA_PAUSED + paused
+    from . import usage
+    capped = usage.spend_block_reason(conn, cfg)
+    if capped:
+        return capped
     state, why = cfg.debug_window(provider)
     if state == 'invalid':
         return '授权窗口无效：' + why
@@ -218,6 +267,126 @@ def retry_after(conn, call_id):
     return max([float(v) for v in values] or [0])
 
 
+# ---- 额度暂停：渠道额度用尽后暂停到重置时刻，到点自动恢复 ----
+# 状态只放在本地 flags：provider_quota_until:<渠道>（ISO 时间）与 provider_quota_reason:<渠道>。
+# 暂停期间路由跳过该渠道；链上没有其他可用渠道时任务留在队列里等最早的恢复时刻，
+# 不消耗任务尝试次数、不换付费渠道、不缩短供应商给出的等待时间。
+QUOTA_PAUSED = '额度暂停至 '
+QUOTA_PROBE_S = 3600          # 供应商没给重置时间、预设也没有重置规则时，隔多久再试一次
+QUOTA_MAX_WAIT_S = 40 * 86400  # 单次暂停上限；更长的等待交给用户处理
+_LIMIT_RE = re.compile(r'\blimit=(quota|rate|auth)\b')
+
+
+def quota_paused_until(conn, provider):
+    until = store.get_flag(conn, f'provider_quota_until:{provider}')
+    if until:
+        try:
+            if util.now() < util.parse_iso(until):
+                return until
+        except ValueError:
+            pass
+    # 旧版本写入的容量冷却同样按暂停处理，到期自动恢复。
+    legacy = store.get_flag(conn, f'provider_not_before:{provider}')
+    if legacy:
+        try:
+            if util.now() < util.parse_iso(legacy):
+                return legacy
+        except ValueError:
+            pass
+    return None
+
+
+def quota_pauses(conn, cfg=None, data=None):
+    """当前处于额度暂停的渠道，供状态、菜单和 CLI 展示；直接读本地标记，不依赖路由配置能否加载。"""
+    names = set()
+    for key in ('provider_quota_until:', 'provider_not_before:'):
+        names |= {r[0][len(key):] for r in conn.execute("SELECT key FROM state_flags WHERE key LIKE ?", (key + '%',))}
+    if data and data.get('providers'):
+        names &= set(data['providers'])
+    result = []
+    for name in sorted(names):
+        until = quota_paused_until(conn, name)
+        if until:
+            result.append({'provider': name, 'until': until,
+                           'reason': store.get_flag(conn, f'provider_quota_reason:{name}') or ''})
+    return sorted(result, key=lambda item: util.parse_iso(item['until']))
+
+
+def clear_quota_pause(conn, provider):
+    for key in ('provider_quota_until', 'provider_quota_reason', 'provider_not_before'):
+        store.set_flag(conn, f'{key}:{provider}', '')
+
+
+def next_reset(rule, now=None):
+    """预设里的重置规则 {"tz": "America/Los_Angeles", "at": "00:00", "period": "daily"|"monthly"}，
+    返回下一次重置的 UTC 时刻。规则无效返回 None。"""
+    if not isinstance(rule, dict):
+        return None
+    try:
+        from zoneinfo import ZoneInfo
+        zone = ZoneInfo(rule.get('tz') or 'UTC')
+        hour, minute = (int(x) for x in str(rule.get('at') or '00:00').split(':'))
+    except Exception:
+        return None
+    local = (now or util.now()).astimezone(zone)
+    candidate = local.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if rule.get('period', 'daily') == 'monthly':
+        candidate = candidate.replace(day=1)
+        if candidate <= local:
+            candidate = (candidate.replace(day=28) + dt.timedelta(days=4)).replace(day=1)
+    elif rule.get('period', 'daily') == 'daily':
+        if candidate <= local:
+            candidate += dt.timedelta(days=1)
+    else:
+        return None
+    return candidate.astimezone(dt.timezone.utc)
+
+
+def pause_for_quota(conn, cfg, provider, definition, wait_s, reason):
+    """暂停渠道到重置时刻：优先供应商给的等待时间，其次预设的重置规则，最后按复查间隔。"""
+    now = util.now()
+    candidates = []
+    if wait_s and wait_s > 0:
+        candidates.append(now + dt.timedelta(seconds=wait_s))
+    reset = next_reset((definition or {}).get('quota_reset'), now)
+    if reset:
+        candidates.append(reset)
+    if not candidates:
+        probe = cfg.get('routing', 'quota_probe_s', default=QUOTA_PROBE_S)
+        probe = probe if isinstance(probe, (int, float)) and not isinstance(probe, bool) and 60 <= probe <= 86400 else QUOTA_PROBE_S
+        candidates.append(now + dt.timedelta(seconds=probe))
+    until = max(candidates)
+    until = min(max(until, now + dt.timedelta(seconds=60)), now + dt.timedelta(seconds=QUOTA_MAX_WAIT_S))
+    value = until.isoformat(timespec='seconds')
+    store.set_flag(conn, f'provider_quota_until:{provider}', value)
+    store.set_flag(conn, f'provider_quota_reason:{provider}', reason)
+    return value
+
+
+def limit_signal(conn, call_id):
+    """读取推理适配器输出的固定分类（limit=quota|rate|auth）。"""
+    row = conn.execute('SELECT log_path FROM agent_calls WHERE call_id=?', (call_id,)).fetchone()
+    if not row or not row[0]:
+        return ''
+    try:
+        with open(row[0], 'rb') as f:
+            f.seek(0, 2); f.seek(max(0, f.tell() - 65536))
+            tail = f.read().decode('utf-8', errors='replace')
+    except OSError:
+        return ''
+    # 只认适配器自己输出的固定分类；旧 launcher 的日志混有模型输出，仍走“重试耗尽→容量判定”。
+    found = _LIMIT_RE.findall(tail)
+    return found[-1] if found else ''
+
+
+def _wait_for_quota(conn, tid, waits):
+    until = min(waits, key=util.parse_iso)
+    conn.execute("UPDATE tasks SET status='queued',not_before=?,last_error=?,attempts=MAX(attempts-1,0),updated_at=? WHERE task_id=?",
+                 (until, QUOTA_PAUSED + until + '；恢复后自动继续', util.now_iso(), tid))
+    store.add_attempt(conn, tid, 'quota_wait', 'scheduled', {'not_before': until})
+    return 'retry_scheduled', {'not_before': until, 'quota_wait': True}, QUOTA_PAUSED + until + '；恢复后自动继续'
+
+
 def dispatch_routed(conn, cfg, task, payload):
     tid = task['task_id']
     if not payload.get('retry_safe') or not payload.get('allow'):
@@ -236,19 +405,30 @@ def dispatch_routed(conn, cfg, task, payload):
         return 'blocked', {}, '冻结输入副本发生变化，停止重试'
     index, retry = row['provider_index'], row['retry_index']
     chain = snap['chain']
-    while index < len(chain):
-        provider = chain[index]
-        why = _unavailable(conn, cfg, provider)
+    skipped, waits, j = [], [], index
+    while j < len(chain):
+        why = _unavailable(conn, cfg, chain[j])
         if not why:
             break
-        store.add_attempt(conn, tid, 'provider_skip', 'unavailable', {'provider': provider, 'reason': why})
-        index += 1
-        retry = 0
+        skipped.append((chain[j], why))
+        if why.startswith(QUOTA_PAUSED):
+            waits.append(why[len(QUOTA_PAUSED):])
+        j += 1
+    if j == len(chain) and waits:
+        # 剩余渠道里有额度暂停的：不推进链位置，等最早恢复的那个到点再试。
+        return _wait_for_quota(conn, tid, waits)
+    for name, why in skipped:
+        store.add_attempt(conn, tid, 'provider_skip', 'unavailable', {'provider': name, 'reason': why})
+    if j != index:
+        index, retry = j, 0
         _save(conn, tid, provider_index=index, retry_index=0)
     if index == len(chain):
         return 'blocked', {}, '预设中的渠道均不可用或预算已耗尽；不会自动充值'
+    provider = chain[index]
     definition = snap['providers'][provider]
-    work = job / f'{index:02d}-{provider}-attempt-{retry + 1}'
+    quota_hits = int(store.get_flag(conn, f'quota_hits:{tid}') or 0)
+    # 额度暂停后重试序号归零；目录名带上暂停次数，保留暂停前那次调用的证据目录。
+    work = job / (f'{index:02d}-{provider}-attempt-{retry + 1}' + (f'-q{quota_hits}' if quota_hits else ''))
     if work.exists():
         return 'blocked', {}, '本次调用目录已存在，需核对上次尝试，拒绝覆盖'
     shutil.copytree(packet, work)
@@ -309,19 +489,33 @@ def dispatch_routed(conn, cfg, task, payload):
         return 'blocked', detail, out.detail
     if out.status == 'crashed':
         return 'unknown', detail, '进程结果未知，需对账'
+    signal = limit_signal(conn, out.call_id)
+    if signal == 'auth':
+        return 'blocked', detail, f'{provider} 认证失败或未登录；重新登录或更新 Key 后再运行，不自动重试'
+    if signal == 'quota':
+        # 额度用尽不是模型故障：不耗重试次数，暂停该渠道到重置时刻，本次调用不计入任务尝试。
+        until = pause_for_quota(conn, cfg, provider, definition, retry_after(conn, out.call_id), '额度用尽')
+        store.add_attempt(conn, tid, 'quota_pause', 'paused', {'provider': provider, 'until': until, 'call_id': out.call_id})
+        conn.execute('UPDATE tasks SET attempts=MAX(attempts-1,0) WHERE task_id=?', (tid,))
+        store.set_flag(conn, f'quota_hits:{tid}', str(quota_hits + 1))
+        _save(conn, tid, retry_index=0)
+        return _backoff(conn, tid, 0, f'{provider} 额度用尽，暂停至 {until}；有其他可用渠道则切换，否则到点自动恢复')
     if payload.get('single_attempt'):
         return 'failed', detail, '唯一补充调用失败；不再重试或切换渠道'
     if retry < snap['retries']:
         delay = max(snap['delays'][retry], retry_after(conn, out.call_id))
         if delay > 86400:
-            store.set_flag(conn, f'provider_not_before:{provider}', (util.now()+dt.timedelta(seconds=delay)).isoformat())
-            return 'blocked', detail, 'Provider 要求等待超过一天；停止本轮，不缩短 Retry-After'
+            until = pause_for_quota(conn, cfg, provider, definition, delay, '供应商要求等待超过一天')
+            store.add_attempt(conn, tid, 'quota_pause', 'paused', {'provider': provider, 'until': until, 'call_id': out.call_id})
+            store.set_flag(conn, f'quota_hits:{tid}', str(quota_hits + 1))
+            _save(conn, tid, retry_index=0)
+            return _backoff(conn, tid, 0, f'{provider} 要求等待至 {until}；不缩短 Retry-After，到点自动恢复')
         _save(conn, tid, retry_index=retry + 1)
         return _backoff(conn, tid, delay,
                         f'{provider} 失败；安排第 {retry + 1}/3 次重试，之前的副本保留')
     capacity = capacity_failure(conn, out.call_id)
     if capacity:
-        store.set_flag(conn, f'provider_not_before:{provider}', (util.now()+dt.timedelta(seconds=max(3600,retry_after(conn,out.call_id)))).isoformat())
+        pause_for_quota(conn, cfg, provider, definition, max(3600, retry_after(conn, out.call_id)), '容量或限流持续失败')
     if not capacity:
         return 'failed', detail, '非明确配额/服务不可用故障，重试耗尽后停止，不自动换渠道'
     index += 1
@@ -333,6 +527,15 @@ def dispatch_routed(conn, cfg, task, payload):
     return 'failed', detail, '全部渠道均已用完首次调用及 3 次重试；保留全部证据并停止'
 
 
+# 供应商容量/配额类故障特征。ZCode 实测返回 `[1310] Weekly/Monthly Limit Exhausted`
+# （无 quota 字样），单独的 limit…exhaust 分支让重试耗尽后能切渠道并设 provider_not_before。
+# 该分支要求周期/用量限定词，避免把 turn/token/context limit exhausted 误判成额度故障。
+_CAPACITY_RE = re.compile(r'(?i)(quota.{0,30}(exceed|exhaust)|insufficient.{0,20}(credit|balance)'
+                          r'|rate.?limit|too many requests|service unavailable|capacity exceeded'
+                          r'|(hourly|daily|weekly|monthly|usage|plan)[^\n]{0,20}limit[^\n]{0,10}exhaust'
+                          r'|额度.{0,12}(不足|用尽|超)|余额不足)')
+
+
 def capacity_failure(conn, call_id):
     row = conn.execute('SELECT log_path FROM agent_calls WHERE call_id=?', (call_id,)).fetchone()
     if not row or not row[0]: return False
@@ -342,4 +545,4 @@ def capacity_failure(conn, call_id):
             tail=f.read().decode('utf-8',errors='replace')
     except OSError:
         return False
-    return bool(re.search(r'(?i)(quota.{0,30}(exceed|exhaust)|insufficient.{0,20}(credit|balance)|rate.?limit|too many requests|service unavailable|capacity exceeded|额度.{0,12}(不足|用尽|超)|余额不足)',tail))
+    return bool(_CAPACITY_RE.search(tail))

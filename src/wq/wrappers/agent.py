@@ -173,6 +173,11 @@ def run_agent(conn, cfg, spec: AgentSpec, prompt_file: str, purpose: str,
             remaining -= used
         if remaining <= 0:
             return blocked("blocked_budget", f"budgets.{spec.name} 已耗尽")
+    from .. import usage
+    # 美元上限对授权窗口内的渠道同样生效；未知金额不记成 $0，只在已知合计达到上限时阻断。
+    spend_reason = usage.spend_block_reason(conn, cfg)
+    if spend_reason:
+        return blocked("blocked_budget", spend_reason)
     if not allow:
         return blocked("blocked_policy", "缺 --allow 确认；wrapper 不被隐式触发")
 
@@ -326,6 +331,10 @@ def _verify_terminal(log_path: str, protocol: str) -> tuple[bool, str]:
                    and not o.get("is_error", False) for o in objects)
     elif protocol == "grok":
         good = any(o.get("stopReason") == "end_turn" for o in objects)
+    elif protocol == "zcode":
+        # 无头 --json 的最终事件：{"type":"result",...,"projection":{"status":"completed"|...}}
+        good = any(o.get("type") == "result" and isinstance(o.get("projection"), dict)
+                   and o["projection"].get("status") == "completed" for o in objects)
     else:
         return False, f"未支持的 terminal_protocol: {protocol}"
     return good, "CLI 终态已核验" if good else f"缺少 {protocol} 成功终态"

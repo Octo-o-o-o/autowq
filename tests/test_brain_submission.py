@@ -108,6 +108,7 @@ class SubmissionTests(unittest.TestCase):
         self.assertEqual(self.tick(tid),'succeeded')
         self.assertEqual([m for m,p in Client.calls].count('POST'),1)
         self.assertEqual(self.c.execute('SELECT status FROM submissions').fetchone()[0],'accepted')
+        self.assertTrue(store.get_flag(self.c, 'brain_identity_refresh_at'))
         self.assertFalse(sub.enqueue(self.c,self.cfg,'abc123',self.review)[1])
 
     def test_pending_missing_unknown_or_fail_never_post(self):
@@ -182,6 +183,47 @@ class SubmissionTests(unittest.TestCase):
         self.assertEqual(self.tick(tid),'queued')
         self.assertEqual(Client.calls, [('GET','/alphas/abc123'), ('GET','/alphas/abc123/check')])
         self.assertFalse(any(method == 'POST' for method, _ in Client.calls))
+
+    def test_standby_waits_out_the_cap_then_queues(self):
+        from wq import autopilot, brain_jobs, desktop, feedback
+        autopilot.setup(self.c); brain_jobs.setup(self.c); feedback.setup(self.c); sub.setup(self.c)
+        self.cfg.data['brain_submission']['max_posts_per_24h'] = 1
+        store.set_flag(self.c, 'brain_last_submit_at', util.now_iso())
+        pnl = Path(self.cfg.private_dir)/'pnl.json'
+        util.write_json(str(pnl), {'schema': {'properties': [{'name': 'date'}, {'name': 'pnl'}]},
+                                   'records': [['2020-01-01', 1.0], ['2020-01-02', 2.0]]})
+        report = {'submission_candidate': True, 'diagnosis': ['平台快照通过'], 'validation_gaps': [], 'pnl_path': str(pnl)}
+        self.c.execute('INSERT INTO research_feedback VALUES(?,?,?,?)',
+                       ('abc123', sub.identity(self.alpha), json.dumps(report), util.now_iso()))
+        sim_task, _ = store.enqueue_task(self.c, 'brain_simulation', {}, 'sim')
+        self.c.execute("UPDATE tasks SET status='succeeded' WHERE task_id=?", (sim_task,))
+        self.c.execute("INSERT INTO brain_runs(task_id,state,alpha_id,started_at,updated_at) VALUES(?,?,?,?,?)",
+                       (sim_task, 'complete', 'abc123', util.now_iso(), util.now_iso()))
+        self.c.execute("INSERT INTO research_cycles(state,policy_json,policy_hash,simulation_task,outcome,created_at,updated_at) VALUES('closed','{}','h',?,'平台快照通过',?,?)",
+                       (sim_task, util.now_iso(), util.now_iso()))
+        cid = self.c.execute('SELECT MAX(cycle_id) FROM research_cycles').fetchone()[0]
+        self.assertEqual(sub.offer_submission(self.c, self.cfg, cid, 'abc123', report), 'standby')
+        entry = desktop.history(self.c, self.cfg)['entries'][0]
+        self.assertEqual(entry['badge'], 'standby')
+        self.assertIn('备选提交', entry['title'])
+        store.set_flag(self.c, 'brain_last_submit_at', '2000-01-01T00:00:00Z')
+        self.assertEqual(sub.release_standby(self.c, self.cfg), 'abc123')
+        self.assertEqual(self.c.execute("SELECT state FROM submission_standby").fetchone()[0], 'queued')
+        self.assertEqual(desktop.standby(self.c)['count'], 1)
+        self.assertEqual(entry['badge'], 'standby')  # 入队后、平台接收前仍是备选
+        fresh = desktop.history(self.c, self.cfg)['entries'][0]
+        self.assertEqual(fresh['badge'], 'standby')
+        tid = self.c.execute('SELECT task_id FROM brain_submissions').fetchone()[0]
+        Client.replies = self.preflight()+[(201, {}, {}), (200, {}, {}), (200, {}, self.submitted())]
+        self.assertEqual(self.tick(tid), 'queued')
+        self.assertEqual(self.tick(tid), 'queued')
+        self.assertEqual(self.tick(tid), 'succeeded')
+        self.assertEqual(self.c.execute("SELECT state FROM submission_standby").fetchone()[0], 'submitted')
+        self.assertEqual(desktop.standby(self.c)['count'], 0)
+        self.assertEqual(desktop.history(self.c, self.cfg)['entries'][0]['badge'], 'submitted')
+        self.c.execute("UPDATE submission_standby SET state='queued'")
+        self.assertEqual(sub.retire_submitted_standby(self.c), ['abc123'])
+        self.assertEqual(desktop.standby(self.c)['count'], 0)
 
     def test_rolling_cap_prevents_post(self):
         tid=self.enqueue();store.set_flag(self.c,'brain_last_submit_at',util.now_iso())

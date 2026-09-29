@@ -45,3 +45,6 @@ config/workflow*.json
 .wrangler/
 # PyInstaller 运行时生成的 spec（构建参数由 packaging/windows/build_exe.ps1 显式提供）
 WorldQuantTray.spec
+
+# Built installers are published to GitHub Releases, not committed.
+website/downloads/
