@@ -8,7 +8,7 @@
 
 ## 安装
 
-需要你自己的模型 CLI 订阅账号或 API Key；没有订阅也可以用官方免费 API 起步（`wq providers free` 列出 Gemini、OpenRouter、智谱、硅基流动等免费预设，只需注册一个 Key）。macOS DMG 自带运行时；其余安装方式需要 Python 3.11+。核心运行时只使用 Python 标准库。支持 macOS；Linux/Windows WSL2 使用 Docker 隔离模型进程。原生 Windows 实验性支持托盘与调度控制层（见方式二下方的 Windows 说明）。
+需要你自己的模型 CLI 订阅账号或 API Key；没有订阅也可以用官方免费 API 起步（`wq providers free` 列出 Gemini、OpenRouter、智谱、硅基流动等免费预设，只需注册一个 Key）。macOS DMG 自带运行时；其余安装方式需要 Python 3.11+。核心运行时只使用 Python 标准库。支持 macOS；Linux/Windows WSL2 使用 Docker 隔离模型进程。原生 Windows 实验性支持，仅 API 渠道（见方式二下方的 Windows 说明）。
 
 ```sh
 # 方式一：pipx（推荐；pipx 本身见 https://pipx.pypa.io）
@@ -25,7 +25,7 @@ brew install --cask Octo-o-o-o/autowq/worldquant   # 可选：菜单栏 App
 
 方式三：macOS 只用 DMG（开箱即用）。从 [Releases](https://github.com/Octo-o-o-o/autowq/releases) 下载 `WorldQuant-<版本>.dmg`，拖入"应用程序"。DMG 自带 Python 运行时和引擎，不需要系统 Python、Xcode 命令行工具或 pip。可以用菜单栏应用（双击后按首启向导选择工作区并完成 onboard），也可以完全不开菜单栏，直接用应用内的 `WorldQuant.app/Contents/Resources/bin/wq` 命令行（适合交给 AI 操作）。两种用法的完整命令见 **[macOS 安装包说明](docs/app-bundle.md)**。未公证版本可用 `brew install --cask` 安装（自动去除隔离属性），或首次右键打开。
 
-Windows（实验性）：托盘与 macOS 菜单栏同功能、同控制层。从 [Releases](https://github.com/Octo-o-o-o/autowq/releases) 下载 `WorldQuantTray.exe`（单文件、内置引擎），在已完成 `wq onboard` 的工作区运行，可用 `--workspace <目录>` 指定；或源码方式 `pip install pystray Pillow` 后运行 `python scripts/setup_windows.py` 注册任务计划调度与登录自启。Provider 不随 exe 发布，需自行配置 profiles.json；完整研究栈仍建议 Linux / Windows WSL2，见[跨平台部署](docs/linux-windows.md)。
+Windows（实验性）：只用 `WorldQuantTray.exe`（从 [Releases](https://github.com/Octo-o-o-o/autowq/releases) 下载）。单文件自带引擎，同时是托盘、完整命令行（`--engine <wq 参数>`，或 `--install-cli` 生成 `wq.cmd`）和调度入口；双击后没有配置会先开控制台完成向导。原生 Windows **只支持 API 渠道**（免费预设、OpenAI/Anthropic 协议、自建兼容接口），模型 CLI 订阅需走 WSL2。详见[跨平台部署](docs/linux-windows.md)。
 
 方式四：源码（开发）：
 
@@ -114,3 +114,10 @@ PYTHONPATH=src python3 -m unittest discover -s tests
 本项目非 WorldQuant 官方产品。本项目以 Apache License 2.0 开源（见 LICENSE 与 NOTICE.md）；公开发布前需由维护者核查完整 Git 历史与第三方内容。
 
 全历史复盘支持手动与自动触发：`./wq auto-research report`、`./wq auto-research run`；设置周期见[Auto Research说明](docs/auto-research.md)。不同渠道复核后，固定指导语进入后续研究与审查Prompt，预算和质量门槛不变。
+
+---
+
+<p align="center">
+  <a href="https://www.octoooo.com"><img src="https://octoooo.com/site-assets/favicon-64.png" width="30" alt="OctoLab 五瓣标"></a><br>
+  <sub>By <a href="https://www.octoooo.com"><b>OctoLab 千手实验室</b></a> · 那里还有更多有趣的项目，对各种合作保持开放</sub>
+</p>

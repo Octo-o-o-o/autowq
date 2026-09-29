@@ -8,7 +8,7 @@ A local WorldQuant BRAIN research workflow: propose a hypothesis → review thro
 
 ## Install
 
-Requirements: your own CLI subscription accounts or API keys. Without a subscription you can start on official free API tiers (`wq providers free` lists Gemini, OpenRouter, BigModel, SiliconFlow and other presets that need only one key). The macOS DMG bundles its runtime; every other install method needs Python 3.11+. The core runtime uses the Python standard library only. macOS is supported; Linux and Windows WSL2 use Docker-isolated providers. Native Windows has experimental support for the tray and scheduler control layer (see the Windows note under Option 2).
+Requirements: your own CLI subscription accounts or API keys. Without a subscription you can start on official free API tiers (`wq providers free` lists Gemini, OpenRouter, BigModel, SiliconFlow and other presets that need only one key). The macOS DMG bundles its runtime; every other install method needs Python 3.11+. The core runtime uses the Python standard library only. macOS is supported; Linux and Windows WSL2 use Docker-isolated providers. Native Windows has experimental support with API providers only (see the Windows note under Option 2).
 
 ```sh
 # Option 1: pipx (recommended; see https://pipx.pypa.io)
@@ -25,7 +25,7 @@ brew install --cask Octo-o-o-o/autowq/worldquant   # optional menu-bar app
 
 Option 3: macOS, DMG only (works out of the box). Download `WorldQuant-<version>.dmg` from [Releases](https://github.com/Octo-o-o-o/autowq/releases) and drag the app into Applications. The DMG ships its own Python runtime and engine; no system Python, Xcode Command Line Tools or pip needed. Use the menu-bar app (open it and follow the first-launch wizard to pick a workspace and finish onboarding), or skip the menu bar entirely and drive the bundled CLI at `WorldQuant.app/Contents/Resources/bin/wq` (suited to AI agents). Full commands for both: **[macOS bundle guide](docs/app-bundle.md)**. If the build is not notarized, install via `brew install --cask` (which removes quarantine) or right-click Open once.
 
-Windows (experimental): the tray shares the same control layer and feature set as the macOS menu bar. Download `WorldQuantTray.exe` (single file, engine bundled) from [Releases](https://github.com/Octo-o-o-o/autowq/releases) and run it inside a workspace that has completed `wq onboard`, optionally with `--workspace <dir>`; or from source, `pip install pystray Pillow` then `python scripts/setup_windows.py` to register the Task Scheduler runner and login autostart. Providers are not bundled with the exe — configure profiles.json yourself; the full research stack still recommends Linux / Windows WSL2, see the cross-platform guide.
+Windows (experimental): `WorldQuantTray.exe` alone (download from [Releases](https://github.com/Octo-o-o-o/autowq/releases)). The single file bundles the engine and is the tray, the full CLI (`--engine <wq args>`, or `--install-cli` to create `wq.cmd`) and the scheduler entry; on first launch without a config it opens a console for the wizard. Native Windows supports **API providers only** (free presets, OpenAI/Anthropic protocols, self-hosted compatible endpoints); model CLI subscriptions need WSL2. See the cross-platform guide (docs/linux-windows.md).
 
 Option 4: source checkout (development):
 
@@ -115,3 +115,10 @@ Configuration, cookies, real Alphas, databases, model outputs, logs and personal
 This is not an official WorldQuant product. The project is open source under the Apache License 2.0 (see LICENSE and NOTICE.md); the maintainer reviews the full Git history and third-party content before publishing.
 
 All-cycle review supports manual and automatic runs: `./wq auto-research report` and `./wq auto-research run`. See [Auto Research](docs/auto-research.md) for cadence and independent review. Accepted fixed guidance enters future prompts without changing budgets or quality gates.
+
+---
+
+<p align="center">
+  <a href="https://www.octoooo.com"><img src="https://octoooo.com/site-assets/favicon-64.png" width="30" alt="OctoLab mark"></a><br>
+  <sub>By <a href="https://www.octoooo.com"><b>OctoLab</b></a> · more curious projects live in the studio, and collaborations stay open</sub>
+</p>
