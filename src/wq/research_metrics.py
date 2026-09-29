@@ -85,10 +85,15 @@ def freeze_contract(conn, pool_id, members, candidate_id=None, minimum=60, forwa
                     risk=_sd(portfolio)
                     if risk<=0: raise ValueError('Degenerate reference risk')
                     return {'weights':ws,'scale':1/risk}
-                contract.update(status='frozen',reference_fit=fit(list(members)),augmented_fit=fit(ids),
-                                calibration_intervals_hash=util.sha256_json(dates),calibration_observations=len(dates),
-                                calibration_end=dates[-1][1],
-                                outcome_versions={i:all_trials[i]['outcome_version'] for i in ids})
+                try:
+                    reference_fit=fit(list(members));augmented_fit=fit(ids)
+                except ValueError as exc:
+                    contract['errors']={'calibration':str(exc)}
+                else:
+                    contract.update(status='frozen',reference_fit=reference_fit,augmented_fit=augmented_fit,
+                                    calibration_intervals_hash=util.sha256_json(dates),calibration_observations=len(dates),
+                                    calibration_end=dates[-1][1],
+                                    outcome_versions={i:all_trials[i]['outcome_version'] for i in ids})
     conn.execute('INSERT INTO learning_pool_contracts VALUES(?,?,?)',(pool_id,json.dumps(contract),util.now_iso()))
     return contract
 
@@ -194,7 +199,7 @@ def comparison(conn, experiment_id):
     row=conn.execute('SELECT document_json FROM learning_experiments WHERE experiment_id=?',(experiment_id,)).fetchone()
     if not row:raise ValueError('Unknown experiment')
     contract=json.loads(row[0]); assignments=list(conn.execute('SELECT * FROM learning_assignments WHERE experiment_id=?',(experiment_id,)))
-    trials=as_of(conn); arms={};pending=0
+    trials=as_of(conn); arms={};pending=0;family_sets={}
     for arm in ('baseline','learning'):
         cycles={r['cycle_id'] for r in assignments if r['arm']==arm}
         groups={}; requests=0
@@ -203,12 +208,14 @@ def comparison(conn, experiment_id):
             outcome=t['outcome'] or {};requests+=bool(outcome.get('request_started'))
             family=t['family_id'] or t['execution_id'];g=groups.setdefault(family,{'usable':False,'pending':False})
             g['usable']|=outcome.get('quality')=='usable';g['pending']|=outcome.get('execution') in ('pending','unknown')
+        family_sets[arm]=set(groups)
         successes=sum(g['usable'] for g in groups.values());pending+=sum(g['pending'] for g in groups.values())
         costs=model_cost(conn,cycles)
         arms[arm]={'cycles':len(cycles),'families':len(groups),'usable_families':successes,
                    'interval_95':wilson(successes,len(groups)),'requests':requests,'cost':costs}
     closed=all(conn.execute('SELECT state FROM research_cycles WHERE cycle_id=?',(r['cycle_id'],)).fetchone()[0]=='closed' for r in assignments)
     reasons=[]
+    if family_sets['baseline'] & family_sets['learning']:reasons.append('shared_families_between_arms')
     if len(assignments)<contract['max_cycles'] or not closed:reasons.append('allocation_or_execution_incomplete')
     if pending:reasons.append('unresolved_outcomes')
     if any(a['families']<20 for a in arms.values()):reasons.append('fewer_than_20_families_per_arm')
