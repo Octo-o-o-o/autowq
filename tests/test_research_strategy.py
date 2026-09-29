@@ -209,3 +209,41 @@ class ResearchStrategyTests(unittest.TestCase):
             self.assertEqual(self.c.execute('SELECT COUNT(*) FROM tasks').fetchone()[0],0)
             learning.stop_experiment(self.c,first['new_experiment'],'User stops this comparison')
             self.assertEqual(maintenance.tick(self.c,self.cfg,True)['learning_state']['mode'],'baseline')
+
+    def test_degenerate_pool_is_unavailable_not_a_maintenance_failure(self):
+        self.trial('a',quality='usable');self.trial('b',proposal('std')['ast'],quality='usable')
+        values=[sum((j%3)-.4 for j in range(i)) for i in range(61)]
+        self.snapshot('a',values);self.snapshot('b',[-x for x in values])
+        result=metrics.freeze_contract(self.c,'cancelled',['a'],'b',minimum=20)
+        self.assertEqual(result['status'],'unavailable')
+        self.assertIn('calibration',result['errors'])
+        self.assertEqual(self.c.execute('SELECT COUNT(*) FROM learning_pool_contracts').fetchone()[0],1)
+
+    def test_refresh_rotates_even_when_market_cutoff_never_advances(self):
+        from wq import brain_jobs
+        brain_jobs.setup(self.c)
+        self.cfg.data['research_learning']={'maintenance_enabled':True,'refresh_enabled':True,'refresh_per_day':1}
+        self.cfg.data['brain_api']={'enabled':True,'authorized_until':'2099-01-01T00:00:00Z'}
+        for key in ('a','b'):
+            self.trial(key,quality='usable');self.snapshot(key,[0,1,3,2])
+            tid,_=store.enqueue_task(self.c,'brain_simulation',{'test':key})
+            self.c.execute("UPDATE tasks SET status='succeeded' WHERE task_id=?",(tid,))
+            self.c.execute('UPDATE learning_trials SET task_id=? WHERE trial_id=?',(tid,key))
+            self.c.execute('INSERT INTO brain_runs VALUES(?,?,?,?,?,?,?)',(tid,'complete',None,key,None,util.now_iso(),util.now_iso()))
+        self.c.execute("UPDATE learning_observations SET available_at=CASE alpha_id WHEN 'a' THEN '2025-01-01' ELSE '2025-01-02' END")
+        original=learning.as_of(self.c)
+        for t in original:
+            t['outcome'].update(data_through='2025-01-04',content_hash='fixture')
+        calls=[]
+        def refresh(conn,cfg,aid):calls.append(aid);return 'read-only-test',False
+        with patch('wq.research_learning.sync',return_value={}), \
+             patch('wq.research_learning.as_of',return_value=original), \
+             patch('wq.autopilot.policy',return_value={'settings':self.settings,'bindings':self.bindings}), \
+             patch('wq.research_learning.freeze_pool'),patch('wq.research_metrics.freeze_contract'), \
+             patch('wq.feedback.enqueue_refresh',side_effect=refresh):
+            maintenance.tick(self.c,self.cfg,True)
+            self.assertEqual(calls[0],'a')
+            calls.clear()
+            self.c.execute("UPDATE learning_observations SET available_at='2025-02-01' WHERE alpha_id='a'")
+            maintenance.tick(self.c,self.cfg,True)
+            self.assertEqual(calls[0],'b')

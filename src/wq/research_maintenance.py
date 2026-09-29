@@ -8,7 +8,10 @@ from . import util, store
 
 def state(conn):
     raw=store.get_flag(conn,'research_learning_state')
-    return json.loads(raw) if raw else {'mode':'baseline','reason':'No prospective evidence evaluated'}
+    if raw:return json.loads(raw)
+    table=conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='learning_experiments'").fetchone()
+    experiment=conn.execute('SELECT experiment_id FROM learning_experiments ORDER BY created_at DESC LIMIT 1').fetchone() if table else None
+    return {'mode':'shadow','reason':'Prospective comparison registered; waiting for a cycle boundary','experiment':experiment[0]} if experiment else {'mode':'baseline','reason':'No prospective evidence evaluated'}
 
 
 def rules_enabled(conn,cfg,cycle_id):
@@ -114,7 +117,11 @@ def tick(conn,cfg,force=False):
     authorized_until=cfg.get('brain_api','authorized_until')
     authorized=bool(authorized_until and util.now()<util.parse_iso(authorized_until))
     if authorized and cfg.get('brain_api','enabled') and cfg.get('research_learning','refresh_enabled',default=False):
-        for trial in sorted(trials,key=lambda t:(t['outcome'] or {}).get('data_through') or ''):
+        def last_collection(trial):
+            oid=(trial['outcome'] or {}).get('observation_id')
+            row=conn.execute('SELECT available_at FROM learning_observations WHERE observation_id=?',(oid,)).fetchone()
+            return row[0] if row else ''
+        for trial in sorted(trials,key=last_collection):
             if used>=cap:break
             run=conn.execute('SELECT alpha_id FROM brain_runs WHERE task_id=?',(trial['task_id'],)).fetchone()
             if not run or not run[0]:continue
