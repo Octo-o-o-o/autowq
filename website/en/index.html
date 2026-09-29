@@ -69,7 +69,7 @@
         { "@type": "Question", "name": "Does autowq itself cost anything?", "acceptedAnswer": { "@type": "Answer", "text": "No — it's free and open source. It orchestrates your own model subscriptions / API keys and your own BRAIN account; those costs are between you and the vendors. The wizard never starts paid inference. Without a subscription you can start on official free API tiers (wq providers free: Gemini, OpenRouter, BigModel, SiliconFlow and more); an exhausted quota pauses and resumes automatically." } },
         { "@type": "Question", "name": "Does automation mean submissions and income?", "acceptedAnswer": { "@type": "Answer", "text": "No. Passing screens, accepted submissions, consultant eligibility and actual payouts are four different states, and submission has its own acceptance gates." } },
         { "@type": "Question", "name": "Do my credentials or research get uploaded?", "acceptedAnswer": { "@type": "Answer", "text": "No. All state lives in a local SQLite ledger; exports exclude cookies, passwords and task inputs; model calls go only to providers you explicitly select." } },
-        { "@type": "Question", "name": "How well is Windows supported?", "acceptedAnswer": { "@type": "Answer", "text": "The native tray and Task Scheduler runner work (experimental); the most mature process-isolation paths remain sandbox-exec on macOS and Docker on Linux/WSL2." } }
+        { "@type": "Question", "name": "How well is Windows supported?", "acceptedAnswer": { "@type": "Answer", "text": "WorldQuantTray.exe alone runs the full workflow on native Windows (experimental): the wizard, tray, CLI and Task Scheduler runs live in that one file. Native Windows has no sandbox for model processes, so it supports API providers only (free presets included); to use CLI subscriptions such as Claude Code or Codex, deploy the Linux + Docker setup inside WSL2." } }
       ]
     }
   ]
@@ -110,7 +110,7 @@
           <div class="cm-head">Desktop · just open it</div>
           <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.16/WorldQuant-0.2.16.dmg" data-os="macos"><span class="cm-l">macOS full package</span><span class="cm-r">DMG · 54 MB</span></a>
           <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.16/WorldQuant-0.2.16-light.dmg"><span class="cm-l">macOS light package</span><span class="cm-r">DMG · 1 MB</span></a>
-          <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases" target="_blank" rel="noopener" data-os="windows"><span class="cm-l">Windows tray</span><span class="cm-r">.exe · experimental</span></a>
+          <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.16/WorldQuantTray.exe" data-os="windows"><span class="cm-l">Windows tray</span><span class="cm-r">.exe · experimental</span></a>
           <hr>
           <div class="cm-head">Developers</div>
           <button role="menuitem" type="button" data-cmd="pipx install wq-pilot"><span class="cm-l">Command line</span><span class="cm-r">pipx install wq-pilot</span></button>
@@ -248,10 +248,10 @@
     <div class="dl-card" data-os="windows">
       <div class="dl-tag">Windows · experimental</div>
       <h3>Windows tray</h3>
-      <div class="dl-size">.exe</div>
-      <p>Native tray + Task Scheduler. Grab <code>WorldQuantTray.exe</code> from Releases and run it.</p>
-      <a class="btn dl-btn" href="https://github.com/Octo-o-o-o/autowq/releases" target="_blank" rel="noopener">Get it on Releases</a>
-      <div class="dl-meta">Native tray · Task Scheduler</div>
+      <div class="dl-size">17 <span>MB</span></div>
+      <p>One <code>WorldQuantTray.exe</code> with the engine inside: tray, CLI and Task Scheduler runs. Double-click and the wizard takes over. API providers only (free presets included). Not code-signed yet; if SmartScreen stops it, choose “More info → Run anyway”.</p>
+      <a class="btn dl-btn" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.16/WorldQuantTray.exe">Download the Windows .exe</a>
+      <div class="dl-meta">0.2.16 · single file · no Python install needed</div>
     </div>
   </div>
   <p class="dl-choose">Both macOS packages are feature-identical; the only difference is the bundled Python. When in doubt, take the full one.</p>
@@ -280,7 +280,7 @@
   <details><summary>Does automation mean submissions and income?</summary><p>No. Passing screens, accepted submissions, consultant eligibility and actual payouts are four different states, and submission has its own acceptance gates.</p></details>
   <details><summary>Do my credentials or research get uploaded?</summary><p>No. All state lives in a local SQLite ledger; exports exclude cookies, passwords and task inputs; model calls go only to providers you explicitly select.</p></details>
   <details><summary>Full or light macOS DMG?</summary><p>Both are notarized and install by dragging into Applications. The features match. The full DMG includes Python and opens ready to use. The light DMG is only the menu and the engine; first setup looks for Python 3.11+ on the machine, and the prompt tells you to install Xcode Command Line Tools if it is missing. Check for Updates opens the full DMG.</p></details>
-  <details><summary>How well is Windows supported?</summary><p>The native tray and Task Scheduler runner work (experimental); the most mature process-isolation paths remain sandbox-exec on macOS and Docker on Linux/WSL2.</p></details>
+  <details><summary>How well is Windows supported?</summary><p>WorldQuantTray.exe alone runs the full workflow on native Windows (experimental): the wizard, tray, CLI and Task Scheduler runs live in that one file. Native Windows has no sandbox for model processes, so it supports API providers only (free presets included); to use CLI subscriptions such as Claude Code or Codex, deploy the Linux + Docker setup inside WSL2.</p></details>
 </section>
 </div>
 
@@ -315,6 +315,6 @@ window.ONBOARD_LINES = [
   { text: 'Done. Hit "Start automation" in the menu bar.', cls: 'ok', pause: 900 }
 ];
 </script>
-<script src="/script.js?v=3"></script>
+<script src="/script.js?v=4"></script>
 </body>
 </html>

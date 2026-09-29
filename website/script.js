@@ -121,8 +121,8 @@ document.documentElement.classList.add('js');
       hero.href = 'https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.16/WorldQuant-0.2.16.dmg';
       hero.textContent = ZH ? '下载 macOS 版 · 54 MB' : 'Download for macOS · 54 MB';
     } else if (isWin) {
-      hero.href = 'https://github.com/Octo-o-o-o/autowq/releases';
-      hero.textContent = ZH ? '下载 Windows 版' : 'Download for Windows';
+      hero.href = 'https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.16/WorldQuantTray.exe';
+      hero.textContent = ZH ? '下载 Windows 版 · 17 MB' : 'Download for Windows · 17 MB';
     }
   }
 

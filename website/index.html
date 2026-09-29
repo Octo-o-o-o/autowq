@@ -69,7 +69,7 @@
         { "@type": "Question", "name": "autowq 收费吗？", "acceptedAnswer": { "@type": "Answer", "text": "项目本身免费开源。它编排的是你自己的模型订阅 / API Key 和你自己的 BRAIN 账号，费用由你与供应商结算；向导不会发起任何付费推理。没有订阅也可以用官方免费 API 起步（wq providers free：Gemini、OpenRouter、智谱、硅基流动等），额度用尽会自动暂停、恢复后自动继续。" } },
         { "@type": "Question", "name": "自动研究 = 自动提交 = 收益吗？", "acceptedAnswer": { "@type": "Answer", "text": "不等于。平台筛选通过、提交接收、顾问资格、实际到账是四种不同状态，提交有独立验收门禁。" } },
         { "@type": "Question", "name": "我的凭证和研究会上传吗？", "acceptedAnswer": { "@type": "Answer", "text": "不会。一切状态存本地 SQLite 账本；导出不包含 Cookie、密码与任务输入；模型请求只发给你显式选择的渠道。" } },
-        { "@type": "Question", "name": "Windows 支持到什么程度？", "acceptedAnswer": { "@type": "Answer", "text": "原生托盘与任务计划调度已可用（实验性）；模型进程的沙箱隔离仍以 macOS sandbox-exec 与 Linux/WSL2 Docker 为最成熟路径。" } }
+        { "@type": "Question", "name": "Windows 支持到什么程度？", "acceptedAnswer": { "@type": "Answer", "text": "只用 WorldQuantTray.exe 就能在原生 Windows 上跑完整流程（实验性）：向导、托盘、命令行和任务计划调度都在这个文件里。原生 Windows 没有模型进程的沙箱，因此只支持 API 渠道（含免费预设）；要用 Claude Code、Codex 等 CLI 订阅，请在 WSL2 里走 Linux + Docker 部署。" } }
       ]
     }
   ]
@@ -110,7 +110,7 @@
           <div class="cm-head">桌面版 · 打开即用</div>
           <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.16/WorldQuant-0.2.16.dmg" data-os="macos"><span class="cm-l">macOS 完整包</span><span class="cm-r">DMG · 54 MB</span></a>
           <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.16/WorldQuant-0.2.16-light.dmg"><span class="cm-l">macOS 轻量包</span><span class="cm-r">DMG · 1 MB</span></a>
-          <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases" target="_blank" rel="noopener" data-os="windows"><span class="cm-l">Windows 托盘版</span><span class="cm-r">.exe · 实验性</span></a>
+          <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.16/WorldQuantTray.exe" data-os="windows"><span class="cm-l">Windows 托盘版</span><span class="cm-r">.exe · 实验性</span></a>
           <hr>
           <div class="cm-head">开发者</div>
           <button role="menuitem" type="button" data-cmd="pipx install wq-pilot"><span class="cm-l">命令行 CLI</span><span class="cm-r">pipx install wq-pilot</span></button>
@@ -248,10 +248,10 @@
     <div class="dl-card" data-os="windows">
       <div class="dl-tag">Windows · 实验性</div>
       <h3>Windows 托盘版</h3>
-      <div class="dl-size">.exe</div>
-      <p>原生托盘 + 任务计划调度。从 Releases 下载 <code>WorldQuantTray.exe</code> 即可。</p>
-      <a class="btn dl-btn" href="https://github.com/Octo-o-o-o/autowq/releases" target="_blank" rel="noopener">去 Releases 下载</a>
-      <div class="dl-meta">原生托盘 · 任务计划调度</div>
+      <div class="dl-size">17 <span>MB</span></div>
+      <p>单个 <code>WorldQuantTray.exe</code>，自带引擎：托盘、命令行和任务计划调度都在里面，双击后向导直接接管。仅支持 API 渠道（含免费预设）。未做代码签名，SmartScreen 拦截时点「更多信息 → 仍要运行」。</p>
+      <a class="btn dl-btn" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.16/WorldQuantTray.exe">下载 Windows 版 .exe</a>
+      <div class="dl-meta">0.2.16 · 单文件 · 无需安装 Python</div>
     </div>
   </div>
   <p class="dl-choose">两个 macOS 包功能完全相同，区别只在「要不要自带 Python」。拿不准，就选完整包。</p>
@@ -280,7 +280,7 @@
   <details><summary>自动研究 = 自动提交 = 收益吗？</summary><p>不等于。平台筛选通过、提交接收、顾问资格、实际到账是四种不同状态，提交有独立验收门禁。</p></details>
   <details><summary>我的凭证和研究会上传吗？</summary><p>不会。一切状态存本地 SQLite 账本；导出不包含 Cookie、密码与任务输入；模型请求只发给你显式选择的渠道。</p></details>
   <details><summary>macOS 完整包和轻量包怎么选？</summary><p>两个都是已公证的 DMG，拖进“应用程序”即可，功能相同。完整包自带 Python，打开就能用。轻量包只有菜单和引擎，第一次设置时找本机的 Python 3.11+；没有的话按提示安装 Xcode 命令行工具。检查更新打开的是完整包。</p></details>
-  <details><summary>Windows 支持到什么程度？</summary><p>原生托盘与任务计划调度已可用（实验性）；模型进程的沙箱隔离仍以 macOS sandbox-exec 与 Linux/WSL2 Docker 为最成熟路径。</p></details>
+  <details><summary>Windows 支持到什么程度？</summary><p>只用 WorldQuantTray.exe 就能在原生 Windows 上跑完整流程（实验性）：向导、托盘、命令行和任务计划调度都在这个文件里。原生 Windows 没有模型进程的沙箱，因此只支持 API 渠道（含免费预设）；要用 Claude Code、Codex 等 CLI 订阅，请在 WSL2 里走 Linux + Docker 部署。</p></details>
 </section>
 </div>
 
@@ -315,6 +315,6 @@ window.ONBOARD_LINES = [
   { text: '完成。去菜单栏点「开始自动运行」。', cls: 'ok', pause: 900 }
 ];
 </script>
-<script src="/script.js?v=3"></script>
+<script src="/script.js?v=4"></script>
 </body>
 </html>
