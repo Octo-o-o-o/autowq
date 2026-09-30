@@ -2,14 +2,66 @@ import AppKit
 import Darwin
 import UserNotifications
 
+/// 界面设计规范：菜单行与研究进展窗口共用这一套间距、字体与颜色，调整只在这里改。
+/// 间距取 4pt 网格；字体分 窗口标题 / 区块标题 / 正文 / 辅助信息 / 说明 五档；
+/// 长文本一律折行（preferredMaxLayoutWidth），不截断。
+enum UI {
+    // 菜单
+    static let menuWidth: CGFloat = 600      // 菜单统一宽度
+    static let menuPadX: CGFloat = 16        // 菜单行水平内边距
+    static let menuRowPadY: CGFloat = 6      // 状态行垂直内边距
+    static let menuBlockPadY: CGFloat = 10   // 卡片式菜单行垂直内边距
+    static let titleBodyGap: CGFloat = 4     // 标题段落后与正文的间距
+    // 窗口
+    static let windowPad: CGFloat = 20       // 窗口内容边距
+    static let headerPadY: CGFloat = 12      // 工具行垂直间距
+    static let cardGap: CGFloat = 12         // 卡片间距
+    static let cardPad: CGFloat = 14         // 卡片内边距
+    static let cardTitleGap: CGFloat = 6     // 卡片标题与正文间距
+    static let cardRadius: CGFloat = 10
+    static let controlGap: CGFloat = 8       // 表单行内、按钮间距
+    // 字体
+    static let fontWindowTitle = NSFont.systemFont(ofSize: 15, weight: .semibold)
+    static let fontTitle = NSFont.systemFont(ofSize: 13, weight: .semibold)
+    static let fontBody = NSFont.systemFont(ofSize: 13)
+    static let fontMeta = NSFont.systemFont(ofSize: 12)
+    static let fontCaption = NSFont.systemFont(ofSize: 11)
+    // 语义色（徽章）：提交=绿 备选=橙 失败=红 进行中=蓝
+    static func badgeColor(_ badge: String) -> NSColor? {
+        switch badge {
+        case "submitted": return .systemGreen
+        case "standby": return .systemOrange
+        case "failed": return .systemRed
+        case "progress": return .systemBlue
+        default: return nil
+        }
+    }
+}
+
+/// 折行标签：宽度由 Auto Layout 决定后回写 preferredMaxLayoutWidth，保证高度按实际宽度计算。
+final class WrapLabel: NSTextField {
+    override func layout() {
+        super.layout()
+        if preferredMaxLayoutWidth != bounds.width {
+            preferredMaxLayoutWidth = bounds.width
+        }
+    }
+}
+
+/// 滚动文档容器：NSView 默认非翻转，内容不足一屏时会贴底；翻转让列表始终从顶部排布。
+final class FlippedView: NSView {
+    override var isFlipped: Bool { true }
+}
+
 /// 预设切换对话框里的临时轮数输入（标签 + 数字框 + 步进器）；确认按钮标题随轮数实时更新。
+/// NSAlert 的 accessoryView 区域对 NSStackView 的固有尺寸支持不可靠（标签会被压没），这里用固定 frame 布局。
 final class PresetCyclesInput: NSObject {
     static let maxCycles = 100
     let alert: NSAlert
     let lang: String
     let field = NSTextField(string: "1")
     let stepper = NSStepper()
-    let row = NSStackView()
+    let row = NSView(frame: NSRect(x: 0, y: 0, width: 220, height: 26))
 
     init(alert: NSAlert, lang: String) {
         self.alert = alert
@@ -20,15 +72,16 @@ final class PresetCyclesInput: NSObject {
         field.formatter = formatter
         field.alignment = .center
         field.font = .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
-        field.widthAnchor.constraint(equalToConstant: 48).isActive = true
+        field.frame = NSRect(x: 72, y: 1, width: 48, height: 24)
         field.target = self; field.action = #selector(changed(_:))
         stepper.minValue = 1; stepper.maxValue = Double(Self.maxCycles); stepper.valueWraps = false
+        stepper.frame = NSRect(x: 72 + 48 + UI.controlGap, y: 0, width: 20, height: 26)
         stepper.target = self; stepper.action = #selector(changed(_:))
-        row.orientation = .horizontal
-        row.spacing = 6
-        row.addArrangedSubview(NSTextField(labelWithString: lang == "zh" ? "临时轮数" : "Cycles"))
-        row.addArrangedSubview(field)
-        row.addArrangedSubview(stepper)
+        let label = NSTextField(labelWithString: lang == "zh" ? "临时轮数" : "Cycles")
+        label.frame = NSRect(x: 0, y: 4, width: 64, height: 17)
+        row.addSubview(label)
+        row.addSubview(field)
+        row.addSubview(stepper)
     }
     func value() -> Int { max(1, min(Self.maxCycles, field.integerValue)) }
     func buttonTitle() -> String {
@@ -58,14 +111,14 @@ final class CustomProviderForm: NSObject {
         let zh = lang == "zh"
         view.orientation = .vertical
         view.alignment = .leading
-        view.spacing = 6
-        view.setFrameSize(NSSize(width: 380, height: 196))
+        view.spacing = UI.controlGap
+        view.setFrameSize(NSSize(width: 380, height: 200))
         protocolPopup.addItems(withTitles: ["openai", "anthropic"])
         noKey.title = zh ? "这个服务不需要 API Key" : "This service does not need an API key"
         func row(_ label: String, _ field: NSView) -> NSStackView {
             let line = NSStackView()
             line.orientation = .horizontal
-            line.spacing = 8
+            line.spacing = UI.controlGap
             let title = NSTextField(labelWithString: label)
             title.widthAnchor.constraint(equalToConstant: 72).isActive = true
             if let text = field as? NSTextField { text.widthAnchor.constraint(equalToConstant: 260).isActive = true }
@@ -133,7 +186,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let research = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     var researchMenu = NSMenu()
     var researchWindow: NSWindow?
-    var researchText: NSTextView?
+    var researchHeaderTitle: NSTextField?
+    var researchScroll: NSScrollView?
+    var researchStack: NSStackView?
     var researchRefreshButton: NSButton?
     var researchMenuButton: NSButton?
     var researchResponse: [String: Any] = [:]
@@ -163,31 +218,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         row.toolTip = value
         row.isEnabled = false
     }
+    /// 单行/多行信息行：自定义视图 + 折行标签，宽度统一 UI.menuWidth，长文本折行不截断。
+    /// 内容未变化时保留原视图，避免 15 秒状态刷新反复重建。
+    func wrapRow(_ row: NSMenuItem, _ value: String, font: NSFont = UI.fontMeta, color: NSColor = .secondaryLabelColor) {
+        let attr = NSAttributedString(string: value, attributes: [.font: font, .foregroundColor: color])
+        row.title = value
+        row.toolTip = value
+        row.isEnabled = false
+        if let field = row.view?.subviews.compactMap({ $0 as? NSTextField }).first,
+           field.attributedStringValue.isEqual(to: attr) { return }
+        let field = NSTextField(wrappingLabelWithString: "")
+        field.attributedStringValue = attr
+        let textWidth = UI.menuWidth - UI.menuPadX * 2
+        field.preferredMaxLayoutWidth = textWidth
+        let height = ceil(field.cell!.cellSize(forBounds: NSRect(x: 0, y: 0, width: textWidth, height: 10000)).height)
+        field.frame = NSRect(x: UI.menuPadX, y: UI.menuRowPadY, width: textWidth, height: height)
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: UI.menuWidth, height: height + UI.menuRowPadY * 2))
+        view.addSubview(field)
+        view.setAccessibilityElement(true)
+        view.setAccessibilityLabel(value)
+        row.view = view
+    }
     func info(_ text: String) -> NSMenuItem {
         let row = NSMenuItem(title: text, action: nil, keyEquivalent: "")
-        textRow(row, text); return row
+        wrapRow(row, text)
+        return row
     }
-    func block(_ lines: [String], width: CGFloat = 560, titleColor: NSColor? = nil) -> NSMenuItem {
+    /// 卡片式菜单行：默认首行作标题（13 semibold，可按徽章着色）+ 其余作正文（12 辅助色）；
+    /// heading=false 时整组按正文渲染（用于没有天然标题的详情面板）。
+    func block(_ lines: [String], width: CGFloat = UI.menuWidth, titleColor: NSColor? = nil, heading: Bool = true) -> NSMenuItem {
         let text = NSTextField(wrappingLabelWithString: "")
         let attr = NSMutableAttributedString()
-        if let title = lines.first {
-            attr.append(NSAttributedString(string: title, attributes: [
-                .font: NSFont.systemFont(ofSize: 13, weight: .semibold),
-                .foregroundColor: titleColor ?? NSColor.labelColor]))
+        let rest = heading ? lines.dropFirst() : []
+        if heading, let title = lines.first {
+            let style = NSMutableParagraphStyle()
+            style.paragraphSpacing = rest.isEmpty ? 0 : UI.titleBodyGap
+            attr.append(NSAttributedString(string: title + (rest.isEmpty ? "" : "\n"), attributes: [
+                .font: UI.fontTitle,
+                .foregroundColor: titleColor ?? NSColor.labelColor,
+                .paragraphStyle: style]))
         }
-        let rest = lines.dropFirst()
-        if !rest.isEmpty {
-            if !attr.string.isEmpty { attr.append(NSAttributedString(string: "\n")) }
-            attr.append(NSAttributedString(string: rest.joined(separator: "\n"), attributes: [
-                .font: NSFont.systemFont(ofSize: 12),
-                .foregroundColor: NSColor.secondaryLabelColor]))
+        let body = heading ? Array(rest) : lines
+        if !body.isEmpty {
+            let style = NSMutableParagraphStyle()
+            style.lineSpacing = 2
+            attr.append(NSAttributedString(string: body.joined(separator: "\n"), attributes: [
+                .font: UI.fontMeta,
+                .foregroundColor: NSColor.secondaryLabelColor,
+                .paragraphStyle: style]))
         }
         text.attributedStringValue = attr
-        text.preferredMaxLayoutWidth = width - 28
-        text.frame = NSRect(x: 14, y: 8, width: width - 28, height: 1)
-        let height = text.cell!.cellSize(forBounds: NSRect(x: 0, y: 0, width: width - 28, height: 10000)).height
-        text.frame.size.height = height
-        let view = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height + 16))
+        let textWidth = width - UI.menuPadX * 2
+        text.preferredMaxLayoutWidth = textWidth
+        let height = ceil(text.cell!.cellSize(forBounds: NSRect(x: 0, y: 0, width: textWidth, height: 10000)).height)
+        text.frame = NSRect(x: UI.menuPadX, y: UI.menuBlockPadY, width: textWidth, height: height)
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height + UI.menuBlockPadY * 2))
         view.addSubview(text)
         view.setAccessibilityElement(true)
         view.setAccessibilityLabel(lines.joined(separator: "，"))
@@ -225,33 +310,81 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if ready { showResearch() }
         return true
     }
+    /// 研究进展窗口：工具行（标题左 + 按钮右）+ 分隔线 + 卡片式分节列表，全部 Auto Layout。
     @objc func showResearch() {
         if researchWindow == nil {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 680),
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 720, height: 640),
                                   styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false
-            window.minSize = NSSize(width: 620, height: 440)
+            window.minSize = NSSize(width: 560, height: 420)
             let content = window.contentView!
+
+            let headerTitle = NSTextField(labelWithString: t("研究进展", "Research progress"))
+            headerTitle.font = UI.fontWindowTitle
+            headerTitle.translatesAutoresizingMaskIntoConstraints = false
+            content.addSubview(headerTitle)
+            researchHeaderTitle = headerTitle
+
             let refreshButton = NSButton(title: t("刷新", "Refresh"), target: self, action: #selector(refreshResearch))
-            refreshButton.frame = NSRect(x: 20, y: 635, width: 100, height: 28)
-            refreshButton.autoresizingMask = [.minYMargin]
-            content.addSubview(refreshButton); researchRefreshButton = refreshButton
             let menuButton = NSButton(title: t("托盘菜单", "Tray menu"), target: self, action: #selector(openTrayMenu))
-            menuButton.frame = NSRect(x: 130, y: 635, width: 130, height: 28)
-            menuButton.autoresizingMask = [.minYMargin]
-            content.addSubview(menuButton); researchMenuButton = menuButton
-            let scroll = NSScrollView(frame: NSRect(x: 20, y: 20, width: 760, height: 600))
+            let actions = NSStackView(views: [menuButton, refreshButton])
+            actions.orientation = .horizontal
+            actions.spacing = UI.controlGap
+            actions.translatesAutoresizingMaskIntoConstraints = false
+            content.addSubview(actions)
+            researchRefreshButton = refreshButton
+            researchMenuButton = menuButton
+
+            let divider = NSBox()
+            divider.boxType = .separator
+            divider.translatesAutoresizingMaskIntoConstraints = false
+            content.addSubview(divider)
+
+            let scroll = NSScrollView()
             scroll.hasVerticalScroller = true
-            scroll.autoresizingMask = [.width, .height]
-            let view = NSTextView(frame: scroll.contentView.bounds)
-            view.isEditable = false; view.isSelectable = true
-            view.isVerticallyResizable = true; view.isHorizontallyResizable = false
-            view.autoresizingMask = [.width]
-            view.textContainer?.widthTracksTextView = true
-            view.textContainerInset = NSSize(width: 12, height: 12)
-            view.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-            scroll.documentView = view; content.addSubview(scroll)
-            researchWindow = window; researchText = view
+            scroll.drawsBackground = false
+            scroll.borderType = .noBorder
+            scroll.translatesAutoresizingMaskIntoConstraints = false
+            content.addSubview(scroll)
+            researchScroll = scroll
+
+            NSLayoutConstraint.activate([
+                actions.topAnchor.constraint(equalTo: content.topAnchor, constant: UI.headerPadY),
+                actions.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -UI.windowPad),
+                headerTitle.centerYAnchor.constraint(equalTo: actions.centerYAnchor),
+                headerTitle.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: UI.windowPad),
+                headerTitle.trailingAnchor.constraint(lessThanOrEqualTo: actions.leadingAnchor, constant: -UI.controlGap),
+                divider.topAnchor.constraint(equalTo: actions.bottomAnchor, constant: UI.headerPadY),
+                divider.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+                divider.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+                scroll.topAnchor.constraint(equalTo: divider.bottomAnchor),
+                scroll.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+                scroll.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+                scroll.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+            ])
+
+            // 文档容器钉住滚动区宽度、高度至少一屏；卡片栈钉住容器四边，超出后向下延伸滚动。
+            let container = FlippedView()
+            container.translatesAutoresizingMaskIntoConstraints = false
+            scroll.documentView = container
+            let stack = NSStackView()
+            stack.orientation = .vertical
+            stack.spacing = UI.cardGap
+            stack.edgeInsets = NSEdgeInsets(top: UI.windowPad, left: 0, bottom: UI.windowPad, right: 0)
+            stack.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(stack)
+            NSLayoutConstraint.activate([
+                container.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
+                container.trailingAnchor.constraint(equalTo: scroll.contentView.trailingAnchor),
+                container.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
+                container.heightAnchor.constraint(greaterThanOrEqualTo: scroll.contentView.heightAnchor),
+                stack.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+                stack.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+                stack.topAnchor.constraint(equalTo: container.topAnchor),
+                stack.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            ])
+            researchStack = stack
+            researchWindow = window
             window.center()
         }
         updateResearchWindow()
@@ -259,24 +392,85 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.activate(ignoringOtherApps: true)
         perform("research")
     }
-    @objc func refreshResearch() { perform("research") }
-    @objc func openTrayMenu() {
-        guard let content = researchWindow?.contentView, let button = researchMenuButton else { return }
-        menu.popUp(positioning: nil, at: NSPoint(x: button.frame.minX, y: button.frame.minY), in: content)
+    /// 单个分节卡片：圆角底板 + 标题（13 semibold）+ 正文（13 regular，行距 3pt）。
+    func researchCard(title: String, lines: [String], meta: Bool = false) -> NSView {
+        let card = NSView()
+        card.wantsLayer = true
+        card.layer?.cornerRadius = UI.cardRadius
+        // 深浅色通用的浅色底板 + 细描边：labelColor 随外观自动反色
+        card.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.06).cgColor
+        card.layer?.borderWidth = 1
+        card.layer?.borderColor = NSColor.labelColor.withAlphaComponent(0.08).cgColor
+        let titleLabel = WrapLabel(wrappingLabelWithString: title)
+        titleLabel.font = meta ? UI.fontMeta : UI.fontTitle
+        titleLabel.textColor = meta ? .secondaryLabelColor : .labelColor
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(titleLabel)
+        NSLayoutConstraint.activate([
+            titleLabel.topAnchor.constraint(equalTo: card.topAnchor, constant: UI.cardPad),
+            titleLabel.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: UI.cardPad),
+            titleLabel.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -UI.cardPad),
+        ])
+        if lines.isEmpty {
+            titleLabel.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -UI.cardPad).isActive = true
+        } else {
+            let style = NSMutableParagraphStyle()
+            style.lineSpacing = 3
+            let bodyLabel = WrapLabel(wrappingLabelWithString: "")
+            bodyLabel.attributedStringValue = NSAttributedString(string: lines.joined(separator: "\n"), attributes: [
+                .font: UI.fontBody, .foregroundColor: NSColor.labelColor, .paragraphStyle: style])
+            bodyLabel.translatesAutoresizingMaskIntoConstraints = false
+            card.addSubview(bodyLabel)
+            NSLayoutConstraint.activate([
+                bodyLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: UI.cardTitleGap),
+                bodyLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+                bodyLabel.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
+                bodyLabel.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -UI.cardPad),
+            ])
+        }
+        card.setAccessibilityElement(true)
+        card.setAccessibilityLabel(([title] + lines).joined(separator: "，"))
+        return card
     }
     func updateResearchWindow() {
         researchRefreshButton?.title = t("刷新", "Refresh")
         researchMenuButton?.title = t("托盘菜单", "Tray menu")
+        researchHeaderTitle?.stringValue = t("研究进展", "Research progress")
         researchWindow?.title = "WorldQuant " + (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "") + " · " + t("研究进展", "Research progress")
-        let result = NSMutableAttributedString()
-        for entry in researchResponse["entries"] as? [[String: Any]] ?? [] {
-            result.append(NSAttributedString(string: (entry["title"] as? String ?? "") + "\n", attributes: [
-                .font: NSFont.systemFont(ofSize: 16, weight: .semibold), .foregroundColor: NSColor.labelColor]))
-            result.append(NSAttributedString(string: (entry["lines"] as? [String] ?? []).joined(separator: "\n") + "\n\n", attributes: [
-                .font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.labelColor]))
+        guard let stack = researchStack else { return }
+        for view in stack.arrangedSubviews {
+            stack.removeArrangedSubview(view)
+            view.removeFromSuperview()
         }
-        if result.length == 0 { result.append(NSAttributedString(string: t("正在读取本地账本…", "Reading the local ledger…"))) }
-        researchText?.textStorage?.setAttributedString(result)
+        let entries = researchResponse["entries"] as? [[String: Any]] ?? []
+        var cards: [NSView] = []
+        if entries.isEmpty {
+            cards.append(researchCard(title: t("正在读取本地账本…", "Reading the local ledger…"), lines: [], meta: true))
+        } else {
+            for entry in entries {
+                cards.append(researchCard(title: entry["title"] as? String ?? "",
+                                          lines: entry["lines"] as? [String] ?? []))
+            }
+        }
+        for card in cards {
+            stack.addArrangedSubview(card)
+            // NSStackView 垂直方向的横向对齐不负责拉伸宽度，这里显式钉住卡片左右边距。
+            NSLayoutConstraint.activate([
+                card.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: UI.windowPad),
+                card.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: -UI.windowPad),
+            ])
+        }
+        // 末位弹性占位：内容不足一屏时吃掉多余高度，卡片保持自然高度顶端对齐。
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .vertical)
+        spacer.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .vertical)
+        stack.addArrangedSubview(spacer)
+        researchScroll?.contentView.scroll(to: NSPoint(x: 0, y: 0))
+    }
+    @objc func refreshResearch() { perform("research") }
+    @objc func openTrayMenu() {
+        guard let content = researchWindow?.contentView, let button = researchMenuButton else { return }
+        menu.popUp(positioning: nil, at: NSPoint(x: button.frame.minX, y: button.frame.minY), in: content)
     }
     func buildFirstRunMenu() {
         menu.removeAllItems()
@@ -546,7 +740,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         accountRow.submenu = accountMenu
         accountRow.isEnabled = true
         menu.addItem(accountRow)
-        for row in [headline, detail, tick, nextAt, researchModel, reviewModel] { row.isEnabled = false; menu.addItem(row) }
+        // 状态区：标题 13 semibold + 说明/调度/模型 12 辅助色，全部折行，等状态回填。
+        wrapRow(headline, t("正在读取状态…", "Reading status…"), font: UI.fontTitle, color: .labelColor)
+        for row in [detail, tick, nextAt, researchModel, reviewModel] { wrapRow(row, " ") }
+        for row in [headline, detail, tick, nextAt, researchModel, reviewModel] { menu.addItem(row) }
         menu.addItem(.separator())
         historyMenu = NSMenu(title: t("轮次历史", "Cycle history"))
         submissionsMenu = NSMenu(title: t("已提交 Alpha", "Submitted Alphas"))
@@ -779,10 +976,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 let lines = entry["lines"] as? [String] ?? []
                 let title = entry["title"] as? String ?? ""
                 let badge = entry["badge"] as? String ?? ""
-                let color: NSColor? = badge == "submitted" ? .systemGreen
-                    : badge == "standby" ? .systemOrange
-                    : badge == "failed" ? .systemRed
-                    : badge == "progress" ? .systemBlue : nil
+                let color = UI.badgeColor(badge)
                 let mark = badge == "submitted" ? "★ " : (badge == "standby" ? "◇ " : "")
                 let row = block([mark + title] + lines, titleColor: color)
                 row.toolTip = (entry["detail"] as? [String] ?? lines).joined(separator: "\n")
@@ -803,15 +997,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 if badge == "standby" {
                     row.attributedTitle = NSAttributedString(string: title, attributes: [
                         .foregroundColor: NSColor.systemOrange,
-                        .font: NSFont.systemFont(ofSize: 13, weight: .semibold)])
+                        .font: UI.fontTitle])
                 } else if badge == "submitted" {
                     row.attributedTitle = NSAttributedString(string: title, attributes: [
                         .foregroundColor: NSColor.systemGreen,
-                        .font: NSFont.systemFont(ofSize: 13, weight: .semibold)])
+                        .font: UI.fontTitle])
                 }
                 let submenu = NSMenu(); submenu.autoenablesItems = false
                 let lines = entry["lines"] as? [String] ?? []
-                for line in lines { submenu.addItem(block([line])) }
+                // 详情面板没有天然标题：整组按正文样式渲染成一张卡
+                if !lines.isEmpty { submenu.addItem(block(lines, heading: false)) }
                 row.submenu = submenu; row.isEnabled = true; target.addItem(row)
             }
         }
@@ -820,7 +1015,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func fillSettings(_ response: [String: Any]) {
         let responseLang = response["language"] as? String ?? "zh"
-        if responseLang != lang { lang = responseLang; buildMainMenu(); updateResearchWindow(); perform("research") }   // 先按新语言重建，再回填动态数据
+        // 先按新语言重建，再重拉所有列表数据（不靠 fetched 判定：launch 等非只读动作会清空 fetched，
+        // 竞态下会漏掉已回填的子菜单标题，滞留旧语言）。
+        if responseLang != lang {
+            lang = responseLang
+            buildMainMenu()
+            updateResearchWindow()
+            fetched.removeAll()
+            for kind in ["history", "submissions", "standby", "research"] { perform(kind) }
+        }
         let notifications = response["notifications"] as? Bool ?? true
         notifyRow.state = notifications ? .on : .off
         notifyRow.representedObject = "config=notifications=" + (notifications ? "off" : "on")
@@ -872,13 +1075,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             row.state = name == active ? .on : .off
             row.toolTip = preset["routes"] as? String ?? ""
             if !research.isEmpty || !review.isEmpty {
+                let style = NSMutableParagraphStyle()
+                style.paragraphSpacing = 2
                 let caption = NSMutableAttributedString(string: name + "\n", attributes: [
-                    .font: NSFont.systemFont(ofSize: 13, weight: .semibold),
-                    .foregroundColor: NSColor.labelColor])
+                    .font: UI.fontTitle,
+                    .foregroundColor: NSColor.labelColor,
+                    .paragraphStyle: style])
                 caption.append(NSAttributedString(
                     string: t("研究  ", "Research  ") + research + "\n" + t("审查  ", "Review  ") + review,
                     attributes: [
-                        .font: NSFont.systemFont(ofSize: 11),
+                        .font: UI.fontCaption,
                         .foregroundColor: NSColor.secondaryLabelColor]))
                 row.attributedTitle = caption
             }
@@ -998,7 +1204,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if loading.contains(action) || (!readOnly && actionBusy) { return }
         loading.insert(action)
         if !readOnly {
-            actionBusy = true; controls.forEach { $0.isEnabled = false }; textRow(headline, t("正在处理…", "Working…"))
+            actionBusy = true; controls.forEach { $0.isEnabled = false }; wrapRow(headline, t("正在处理…", "Working…"), font: UI.fontTitle, color: .labelColor)
         }
         DispatchQueue.global(qos: .utility).async {
             let process = Process()
@@ -1034,8 +1240,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                         target.removeAllItems(); target.addItem(self.block([error])); return
                     }
                     self.fetched["settings"] = nil
-                    self.textRow(self.headline, self.t("读取失败", "Read failed"))
-                    self.textRow(self.detail, String(error.prefix(90)))
+                    self.wrapRow(self.headline, self.t("读取失败", "Read failed"), font: UI.fontTitle, color: .labelColor)
+                    self.wrapRow(self.detail, error)
                     self.item.button?.toolTip = error
                     if action == "launch" {
                         self.refresh()
@@ -1061,12 +1267,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     if self.actionBusy { return }
                     let identity = response["identity"] as? [String: Any] ?? [:]
                     self.applyIdentity(identity)
-                    self.textRow(self.headline, response["title"] as? String ?? self.t("状态未知", "Status unknown"))
-                    self.textRow(self.detail, String((response["message"] as? String ?? "").prefix(90)))
+                    self.wrapRow(self.headline, response["title"] as? String ?? self.t("状态未知", "Status unknown"),
+                                 font: UI.fontTitle, color: .labelColor)
+                    self.wrapRow(self.detail, response["message"] as? String ?? " ")
                     self.cycles.title = self.t("轮次历史", "Cycle history")
                     self.cycles.toolTip = response["cycles"] as? String ?? ""
-                    self.textRow(self.tick, self.t("最近调度：", "Last tick: ") + (response["last_tick"] as? String ?? self.t("尚无记录", "No records yet")))
-                    self.textRow(self.nextAt, self.t("下一轮：", "Next cycle: ") + (response["next_at"] as? String ?? self.t("待当前任务完成／调度检查", "awaiting current task / scheduler check")))
+                    self.wrapRow(self.tick, self.t("最近调度：", "Last tick: ") + (response["last_tick"] as? String ?? self.t("尚无记录", "No records yet")))
+                    self.wrapRow(self.nextAt, self.t("下一轮：", "Next cycle: ") + (response["next_at"] as? String ?? self.t("待当前任务完成／调度检查", "awaiting current task / scheduler check")))
                     if (identity["detail"] as? String ?? "").isEmpty {
                         self.textRow(self.brainRow, (response["brain_bound"] as? Bool) == true
                                      ? self.t("已登录", "Signed in")
@@ -1074,7 +1281,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     }
                     let models = response["next_models"] as? [[String: Any]] ?? []
                     for (index, row) in [self.researchModel, self.reviewModel].enumerated() {
-                        self.textRow(row, self.t("下轮", "Next: ") + (index < models.count ? models[index]["title"] as? String ?? self.t("未知", "unknown") : self.t("未知", "unknown")))
+                        self.wrapRow(row, self.t("下轮", "Next: ") + (index < models.count ? models[index]["title"] as? String ?? self.t("未知", "unknown") : self.t("未知", "unknown")))
                         row.toolTip = self.t("预估下一轮路由；任务领取时冻结，重试可能切换备用渠道。",
                                              "Estimated routing for the next cycle; frozen at claim time, retries may switch to a fallback provider.")
                     }
@@ -1094,7 +1301,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                  "quit-after-cycle", "quit-now", "provider-add", "provider-role",
                                  "preset", "preset-once", "preset-cancel", "provider"].contains(action)
                     if let message = response["message"] as? String, !message.isEmpty {
-                        self.textRow(self.detail, String(message.prefix(90)))
+                        self.wrapRow(self.detail, message)
                         if !quiet { self.alert("WorldQuant", message) }
                     }
                     self.fetched.removeAll()
