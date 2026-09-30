@@ -80,6 +80,7 @@ def sync_gaps(conn,p):
         steps=h.get('steps') or [{'id':'primary','profile':'base','roles_by_arm':{},'data_contract':h.get('data_contract',{})}]
         for step in steps:
             profile=campaign['execution_profiles'].get(step['profile']) or next(iter(campaign['execution_profiles'].values()))
+            if not h.get('steps'):profile={**profile,'settings':h.get('settings',profile['settings'])}
             roles=sorted(set(r for rs in step.get('roles_by_arm',{}).values() for r in rs))
             contract=step.get('data_contract') or {}
             status=events.eligibility(p,h,step) if h.get('steps') else {'ready':False,'reasons':[]}

@@ -44,6 +44,20 @@ class FrameworkTests(unittest.TestCase):
         framework.register_source(self.c,self.cfg,source)
         return gap,source,material,data
 
+    def test_unregistered_scope_gaps_describe_target_without_authorizing_it(self):
+        p=copy.deepcopy(self.p);p.pop('campaign')
+        p['campaign']=campaign.template(p,self.cfg.get('account_alias'))
+        gaps=framework.sync_gaps(self.c,p)
+        targets={'H-D0':{'delay':0},'H-U1':{'universe':'TOP1000'},'H-U2':{'universe':'TOPSP500'}}
+        for hid,scope in targets.items():
+            items=[g for g in gaps if g['hypothesis']==hid];self.assertTrue(items)
+            for gap in items:
+                for key,value in scope.items():
+                    self.assertEqual(gap['scope'][key],value);self.assertEqual(gap['query'][key],value)
+                self.assertTrue(gap['owner_required']);self.assertIsNone(gap['binding_hash'])
+        self.assertFalse(p['campaign']['enabled'])
+        self.assertEqual(list(p['campaign']['execution_profiles']),['base'])
+
     def test_gap_collection_uses_task_ledger_and_does_not_claim_semantics(self):
         gap,source,material,data=self.gap_source()
         with patch('wq.brain_client.BrainClient.request',side_effect=AssertionError('No network')):

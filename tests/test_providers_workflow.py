@@ -133,14 +133,14 @@ class ProviderWorkflowTests(unittest.TestCase):
 
     def test_free_preset_install_writes_reset_rule_and_rejects_same_service_review(self):
         self.save()
-        providers.install_custom(self.cfg, {'name': 'or-a', 'preset': 'openrouter-free', 'roles': []}, key='k1')
-        providers.install_custom(self.cfg, {'name': 'or-b', 'preset': 'openrouter-free', 'model': 'google/gemma-4-31b-it:free'}, key='k2')
+        providers.install_custom(self.cfg, {'name': 'or-a', 'preset': 'openrouter-free', 'roles': []}, key='fixture-provider-secret-one')
+        providers.install_custom(self.cfg, {'name': 'or-b', 'preset': 'openrouter-free', 'model': 'google/gemma-4-31b-it:free'}, key='fixture-provider-secret-two')
         saved = json.loads((self.root/'config/profiles.json').read_text())
         entry = saved['providers']['or-b']
         self.assertEqual(entry['transport']['base_url'], 'https://openrouter.ai/api/v1')
         self.assertEqual(entry['transport']['model'], 'google/gemma-4-31b-it:free')
         self.assertEqual(entry['quota_reset'], {'tz': 'UTC', 'at': '00:00', 'period': 'daily'})
-        self.assertNotIn('k2', json.dumps(saved))
+        self.assertNotIn('fixture-provider-secret-two', json.dumps(saved))
         providers.assign_role(self.cfg, self.conn, 'research', 'or-a')
         with self.assertRaisesRegex(ValueError, '同一服务'):
             providers.assign_role(self.cfg, self.conn, 'review', 'or-b')
