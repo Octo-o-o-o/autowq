@@ -443,6 +443,45 @@ def research(conn, cfg, lang='zh'):
         add(title,title,[h['claim'],h['reason'] or text(lang,'仍需当前授权与审查通过','Current authorization and review still required'),
             f"{h['settings'].get('region')} / {h['settings'].get('universe')} / D{h['settings'].get('delay')}",
             text(lang,'已分配轮次 / 已预约请求：','Allocated cycles / reserved requests: ') + f"{h['allocated_cycles']} / {h['reserved']}"])
+        if report.get('schema')=='wq.research-campaign/v2':
+            details=[text(lang,'资料状态 / 评估：','Data / assessment: ')+f"{h['data_state']} / {h['assessment']}",
+                text(lang,'完成配对 / 已登记配对：','Complete / registered pairs: ')+f"{h['complete_pairs']} / {h['pairs']}",
+                text(lang,'独立机制来源 / 新执行：','Mechanism sources / completed executions: ')+f"{h['independent_mechanism_sources']} / {h['unique_completed_executions']}",
+                text(lang,'后续动作：','Next action: ')+h['next_action']]
+            details += [text(lang,'缺项：','Missing: ')+r['code']+(' · '+r['subject'] if r.get('subject') else '') for r in h['data_gaps']]
+            add(h['hypothesis_id']+' · 配对评估',h['hypothesis_id']+' · Paired assessment',details)
+    from . import feedback,workflow
+    advanced=workflow.load(cfg)
+    cap=advanced['combinations']['max_plans'] if advanced else cfg.get('research_feedback','max_combination_plans',default=2)
+    combinations=feedback.combination_diagnostics(conn,cap,current_policy=p)
+    from . import research_framework
+    framework=research_framework.report(conn)
+    selection=framework['last_selection'] or {}
+    labels={'validated':('已核验','validated'),'collected':('已采集待语义核验','collected; semantics pending'),
+            'owner_required':('待人工核验','owner required'),'fetchable':('可补证','fetchable'),
+            'waiting_retry':('等待重试','waiting retry'),'unsupported':('能力未支持','unsupported'),
+            'exhausted':('本版重试已用完','attempts exhausted'),'expired':('已过期','expired'),
+            'rejected':('证据不符','rejected'),'superseded':('已替代','superseded')}
+    gap_lines=[text(lang,'框架调度：','Framework scheduling: ')+text(lang,'启用' if research_framework.enabled(cfg) else '停用','enabled' if research_framework.enabled(cfg) else 'disabled'),
+               text(lang,'当前状态：','Current state: ')+framework['status']['state'],
+               text(lang,'证据事项：','Evidence work: ')+str(len(framework['gaps']))]
+    gap_lines += [text(lang,*labels.get(k,(k,k)))+': '+str(v) for k,v in framework['gap_counts'].items()]
+    kinds={'evidence':('补充证据','collect evidence'),'reassess':('重评新证据','reassess evidence'),
+           'maintenance':('研究维护','research maintenance'),'research':('新研究机会','new research')}
+    gap_lines += [text(lang,'最近选择：','Last selection: ')+text(lang,*kinds.get(selection.get('kind'),('尚无记录','none recorded'))),
+                  text(lang,'支持／反证／未知记录：','Paired findings: ')+str(len(framework['paired_knowledge'])),
+                  text(lang,'由任务账本推进；采集资料不等于语义核验，未知结果不算失败。','Advanced by the task ledger; collection is not semantic verification; unknown is not failure.')]
+    if selection:gap_lines.append(text(lang,'选择原因：','Selection reason: ')+selection.get('reason',''))
+    pending=sorted((g for g in framework['gaps'] if g['state'] not in ('validated','superseded')),key=lambda g:(g['state']!='fetchable',g['hypothesis'],g['predicate']))
+    for gap in pending[:3]:
+        gap_lines.append(gap['hypothesis']+' / '+gap['predicate']+' · '+gap['state']+' → '+gap['next_trigger'])
+    add('持续研究框架','Continuous research',gap_lines)
+    add('组合资格诊断','Combination eligibility',[
+        text(lang,'已登记 / 上限：','Registered / cap: ')+f"{combinations['registered']} / {combinations['cap']}",
+        text(lang,'可用 / 阻断 / 未知父对：','Eligible / blocked / unknown pairs: ')+
+        ' / '.join(str(combinations['counts'].get(k,0)) for k in ('eligible','blocked','unknown')),
+        text(lang,'首要阻断原因：','First blocking reasons: ')+json.dumps(combinations['first_reason_counts'],ensure_ascii=False),
+        text(lang,'仅诊断现有父对；资料缺失不算失败耗尽。','Existing pairs only; missing evidence does not count as exhausted failures.')])
     order = cfg.get('brain_submission','standby_order',default='fifo')
     add('备选提交顺序','Standby submission order',[text(lang,'同条件、完整证据的连续候选按质量与本地相关性排序；未知证据保留 FIFO 边界。','Continuous comparable candidates use quality and local correlation; unknown evidence preserves FIFO boundaries.') if order == 'evidence' else 'FIFO',
         text(lang,'本地相关性不是官方 Uniqueness；已入队的提交不重排。','Local correlation is not official Uniqueness; queued submissions are not reordered.')])

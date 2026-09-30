@@ -158,8 +158,27 @@ class Config:
             return "invalid", str(e)
         if end <= start:
             return "invalid", "expires_at 必须晚于 starts_at"
-        if end - start > dt.timedelta(days=7):
-            return "invalid", "授权窗口超过 7 天上限"
+        windows = w.get("windows")
+        if windows is None:
+            if end - start > dt.timedelta(days=7):
+                return "invalid", "授权窗口超过 7 天上限"
+        else:
+            if not isinstance(windows, list) or not windows:
+                return "invalid", "续期 windows 须为非空数组"
+            previous = start
+            for window in windows:
+                if not isinstance(window, dict) or not str(window.get("evidence") or "").strip():
+                    return "invalid", "每个续期窗口须有明确 evidence"
+                try:
+                    window_start = _parse_window_ts(window.get("starts_at"), "starts_at")
+                    window_end = _parse_window_ts(window.get("expires_at"), "expires_at")
+                except ValueError as exc:
+                    return "invalid", str(exc)
+                if window_start != previous or not dt.timedelta(0) < window_end-window_start <= dt.timedelta(days=7):
+                    return "invalid", "续期窗口须连续且每段不超过 7 天"
+                previous = window_end
+            if previous != end:
+                return "invalid", "续期窗口与总授权截止时间不一致"
         n = now or util.now()
         if n < start:
             return "invalid", f"窗口未开始（starts_at={w['starts_at']}）"

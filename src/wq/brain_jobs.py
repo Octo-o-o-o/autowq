@@ -80,10 +80,35 @@ def enqueue(conn,cfg,doc):
         conn.execute('ROLLBACK TO simulation_reservation');conn.execute('RELEASE simulation_reservation')
         raise
 
+def send_deadline(conn,cfg,payload):
+    deadlines=[util.parse_iso(cfg.get('brain_api','authorized_until'))]
+    cid=payload.get('research_cycle_id')
+    if cid is not None:
+        from . import autopilot, research_campaign, research_campaign_v2
+        p=autopilot.policy(cfg)
+        deadlines.append(util.parse_iso(p['valid_until']))
+        deadlines.extend(util.parse_iso(b['vector_reduction']['valid_until']) for b in p['bindings'].values() if b.get('vector_reduction'))
+        a=research_campaign.assignment(conn,cid)
+        if a:
+            deadlines.append(util.parse_iso(p['campaign']['valid_until']))
+            if a.get('schema')==research_campaign_v2.SCHEMA:
+                step=research_campaign_v2.step_spec(p,a)
+                profile=p['campaign']['execution_profiles'][a['profile']]
+                deadlines.append(util.parse_iso(profile['valid_until']))
+                deadlines.extend(util.parse_iso(b['vector_reduction']['valid_until']) for b in profile['bindings'].values() if b.get('vector_reduction'))
+                deadlines.extend(util.parse_iso(x['valid_until']) for x in step['data_contract']['assertions'])
+                if step['evaluation'].get('collector_id'):
+                    from . import research_observation
+                    contract,_=research_observation.collector_contract(step['evaluation'],profile)
+                    deadlines.append(util.parse_iso(contract['valid_until']))
+    return min(deadlines)
+
+
 def step(conn,cfg,task,payload):
     setup(conn);tid=task['task_id']
     row=conn.execute('SELECT * FROM brain_runs WHERE task_id=?',(tid,)).fetchone()
     if cfg.get('brain_api','enabled') is not True:return 'blocked',{},'BRAIN API 尚未启用'
+    if row and row['state']=='not_sent':return 'blocked',{},'Final send gate rejected this reservation; no automatic retry'
     if row and row['state']=='post_started':return 'unknown',{},'上次POST结果未知，禁止自动重发'
     if row and row['state']=='complete':return 'succeeded',{'evidence':row['evidence_path']},None
     cooldown=store.get_flag(conn,'brain_not_before')
@@ -143,6 +168,33 @@ def step(conn,cfg,task,payload):
             return 'blocked', {}, f'BRAIN预检返回HTTP {code}；未发送POST'
         conn.execute('INSERT INTO brain_runs(task_id,state,started_at,updated_at) VALUES(?,?,?,?)',(tid,'post_started',util.now_iso(),util.now_iso()))
         conn.commit()
+        # Serialize stop/migration writers with this send decision using the
+        # ledger's existing write lock, after the durable uncertain intent.
+        conn.execute('BEGIN IMMEDIATE')
+        from .config import Config
+        try:
+            current=Config.load(cfg.path,cfg.root) if cfg.path else cfg
+            if current.get('account_alias')!=cfg.get('account_alias') or current.db_path!=cfg.db_path or current.private_dir!=cfg.private_dir:
+                raise ValueError('Runtime identity changed during preflight')
+            deadline=current.get('brain_api','authorized_until')
+            if current.get('brain_api','enabled') is not True or not deadline or util.now()>=util.parse_iso(deadline):
+                raise ValueError('BRAIN authorization expired or revoked during preflight')
+            if store.is_paused(conn):raise ValueError('Paused before transport')
+            if conn.execute("SELECT 1 FROM brain_runs WHERE task_id!=? AND state IN ('post_started','polling','fetching') LIMIT 1",(tid,)).fetchone():
+                raise ValueError('Another request owns the single transport slot')
+            if conn.execute("SELECT 1 FROM tasks WHERE status='unknown' AND task_id!=? LIMIT 1",(tid,)).fetchone():
+                raise ValueError('Global UNKNOWN before POST intent')
+            research_learning.validate_dispatch(conn,current,tid,payload)
+            research_campaign.check_budget(conn,current,payload.get('research_cycle_id'),tid)
+            if payload.get('purpose')=='research_validation':research_gate.validate(current,payload)
+            last_deadline=send_deadline(conn,current,payload)
+        except (ValueError,OSError,KeyError,TypeError) as exc:
+            conn.execute("UPDATE brain_runs SET state='not_sent',updated_at=? WHERE task_id=?",(util.now_iso(),tid))
+            return 'blocked',{},str(exc)+'; no POST sent'
+        # Gate verification may itself take time; the local send boundary is here.
+        if util.now()>=last_deadline:
+            conn.execute("UPDATE brain_runs SET state='not_sent',updated_at=? WHERE task_id=?",(util.now_iso(),tid))
+            return 'blocked',{},'Authorization expired at transport boundary; no POST sent'
         try:
             status,headers,data=client.request('POST','/simulations',payload['request'])
         except AdapterError as e:
@@ -155,6 +207,10 @@ def step(conn,cfg,task,payload):
                 elif e.kind==AdapterError.RATE_LIMIT:
                     store.set_flag(conn,'brain_not_before',(util.now()+dt.timedelta(seconds=max(60,e.retry_after or 60))).isoformat())
                 return 'blocked',{},str(e)+'；POST不自动重发'
+            conn.rollback()
+            raise
+        except BaseException:
+            conn.rollback()
             raise
         loc=headers.get('location')
         if status not in (201,202) or not loc:return 'unknown',{},'派发回执缺少明确Location，需对账'

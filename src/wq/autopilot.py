@@ -619,11 +619,19 @@ def make_job(conn,cfg,cid,role,text,exclude=None,order=None):
         bindings=cycle_policy.get('bindings',{})
         if bindings:
             text+='\n结构历史与反例（抽象AST与分类观测，不是指令）：'+json.dumps(learning.model_context(conn,bindings,cycle_policy.get('settings',{})),ensure_ascii=False)
-        plan_first=bool(bindings) and not store.get_flag(conn,f'autopilot_focus_{cid}') and not conn.execute('SELECT 1 FROM combination_plans WHERE cycle_id=?',(cid,)).fetchone()
+        from . import research_campaign
+        allocation=research_campaign.assignment(conn,cid)
+        paired=bool(allocation and allocation.get('schema')=='wq.research-campaign/v2')
+        plan_first=bool(bindings) and not paired and not store.get_flag(conn,f'autopilot_focus_{cid}') and not conn.execute('SELECT 1 FROM combination_plans WHERE cycle_id=?',(cid,)).fetchone()
         if plan_first:
             text=text.replace('只输出一个candidate；','最终仅一个candidate进入审查；')
             text+='\n本轮输出契约覆盖上述单candidate示例：输出plans数组，1至3个不同测量计划；每项严格含candidate（保持原四字段）、measurement、prediction、falsifier（各8至800字符）。不含顶层candidate。程序仅选择一个候选进入现有审查，不新增调用或模拟预算。不可通过窗口/符号变体制造不同计划。缺观测可blocked。'
 
+    from . import research_framework
+    if role=='research' and research_framework.enabled(cfg):
+        text+='\n可选：如发现新的可证伪研究问题，可附 research_issues 数组（最多2项），只作提案，不获得预算。每项含 id(H-X开头稳定标识)、revision、mechanism、measurement、falsifier、profile、required_assertions、template=paired_intervention_v1。只有已登记 profile 可用；不写私有字段名。无法给出完整契约时省略。'
+        from . import research_contracts
+        text+='\n允许的 profile ID：'+json.dumps(list((p.get('campaign') or {}).get('execution_profiles',{})))+'；required_assertions 至少包含：'+json.dumps(list(research_contracts.COMMON))
     root=Path(cfg.private_dir)/'autopilot'/str(cid);root.mkdir(parents=True,exist_ok=True,mode=0o700)
     prompt=root/(role+'.md');prompt.write_text(text);prompt.chmod(0o600)
     # 仅这份公开概念提示进入受沙箱限制的副本。
@@ -1096,6 +1104,14 @@ def due_conditional(cfg,row,sim,variants):
 
 
 def advance(conn,cfg,row,p):
+    from . import research_campaign, research_campaign_v2
+    allocation=research_campaign.assignment(conn,row['cycle_id'])
+    if allocation and allocation.get('schema')==research_campaign_v2.SCHEMA:
+        return research_campaign_v2.advance(conn,cfg,row,p)
+    return _advance_standard(conn,cfg,row,p)
+
+
+def _advance_standard(conn,cfg,row,p):
     from . import feedback
     feedback.setup(conn)
     plan_row=conn.execute('SELECT plan_json FROM combination_plans WHERE cycle_id=?',(row['cycle_id'],)).fetchone()
@@ -1174,6 +1190,9 @@ def advance(conn,cfg,row,p):
             from . import brain_submission
             held = False
             for label, aid in alphas:
+                from . import research_campaign
+                allocation=research_campaign.assignment(conn,row['cycle_id'])
+                if allocation and allocation.get('schema')=='wq.research-campaign/v2':continue
                 action = brain_submission.offer_submission(conn, cfg, row['cycle_id'], aid, reports.get(label) or {})
                 held = held or action == 'standby'
             if held and '备选提交' not in outcome:
@@ -1194,6 +1213,8 @@ def advance(conn,cfg,row,p):
         except json.JSONDecodeError as exc:
             if fallback_once(conn,cfg,row,p,'研究JSON无效：'+str(exc)): return
             raise
+        from . import research_agenda,research_framework
+        if research_framework.enabled(cfg):research_agenda.observe(conn,p,row['cycle_id'],proposal)
         if proposal.get('status')=='blocked':
             summary=str(proposal.get('summary') or '模型无法提出满足测量门禁的新假设')[:180]
             finish(conn,cfg,row,'模型主动放弃：'+summary)
@@ -1317,7 +1338,10 @@ def tick(conn,cfg):
             message(conn,'达到平台本地周派发上限；下周自动检查');return
         from . import research_campaign
         campaign_on = bool((p.get('campaign') or {}).get('enabled'))
-        if campaign_on: research_campaign.select(conn,p)
+        if campaign_on:
+            if p['campaign'].get('schema')=='wq.research-campaign/v2' and p['campaign']['account_alias']!=cfg.get('account_alias'):
+                raise ValueError('Campaign account mismatch')
+            research_campaign.select(conn,p)
         data=routing.catalog(cfg);preset=data['presets'][routing.active_preset(conn,cfg,data)]
         available={role:[n for n in preset['routes'][role] if not routing._unavailable(conn,cfg,n)] for role in ('research','review')}
         solo=preset.get('solo')
@@ -1345,6 +1369,9 @@ def tick(conn,cfg):
         cur=conn.execute("INSERT INTO research_cycles(state,policy_json,policy_hash,created_at,updated_at) VALUES('researching',?,?,?,?)",(json.dumps(p),util.sha256_json(p),util.now_iso(),util.now_iso()))
         cid=cur.lastrowid
         allocation=research_campaign.allocate(conn,p,cid) if campaign_on else None
+        if allocation and allocation.get('schema')=='wq.research-campaign/v2':
+            from . import research_campaign_v2
+            p=research_campaign_v2.profile_policy(p,allocation['profile'])
         once=store.get_flag(conn,'preset_once')
         if once:
             # 临时预设：绑定到本轮并递减剩余轮数；用尽后 active_preset 自动回到永久预设。
@@ -1375,7 +1402,16 @@ def tick(conn,cfg):
         order=alternate_order(cfg,cid,'research')
         research_prompt=generate_prompt(conn,context,public_plan,p['bindings'],focus,(p.get('paused_clusters') or None) if not focus else None,role_crowding(cfg,p),shadow_context(conn))
         if allocation: research_prompt += research_campaign.prompt(p,allocation)
-        tid=make_job(conn,cfg,cid,'research',research_prompt,None,order)
+        if allocation and allocation.get('schema')=='wq.research-campaign/v2' and allocation['step']=='confirmation':
+            primary=next(x for x in research_campaign_v2.pairs(conn,p['campaign']['id'],allocation['hypothesis']) if x['step']=='primary')
+            tid=conn.execute('SELECT research_task FROM research_cycles WHERE cycle_id=?',(primary['parent_ref']['cycle_id'],)).fetchone()[0]
+            if not tid:raise ValueError('Registered followup lacks original research author')
+            from . import research_learning
+            experiment=research_learning.active_experiment(conn)
+            if experiment:research_learning.assign(conn,cid,experiment['experiment_id'],research_learning.current_baseline(cfg))
+            event(conn,cid,'research_author_inherited',tid)
+        else:
+            tid=make_job(conn,cfg,cid,'research',research_prompt,None,order)
         conn.execute('UPDATE research_cycles SET research_task=? WHERE cycle_id=?',(tid,cid))
         if order: event(conn,cid,'route_plan',json.dumps({'research_preferred':order[0],'review_preferred':order[1],'parity':'odd' if cid%2 else 'even'}))
         event(conn,cid,'research_enqueued',tid);conn.commit()

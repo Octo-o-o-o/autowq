@@ -247,3 +247,35 @@ class ResearchStrategyTests(unittest.TestCase):
             self.c.execute("UPDATE learning_observations SET available_at='2025-02-01' WHERE alpha_id='a'")
             maintenance.tick(self.c,self.cfg,True)
             self.assertEqual(calls[0],'b')
+
+
+class CampaignCostSeparationTests(unittest.TestCase):
+    def test_campaign_changes_resources_but_not_ordinary_effect_metrics(self):
+        from wq import research_campaign
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg,conn=make_env(tmp);self.addCleanup(conn.close)
+            autopilot.setup(conn);learning.setup(conn);metrics.setup(conn)
+            baseline={k:'fixture' for k in ('source','policy','models','budget','usable_definition')}
+            learning.freeze_experiment(conn,'fixture-cost',baseline,4)
+            for cid,arm in ((1,'baseline'),(2,'learning')):
+                now=util.now_iso()
+                conn.execute("INSERT INTO research_cycles(cycle_id,state,policy_json,policy_hash,created_at,updated_at) VALUES(?,'closed','{}','fixture',?,?)",(cid,now,now))
+                conn.execute('INSERT INTO learning_assignments VALUES(?,?,?,?,?)',(cid,'fixture-cost',arm,util.sha256_json(baseline),now))
+                learning.record_trial(conn,'ordinary'+str(cid),{'execution_id':'execution'+str(cid),'scope_id':'scope','family_id':'family'+str(cid),'source':'automatic'},cycle_id=cid,task_id='task'+str(cid))
+                learning.append_outcome(conn,'ordinary'+str(cid),{'execution':'complete','quality':'usable','evidence_complete':True,'request_started':True})
+            # Isolate the aggregator's population boundaries, not financial metering.
+            cost=lambda c,ids:{'linked_calls':len(ids),'known_usd':float(len(ids)),'unknown_cost_calls':0}
+            with patch('wq.research_learning.model_cost',side_effect=cost):
+                before=metrics.comparison(conn,'fixture-cost')
+                now=util.now_iso();cid=3
+                conn.execute("INSERT INTO research_cycles(cycle_id,state,policy_json,policy_hash,created_at,updated_at) VALUES(?,'closed','{}','fixture',?,?)",(cid,now,now))
+                conn.execute('INSERT INTO learning_assignments VALUES(?,?,?,?,?)',(cid,'fixture-cost','baseline',util.sha256_json(baseline),now))
+                autopilot.event(conn,cid,'campaign_v2_assignment',json.dumps({'campaign_id':'fixture','hypothesis':'H-N1','schema':'wq.research-campaign/v2'}))
+                learning.record_trial(conn,'campaign',{'execution_id':'campaign','scope_id':'scope','family_id':'campaign-family','source':'campaign'},cycle_id=cid,task_id='campaign-task')
+                learning.append_outcome(conn,'campaign',{'execution':'complete','quality':'usable','evidence_complete':True,'request_started':True})
+                after=metrics.comparison(conn,'fixture-cost')
+                self.assertEqual(before['arms'],after['arms'])
+                self.assertEqual(after['global_resource_cost']['known_usd'],before['global_resource_cost']['known_usd']+1)
+                self.assertEqual(after['campaign_resource_cost']['known_usd'],1)
+                conn.execute('INSERT INTO learning_reuses VALUES(?,?,?,?)',('campaign',1,None,util.now_iso()))
+                self.assertEqual(metrics.comparison(conn,'fixture-cost')['global_resource_cost'],after['global_resource_cost'])

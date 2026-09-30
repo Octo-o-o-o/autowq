@@ -44,6 +44,7 @@ class AlternateCycleTests(AutopilotTests):
     def setUp(self):
         super().setUp()
         self.cfg.data['autopilot']['alternate_research_providers'] = ['a', 'b']
+        util.write_json(self.cfg.path,self.cfg.data)
 
     def payload(self, tid):
         return json.loads(self.c.execute('SELECT payload_json FROM tasks WHERE task_id=?', (tid,)).fetchone()[0])

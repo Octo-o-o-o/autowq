@@ -59,7 +59,7 @@ def tick(conn,cfg,force=False):
         drift=learning.current_baseline(cfg)!=contract['baseline']
         if stopped or drift:
             current={'mode':'baseline','reason':'Experiment stopped or source/policy/model/budget changed','experiment':eid}
-            if drift and not stopped:learning.stop_experiment(conn,eid,'Frozen baseline changed; stop experimental dispatch and retain existing evidence')
+            if drift and not stopped:learning.stop_experiment(conn,eid,'Frozen baseline changed; stop experimental dispatch and retain existing evidence',stop_type='baseline_superseded')
         else:
             comparison=metrics.comparison(conn,eid);result['comparison']=comparison
             # Promote the tested bundle only with a positive independent forward observation.
@@ -78,6 +78,10 @@ def tick(conn,cfg,force=False):
             else:
                 current={'mode':'shadow','reason':'Waiting for comparable families, cost completeness and independent forward data',
                          'experiment':eid}
+    from . import research_lifecycle
+    result['epoch_transition']=research_lifecycle.advance(conn,cfg)
+    if result['epoch_transition']['state']=='created':
+        current={'mode':'shadow','reason':'Approved successor inherits remaining lineage budget','experiment':result['epoch_transition']['experiment']}
     # One bounded comparison per UTC week at most; never renew an explicitly stopped experiment.
     if cfg.get('research_learning','auto_experiments',default=False) and not learning.active_experiment(conn):
         authorized_until=cfg.get('brain_api','authorized_until')
@@ -95,19 +99,15 @@ def tick(conn,cfg,force=False):
             current={'mode':'shadow','reason':'Bounded prospective comparison registered; existing permissions and budgets unchanged','experiment':eid}
             result['new_experiment']=eid
     store.set_flag(conn,'research_learning_state',json.dumps(current))
-    # Freeze complete usable candidates once; no refit after seeing later observations.
+    # Retention and contribution preparation have separate completion conditions.
     trials=[t for t in learning.as_of(conn) if t.get('task_id') and (t['outcome'] or {}).get('quality')=='usable'
             and (t['outcome'] or {}).get('content_hash') and (t['outcome'] or {}).get('data_through')]
     frozen={m['trial_id'] for r in conn.execute('SELECT document_json FROM learning_pools') for m in json.loads(r[0])['members']}
     fresh=[t for t in trials if t['trial_id'] not in frozen]
-    # At most one new two-member contract per maintenance, using actual frozen reference identity.
     if fresh:
         candidate=fresh[0]; pid='auto-'+util.sha256_json(candidate['trial_id'])[:16]
         learning.freeze_pool(conn,pid,[candidate['trial_id']])
-        references=[t for t in trials if t['trial_id']!=candidate['trial_id'] and
-                    t['document'].get('settings')==candidate['document'].get('settings') and t['execution_id']!=candidate['execution_id']]
-        if references:
-            result['new_pool_contract']=metrics.freeze_contract(conn,pid,[references[0]['trial_id']],candidate['trial_id'])
+    result['contribution_preparation']=metrics.prepare_contributions(conn,trials)
     cap=cfg.get('research_learning','refresh_per_day',default=2)
     if type(cap) is not int or not 0<=cap<=5:raise ValueError('Learning refresh_per_day must be 0..5')
     today=util.now().date().isoformat();used=0
