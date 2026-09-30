@@ -41,7 +41,7 @@
       "name": "autowq",
       "applicationCategory": "DeveloperApplication",
       "operatingSystem": "macOS, Windows, Linux",
-      "softwareVersion": "0.2.16",
+      "softwareVersion": "0.2.18",
       "isAccessibleForFree": true,
       "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
       "license": "https://www.apache.org/licenses/LICENSE-2.0",
@@ -108,9 +108,9 @@
         </button>
         <div class="cta-menu" id="heroMenu" role="menu" aria-label="Download options" hidden>
           <div class="cm-head">Desktop · just open it</div>
-          <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.16/WorldQuant-0.2.16.dmg" data-os="macos"><span class="cm-l">macOS full package</span><span class="cm-r">DMG · 54 MB</span></a>
-          <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.16/WorldQuant-0.2.16-light.dmg"><span class="cm-l">macOS light package</span><span class="cm-r">DMG · 1 MB</span></a>
-          <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.16/WorldQuantTray.exe" data-os="windows"><span class="cm-l">Windows tray</span><span class="cm-r">.exe · experimental</span></a>
+          <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.18/WorldQuant-0.2.18.dmg" data-os="macos"><span class="cm-l">macOS full package</span><span class="cm-r">DMG · 54 MB</span></a>
+          <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.18/WorldQuant-0.2.18-light.dmg"><span class="cm-l">macOS light package</span><span class="cm-r">DMG · 1 MB</span></a>
+          <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.18/WorldQuantTray.exe" data-os="windows"><span class="cm-l">Windows tray</span><span class="cm-r">.exe · experimental</span></a>
           <hr>
           <div class="cm-head">Developers</div>
           <button role="menuitem" type="button" data-cmd="pipx install wq-pilot"><span class="cm-l">Command line</span><span class="cm-r">pipx install wq-pilot</span></button>
@@ -149,7 +149,7 @@
     <div class="pillar"><div class="k">Visible</div><div class="d">Cycles, budget, progress — all in the tray</div></div>
     <div class="pillar"><div class="k">Control</div><div class="d">Budgets, authorization, pause — always yours</div></div>
     <div class="pillar"><div class="k">Safe</div><div class="d">Data stays local; gates closed by default</div></div>
-    <div class="pillar"><div class="k">Open</div><div class="d">Apache-2.0, 500 automated tests</div></div>
+    <div class="pillar"><div class="k">Open</div><div class="d">Apache-2.0, 732 automated tests</div></div>
   </div>
 </section>
 
@@ -182,6 +182,7 @@
           <div class="mi dim">next: research grok → review cursor</div>
           <hr>
           <div class="mi">WorldQuant account<span class="r">BRAIN bound ▸</span></div>
+          <div class="mi">Research progress<span class="r">evidence · budget ▸</span></div>
           <div class="mi">Cycle history<span class="r">123 cycles ▸</span></div>
           <div class="mi">Submitted alphas (4)<span class="r">▸</span></div>
           <div class="mi">Settings<span class="r">budget · interval ▸</span></div>
@@ -193,6 +194,7 @@
     </div>
     <ul class="bullets rise">
       <li><b>The account lives in the tray</b>: bind / re-login to BRAIN, verify the session online, open the registration page — the password is typed into a terminal and never stored.</li>
+      <li><b>Research progress</b>: separate authorization deadlines, learning status, known and unknown costs, and evidence blockers for 14 opportunities. On macOS, reopen the app for a scrollable, selectable progress window.</li>
       <li><b>Status at a glance</b>: current cycle, next research / review models, last tick and next-run time, refreshed live.</li>
       <li><b>History & submissions one click away</b>: cycle history, submitted alphas and receipts come straight from the local ledger, day by day.</li>
       <li><b>Budget & pause in hand</b>: budget switches and run intervals at your fingertips; "Run next cycle now" and "Pause (after current task)" are a single click away.</li>
@@ -202,7 +204,7 @@
 
 <section id="case">
   <h2><span class="no">04</span>A real ledger, not a mockup</h2>
-  <p class="lead">From the author's own testing: research runs on the surplus tokens of subscriptions you already pay for — one alpha submitted per day for 4 straight days, all ACTIVE on the platform; Silver around day 2, Gold within 1 week (day 5 in our test) — and once Gold lands, you're ready to apply for Consultant status.</p>
+  <p class="lead">From the author's own testing: research runs on the surplus tokens of subscriptions you already pay for — one alpha submitted per day for 4 straight days, all ACTIVE on the platform; Silver around day 2, Gold within 1 week (day 5 in our test) — Consultant onboarding still depends on the official regional invitation and review process.</p>
   <div class="stats rise">
     <div class="stat"><div class="n" data-count="123">0</div><div class="l">research cycles</div></div>
     <div class="stat"><div class="n" data-count="160">0</div><div class="l">real simulations</div></div>
@@ -212,7 +214,7 @@
   <div class="chart rise">
     <div class="chart-head">
       <span class="lg acc"><i></i>cumulative submitted alphas · growing every day</span>
-      <span class="note">🥈 Silver ≈ day 2 · 🥇 Gold ≤ 1 week · Consultant-ready at Gold</span>
+      <span class="note">🥈 Silver ≈ day 2 · 🥇 Gold ≤ 1 week · Gold does not guarantee an invitation</span>
     </div>
     <div class="bars">
       <div class="bar accepted" style="--v:25%"><b>1</b><i style="animation-delay:.1s"></i><em>Day 1 ★</em></div>
@@ -222,7 +224,7 @@
       <div class="bar accepted" style="--v:100%"><b>🥇</b><i style="animation-delay:.5s"></i><em>Day 5 · Gold (≤ 1 wk)</em></div>
     </div>
   </div>
-  <p class="fineprint">Bar height = cumulative submitted alphas (one per day on days 1–4, all ACTIVE on the platform; ★ = a new receipt that day). 🥈 Silver around day 2, 🥇 Gold within 1 week (day 5 in our test) — Gold unlocks the Consultant application; tiers and points keep accruing on WorldQuant from alphas and OS performance. Model usage stayed within the surplus allowance of already-paid subscriptions; "accepted" implies neither passing screens nor income — a research tool, not a promise of returns.</p>
+  <p class="fineprint">Bar height = cumulative submitted alphas (one per day on days 1–4, all ACTIVE on the platform; ★ = a new receipt that day). 🥈 Silver around day 2, 🥇 Gold within 1 week (day 5 in our test) — Consultant admission follows the official regional invitation and review process; tiers and points keep accruing on WorldQuant from alphas and OS performance. Model usage stayed within the surplus allowance of already-paid subscriptions; "accepted" implies neither passing screens nor income — a research tool, not a promise of returns.</p>
 </section>
 
 <section id="install">
@@ -234,24 +236,24 @@
       <h3>macOS full package</h3>
       <div class="dl-size">54 <span>MB</span></div>
       <p>Ships with Python 3.12 — no system Python, Xcode CLT or pip needed. Drag into Applications, double-click, and the wizard takes over.</p>
-      <a class="btn primary dl-btn" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.16/WorldQuant-0.2.16.dmg" target="_blank" rel="noopener">Download the full DMG</a>
-      <div class="dl-meta">0.2.16 · Notarized by Apple · menu-bar app</div>
+      <a class="btn primary dl-btn" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.18/WorldQuant-0.2.18.dmg" target="_blank" rel="noopener">Download the full DMG</a>
+      <div class="dl-meta">0.2.18 · Notarized by Apple · menu-bar app</div>
     </div>
     <div class="dl-card" data-os="macos">
       <div class="dl-tag">If you already have Python</div>
       <h3>macOS light package</h3>
       <div class="dl-size">1 <span>MB</span></div>
       <p>No bundled Python. First setup uses your local Python 3.11+ (Homebrew or Xcode CLT) and guides you if it's missing. Features are identical.</p>
-      <a class="btn dl-btn" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.16/WorldQuant-0.2.16-light.dmg" target="_blank" rel="noopener">Download the light DMG</a>
-      <div class="dl-meta">0.2.16 · Notarized by Apple · menu-bar app</div>
+      <a class="btn dl-btn" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.18/WorldQuant-0.2.18-light.dmg" target="_blank" rel="noopener">Download the light DMG</a>
+      <div class="dl-meta">0.2.18 · Notarized by Apple · menu-bar app</div>
     </div>
     <div class="dl-card" data-os="windows">
       <div class="dl-tag">Windows · experimental</div>
       <h3>Windows tray</h3>
       <div class="dl-size">17 <span>MB</span></div>
       <p>One <code>WorldQuantTray.exe</code> with the engine inside: tray, CLI and Task Scheduler runs. Double-click and the wizard takes over. API providers only (free presets included). Not code-signed yet; if SmartScreen stops it, choose “More info → Run anyway”.</p>
-      <a class="btn dl-btn" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.16/WorldQuantTray.exe">Download the Windows .exe</a>
-      <div class="dl-meta">0.2.16 · single file · no Python install needed</div>
+      <a class="btn dl-btn" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.18/WorldQuantTray.exe">Download the Windows .exe</a>
+      <div class="dl-meta">0.2.18 · single file · no Python install needed</div>
     </div>
   </div>
   <p class="dl-choose">Both macOS packages are feature-identical; the only difference is the bundled Python. When in doubt, take the full one.</p>
