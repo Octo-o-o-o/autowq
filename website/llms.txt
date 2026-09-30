@@ -1,6 +1,6 @@
 # autowq
 
-> autowq 是开源（Apache-2.0）的本地 WorldQuant BRAIN 研究回路。假设 → 异渠道审查 → 有限回测 → 真实结果诊断 → 互补信号 → 提交前验收。模型、预算、证据和队列由用户控制，数据不出本机。当前版本 0.2.4（2026-09-27），523 项自动化测试。
+> autowq 是开源（Apache-2.0）的本地 WorldQuant BRAIN 研究回路：先以受控自动循环冲击金牌，金牌之后用持续研究框架继续提高研究质量。假设 → 异渠道审查 → 有限回测 → 真实结果诊断 → 互补信号 → 提交前验收；0.2.19 起内置持续研究框架（有界补证、晚到重评、配对知识回流与预算继承）。模型、预算、证据和队列由用户控制；状态存本地 SQLite 账本，模型请求只发给用户显式选择的渠道。当前版本 0.2.19，804 项工程测试（0.2.19 源码套件，非金融效果验收）。
 
 > 由 OctoLab 千手实验室（https://www.octoooo.com）开源维护；工作室里还有更多有趣的项目，对各种合作保持开放。
 
@@ -9,26 +9,32 @@
 - Homebrew: https://github.com/Octo-o-o-o/homebrew-autowq
 - PyPI: https://pypi.org/project/wq-pilot/ （`pipx install wq-pilot`）
 
+## 使用路径：同一个工具，两个阶段
+
+1. 快速到达金牌：首次向导（检测渠道、生成配置、调起登录）→ 在自己的预算与授权期限内启用研究 → 每轮「提出假设 → 异渠道审查 → 有限回测」→ 查看真实结果与失败原因 → 合格候选过提交前验收并核对平台回执，进入下一轮。Gold 由平台按 Alpha 与 OS 表现累计判定，无固定天数；研究用量可完全落在已订阅渠道的 token 富余量内，不产生额外按量开销。
+2. 金牌之后持续提高：不用重装或重新登录。闭环为「发现研究问题 → 明确资料缺口 → 授权内有界补证 → 可检验的小实验 → 新结果到来时重评 → 经验与反例回流」。改进只在同预算对照里说话（新增数据下的质量保持、固定组合中的增量贡献）；失败与 UNKNOWN 如实留档。建议节奏：每天看运行/阻塞/成本，每周看有效产出与反例，等新数据再下结论。baseline=保持基线，shadow=积累与比较，active=在已验证范围内试用学到的排序。14 个方向是初始研究议题，不是已验证或盈利的策略；可注册新议题，仍需数据来源与明确授权。自动学习只改进检索、计划与有界实验，不自动改代码、不提高预算、不绕过提交门槛。
+3. 顾问路径：Gold、官方邀请、签约/激活、报酬资格、实际到账是不同状态，以所在地区官方通知为准。WorldQuant 官方顾问页面（https://worldquantbrain.com/consultant）表述：Grandmaster 级顾问每季度报酬可达 8,000 美元以上，Master 级可达 2,000 美元以上——这是平台的激励机制，不是 autowq 的承诺。
+
 ## 安装
 
-- macOS 菜单栏 App: `brew install --cask Octo-o-o-o/autowq/worldquant`（或 Releases 的 DMG，Developer ID 签名 + Apple 公证），双击后首启向导全程引导；App 启动时按内置 wheel 校验和自动更新引擎
-- Windows: Releases 的 WorldQuantTray.exe，原生托盘 + 任务计划（实验性）
+- macOS 菜单栏 App: `brew install --cask Octo-o-o-o/autowq/worldquant`（或 Releases 的 DMG，Developer ID 签名 + Apple 公证；完整包自带 Python 56.7 MB，轻量包 1.4 MB 用本机 Python 3.11+），双击后首启向导全程引导；App 启动时按内置 wheel 校验和自动更新引擎
+- Windows: Releases 的 WorldQuantTray.exe（0.2.18），原生托盘 + 任务计划（实验性）
 - CLI: `brew install Octo-o-o-o/autowq/wq-pilot`，任意空目录 `wq onboard`
 - 源码: `git clone` 后 `./wq onboard`；Linux/WSL2 用 Docker 隔离
 
 ## 上手成本
 
-本地已有订阅的 Agent CLI（Grok Build、Devin、Cursor、ZCode、Claude Code、Codex、Gemini CLI、GitHub Copilot CLI、Qwen Code、OpenCode）或 OpenAI/Anthropic API Key 即可。向导只检测、生成配置、调起登录；模型、自动研究、提交默认全关。研究用量可完全落在已订阅渠道的 token 富余量内，不需要额外按量 API。
+本地已有订阅的 Agent CLI（Grok Build、Devin、Cursor、ZCode、Claude Code、Codex、Gemini CLI、GitHub Copilot CLI、Qwen Code、OpenCode）或 OpenAI/Anthropic API Key 即可；也可用官方免费 API 起步（`wq providers free`）。向导只检测、生成配置、调起登录；模型、自动研究、提交默认全关。
 
 ## 关键事实
 
 - 运行时零第三方依赖，纯 Python 3.11+ 标准库
 - 隔离：macOS sandbox-exec；Linux/WSL2 Docker
 - 闸门：单并发、逐渠道预算、授权期限、UNKNOWN 人工对账、崩溃恢复去重、提交前验收
-- 托盘：macOS 菜单栏 App 与 Windows 托盘共享同一受控桥接（状态、BRAIN 账号绑定/核验/注册入口、轮次历史、已提交 Alpha、预算/间隔/通知开关）
+- 托盘：macOS 菜单栏 App 与 Windows 托盘共享同一受控桥接（状态、BRAIN 账号绑定/核验/注册入口、轮次历史、已提交 Alpha、研究进展、预算/间隔/通知开关）
 - 研究/审查复杂度契约按轮次类型（提案 / 预登记组合）分档，提示词如实说明
 - 非 WorldQuant 官方产品；研究工具，不承诺收益
 
-## 真实案例（维护者本地账本第一周，2026-09-20 → 09-26）
+## 真实案例（维护者本地账本第一周，2026-09-20 → 09-26，个人历史记录）
 
-123 研究轮、160 次真实模拟；09-22 至 09-25 连续 4 天各有 1 个 Alpha 获得平台正式提交回执（平台状态均为 ACTIVE）；约第 2 天账号升至银牌、1 周内（实测第 5 天）升至金牌，金牌后即可申请顾问身份。模型用量全部来自已订阅 CLI 的 token 富余量，无额外按量 API 开销；"被接收"不代表筛选通过或收益。
+123 研究轮、160 次真实模拟；09-22 至 09-25 连续 4 天各有 1 个 Alpha 获得平台正式提交回执（平台状态均为 ACTIVE）；该账号约第 2 天升至银牌、第 5 天升至金牌——个人历史案例，不代表人人如此。模型用量全部来自已订阅 CLI 的 token 富余量，无额外按量 API 开销；"被接收"不代表筛选通过或收益；顾问入职仍需所在地区官方邀请与审核。

@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>autowq — 开箱即用的 WorldQuant BRAIN 全自动研究工具</title>
-<meta name="description" content="autowq：开源、开箱即用的 WorldQuant BRAIN 全自动研究回路。异渠道审查、预算闸门、提交前验收。本地已有订阅的 Agent CLI 即可上手，macOS 菜单栏与 Windows 托盘常驻。">
+<title>autowq — 用沉睡的 token 冲金牌，再冲每季度 $8,000：WorldQuant BRAIN 自动研究</title>
+<meta name="description" content="autowq：开源、本地的 WorldQuant BRAIN 研究回路。零增量开销，跑在你已订阅 Agent 的 token 富余量里，受控自动循环日夜推进——作者实测装上第 5 天到金牌。金牌之后不用重装：持续积累证据、检验改进，朝 WorldQuant 官方所述 Grandmaster 顾问每季度 8,000 美元以上的轨道前进。">
 <link rel="canonical" href="https://autowq.octoooo.com/">
 <link rel="alternate" hreflang="zh-CN" href="https://autowq.octoooo.com/">
 <link rel="alternate" hreflang="en" href="https://autowq.octoooo.com/en/">
@@ -17,21 +17,21 @@
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f5f3ec">
 <script>(function(){try{var m=localStorage.getItem('wq-theme');if(m!=='light'&&m!=='dark')m='auto';var d=m==='dark'||(m==='auto'&&window.matchMedia('(prefers-color-scheme: dark)').matches);var h=document.documentElement;h.dataset.theme=d?'dark':'light';h.dataset.themeMode=m;}catch(e){}})();</script>
 <meta property="og:site_name" content="autowq">
-<meta property="og:title" content="autowq — 本地 BRAIN 研究回路">
-<meta property="og:description" content="异渠道审查 · 预算闸门 · 提交前验收 · 数据不出本机">
+<meta property="og:title" content="autowq — 沉睡 token 冲金牌，再冲每季度 $8,000">
+<meta property="og:description" content="零增量开销 · 作者实测第 5 天金牌 · WorldQuant 官方：Grandmaster 顾问每季度 $8,000+">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://autowq.octoooo.com/">
 <meta property="og:image" content="https://autowq.octoooo.com/assets/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="autowq — 开箱即用的 WorldQuant BRAIN 全自动研究工具">
+<meta property="og:image:alt" content="autowq — 用沉睡的 token 冲金牌，再冲每季度 $8,000：WorldQuant BRAIN 自动研究">
 <meta property="og:locale" content="zh_CN">
 <meta property="og:locale:alternate" content="en_US">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="autowq — 本地 BRAIN 研究回路">
-<meta name="twitter:description" content="异渠道审查 · 预算闸门 · 提交前验收 · 数据不出本机">
+<meta name="twitter:title" content="autowq — 沉睡 token 冲金牌，再冲每季度 $8,000">
+<meta name="twitter:description" content="零增量开销 · 作者实测第 5 天金牌 · WorldQuant 官方：Grandmaster 顾问每季度 $8,000+">
 <meta name="twitter:image" content="https://autowq.octoooo.com/assets/og.png">
-<link rel="stylesheet" href="/style.css?v=10">
+<link rel="stylesheet" href="/style.css?v=11">
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -56,11 +56,12 @@
         "逐渠道预算与授权闸门，默认全关",
         "本地 SQLite 账本与真实结果诊断",
         "提交前独立验收门禁",
+        "金牌后的持续研究框架：有界补证、晚到重评、证据回流",
         "macOS 菜单栏 / Windows 托盘常驻，BRAIN 账号绑定",
-        "运行时零第三方依赖，数据不出本机"
+        "运行时零第三方依赖；状态存本地账本，模型请求只发给显式选择的渠道"
       ],
       "author": { "@type": "Organization", "name": "OctoLab", "url": "https://www.octoooo.com", "sameAs": ["https://github.com/Octo-o-o-o"] },
-      "description": "本地运行的 WorldQuant BRAIN 研究回路：假设、异渠道审查、有限回测、诊断与提交前验收，预算与授权由用户控制。"
+      "description": "本地运行的 WorldQuant BRAIN 研究回路：零增量开销跑在订阅 token 富余量里，以受控自动循环冲击金牌；金牌之后，持续研究框架把历史变成可检验的下一步。预算与授权由用户控制。"
     },
     {
       "@type": "FAQPage",
@@ -68,6 +69,8 @@
         { "@type": "Question", "name": "是 WorldQuant 官方产品吗？", "acceptedAnswer": { "@type": "Answer", "text": "不是。autowq 是独立开源项目（Apache-2.0），与 WorldQuant 无隶属关系；BRAIN 商标、平台与数据归其权利人。" } },
         { "@type": "Question", "name": "autowq 收费吗？", "acceptedAnswer": { "@type": "Answer", "text": "项目本身免费开源。它编排的是你自己的模型订阅 / API Key 和你自己的 BRAIN 账号，费用由你与供应商结算；向导不会发起任何付费推理。没有订阅也可以用官方免费 API 起步（wq providers free：Gemini、OpenRouter、智谱、硅基流动等），额度用尽会自动暂停、恢复后自动继续。" } },
         { "@type": "Question", "name": "自动研究 = 自动提交 = 收益吗？", "acceptedAnswer": { "@type": "Answer", "text": "不等于。平台筛选通过、提交接收、顾问资格、实际到账是四种不同状态，提交有独立验收门禁。" } },
+        { "@type": "Question", "name": "到了金牌之后，这个工具还有什么用？", "acceptedAnswer": { "@type": "Answer", "text": "进入第二阶段：持续研究框架把本地历史变成下一轮可检验的研究建议——新想法先查历史与反例，改进在同预算对照里验证，授权、成本、资料缺口和下一触发条件都在「研究进展」里。不用重装、不用重新初始化。" } },
+        { "@type": "Question", "name": "金牌 = 顾问 = 收入吗？", "acceptedAnswer": { "@type": "Answer", "text": "不等于。Gold 是平台等级；成为顾问需要官方邀请、签约与激活；报酬资格和实际到账又是后续状态，以所在地区官方通知为准。WorldQuant 官方顾问页面表述：Grandmaster 级顾问每季度报酬可达 8,000 美元以上——那是平台的激励机制，不是本软件的承诺。" } },
         { "@type": "Question", "name": "我的凭证和研究会上传吗？", "acceptedAnswer": { "@type": "Answer", "text": "不会。一切状态存本地 SQLite 账本；导出不包含 Cookie、密码与任务输入；模型请求只发给你显式选择的渠道。" } },
         { "@type": "Question", "name": "Windows 支持到什么程度？", "acceptedAnswer": { "@type": "Answer", "text": "只用 WorldQuantTray.exe 就能在原生 Windows 上跑完整流程（实验性）：向导、托盘、命令行和任务计划调度都在这个文件里。原生 Windows 没有模型进程的沙箱，因此只支持 API 渠道（含免费预设）；要用 Claude Code、Codex 等 CLI 订阅，请在 WSL2 里走 Linux + Docker 部署。" } }
       ]
@@ -81,12 +84,11 @@
   <div class="inner">
   <a class="brand" href="/"><img src="/favicon-32.png?v=2" alt="autowq 标志">auto<em>wq</em></a>
   <div class="links">
-    <a href="#pillars">特点</a>
     <a href="#start">上手</a>
-    <a href="#tray">托盘</a>
+    <a href="#reach-gold">到达金牌</a>
+    <a href="#after-gold">金牌之后</a>
     <a href="#case">案例</a>
     <a href="#install">下载</a>
-    <a href="#faq">FAQ</a>
     <a href="https://github.com/Octo-o-o-o/autowq" target="_blank" rel="noopener">GitHub</a>
     <button class="theme" id="themeToggle" type="button" aria-label="切换配色（自动 / 亮 / 暗）">◐</button>
     <a class="lang" href="/en/">EN</a>
@@ -98,8 +100,8 @@
 <section class="hero">
   <div>
     <div class="kicker">Open source · Apache-2.0 · Local-first</div>
-    <h1>开箱即用的<br><span class="amber">全自动</span> BRAIN 研究。</h1>
-    <p class="sub">装上就在菜单栏里运转：假设 → 异渠道审查 → 有限回测 → 诊断 → 提交前验收，一条回路自动循环。用你的账号、你的预算、你的节奏。</p>
+    <h1>用沉睡的 token 冲<span class="amber">金牌</span>，<br>再冲每季度 $8,000。</h1>
+    <p class="sub">一分钱不用多花：autowq 跑在你已订阅 Agent 的 token 富余量里（免费 API 也能起步），受控循环日夜推进「假设 → 异渠道审查 → 有限回测 → 提交前验收」——作者实测，装上第 5 天账号升上金牌。金牌不是终点：WorldQuant 官方写明 Grandmaster 级顾问每季度报酬可达 8,000 美元以上，第二阶段帮你持续提高研究质量，一站一站朝那条线走。</p>
     <div class="cta">
       <div class="cta-dl">
         <a class="btn primary" id="heroCta" href="#install">免费下载 · 5 分钟上手</a>
@@ -120,6 +122,10 @@
         </div>
       </div>
       <a class="btn" href="https://github.com/Octo-o-o-o/autowq" target="_blank" rel="noopener">GitHub →</a>
+    </div>
+    <div class="stage-links">
+      <a class="btn stage" href="#reach-gold"><span class="sn">①</span>冲金牌：装好就开跑</a>
+      <a class="btn stage" href="#after-gold"><span class="sn">②</span>金牌后：冲向 $8,000/季度</a>
     </div>
   </div>
   <svg class="loopmark" viewBox="0 0 200 200" aria-label="autowq 回路标志">
@@ -145,11 +151,11 @@
   <div class="pillars rise">
     <div class="pillar"><div class="k">方便</div><div class="d">开箱即用，有订阅的 Agent 就能跑</div></div>
     <div class="pillar"><div class="k">高质量</div><div class="d">异渠道审查 + 提交前验收门禁</div></div>
-    <div class="pillar"><div class="k">低成本</div><div class="d">跑在已有订阅的 token 富余量里</div></div>
+    <div class="pillar"><div class="k">零增量成本</div><div class="d">跑在订阅 token 富余量里，免费 API 也能起步</div></div>
     <div class="pillar"><div class="k">可见</div><div class="d">轮次、预算、进度全在托盘</div></div>
     <div class="pillar"><div class="k">可控制</div><div class="d">预算、授权、暂停随时在手</div></div>
-    <div class="pillar"><div class="k">安全</div><div class="d">数据不出本机，闸门默认关闭</div></div>
-    <div class="pillar"><div class="k">开源</div><div class="d">Apache-2.0，732 项自动化测试</div></div>
+    <div class="pillar"><div class="k">安全</div><div class="d">状态留在本地账本，闸门默认关闭</div></div>
+    <div class="pillar"><div class="k">开源</div><div class="d">Apache-2.0 · 0.2.19 共 804 项工程测试</div></div>
   </div>
 </section>
 
@@ -202,9 +208,23 @@
   </div>
 </section>
 
+<section id="reach-gold">
+  <h2><span class="no">04</span>阶段一 · 快速到达金牌</h2>
+  <p class="lead">面向刚开始 BRAIN 研究、或还没到 Gold 的你。门槛很低：装好、登录、设定预算，剩下的交给受控的自动循环——不多花一分钱，烧的是订阅里沉睡的 token。作者的第一周就是这么过的：第 5 天，金牌。</p>
+  <div class="principles rise">
+    <div class="p"><div class="idx">STEP 1</div><h3>跑一次首次向导</h3><p>检测你已订阅的 Agent CLI、按你的选择生成配置、调起 BRAIN 与渠道登录——就是上面那段演示，之后不用再做。</p></div>
+    <div class="p"><div class="idx">STEP 2</div><h3>设定预算与期限</h3><p>在你的预算、你的授权期限内启用自动研究。模型、研究、提交默认全关，你显式打开才跑。</p></div>
+    <div class="p"><div class="idx">STEP 3</div><h3>每轮自动循环</h3><p>提出假设 → 异渠道审查 → 有限回测。研究渠道与审查渠道强制不同，减少自说自话。</p></div>
+    <div class="p"><div class="idx">STEP 4</div><h3>看真实结果</h3><p>轮次历史、真实回执、失败与 UNKNOWN 如实记账；失败的候选能查到原因，不会静默重来。</p></div>
+    <div class="p"><div class="idx">STEP 5</div><h3>过验收再提交</h3><p>合格候选先过独立的提交前验收，再核对平台回执——然后进入下一轮，把圈再缩一圈。</p></div>
+    <div class="p"><div class="idx">全程可见</div><h3>一切都在托盘里</h3><p>当前轮次、下轮研究 / 审查渠道、已提交 Alpha、真实回执与异常阻塞，随时可查、可暂停。</p></div>
+  </div>
+  <p class="fineprint">Gold 由 WorldQuant 平台按 Alpha 与 OS 表现持续累计判定，没有写死的天数，软件里也没有「冲金牌模式」开关。下面的账本是作者个人的历史案例，供参考，不代表人人如此。</p>
+</section>
+
 <section id="case">
-  <h2><span class="no">04</span>真实账本，不是效果图</h2>
-  <p class="lead">作者个人实测：研究只消耗订阅 token 的富余量，连续 4 天每天提交 1 枚 Alpha、平台状态全部 ACTIVE；约第 2 天升到银牌，1 周内即可升到金牌（实测第 5 天），顾问入职仍需遵循所在地区的官方邀请与审核流程。</p>
+  <h2><span class="no">05</span>真实账本，不是效果图</h2>
+  <p class="lead">作者个人实测（历史期间 2026-09-20 → 09-26）：研究只消耗订阅 token 的富余量，连续 4 天每天提交 1 枚 Alpha、平台状态全部 ACTIVE；该账号约第 2 天升银牌、第 5 天升金牌。这是个人历史案例，不代表人人如此——顾问入职仍需遵循所在地区的官方邀请与审核流程。</p>
   <div class="stats rise">
     <div class="stat"><div class="n" data-count="123">0</div><div class="l">研究轮次</div></div>
     <div class="stat"><div class="n" data-count="160">0</div><div class="l">真实模拟</div></div>
@@ -214,21 +234,45 @@
   <div class="chart rise">
     <div class="chart-head">
       <span class="lg acc"><i></i>累计提交的 Alpha · 每天都在变多</span>
-      <span class="note">🥈 约第 2 天银牌 · 🥇 1 周内金牌 · 金牌不等于已获邀请</span>
+      <span class="note">作者实测：🥈 约第 2 天 · 🥇 第 5 天 · 金牌 ≠ 已获顾问邀请</span>
     </div>
     <div class="bars">
       <div class="bar accepted" style="--v:25%"><b>1</b><i style="animation-delay:.1s"></i><em>第 1 天 ★</em></div>
       <div class="bar accepted" style="--v:50%"><b>2</b><i style="animation-delay:.2s"></i><em>第 2 天 ★🥈</em></div>
       <div class="bar accepted" style="--v:75%"><b>3</b><i style="animation-delay:.3s"></i><em>第 3 天 ★</em></div>
       <div class="bar accepted" style="--v:100%"><b>4</b><i style="animation-delay:.4s"></i><em>第 4 天 ★</em></div>
-      <div class="bar accepted" style="--v:100%"><b>🥇</b><i style="animation-delay:.5s"></i><em>第 5 天 · 金牌（1 周内）</em></div>
+      <div class="bar accepted" style="--v:100%"><b>🥇</b><i style="animation-delay:.5s"></i><em>第 5 天 · 金牌</em></div>
     </div>
   </div>
-  <p class="fineprint">柱高 = 累计已提交 Alpha 数（第 1–4 天每天 +1，平台状态均为 ACTIVE；★ = 当天有新回执）。🥈 约第 2 天升银牌、🥇 1 周内（实测第 5 天）升金牌，顾问准入仍以所在地区官方邀请与审核为准；等级与积分由 WorldQuant 平台按 Alpha 与 OS 表现持续累计。模型用量都在已付订阅的富余额度内；"被接收"不代表筛选通过或收益——研究工具，不是收益承诺。</p>
+  <p class="fineprint">柱高 = 累计已提交 Alpha 数（第 1–4 天每天 +1，平台状态均为 ACTIVE；★ = 当天有新回执）。图为作者个人账号 2026-09-20 → 09-26 的历史记录：约第 2 天升银牌、第 5 天升金牌；他人进度取决于各自的 Alpha 质量与平台累计，等级与积分由 WorldQuant 平台判定，顾问准入以所在地区官方邀请与审核为准。模型用量都在已付订阅的富余额度内；"被接收"不代表筛选通过或收益——研究工具，不是收益承诺。</p>
+</section>
+
+<section id="after-gold">
+  <h2><span class="no">06</span>阶段二 · 金牌之后，持续提高</h2>
+  <p class="lead">到达 Gold 不是终点，也不用重装、不用重新登录——同一份安装进入下一段旅程：让每一轮研究都比上一轮更有依据，把同样预算的有效产出越做越高。研究质量，正是平台给顾问定价的东西。</p>
+  <div class="loopline rise" aria-label="持续研究闭环">
+    <span>发现新的研究问题</span><i>→</i><span>明确缺什么资料</span><i>→</i><span>有界补证</span><i>→</i><span>可检验的小实验</span><i>→</i><span>新结果到来时重评</span><i>→</i><span>经验与反例回流</span><i>↺</i>
+  </div>
+  <div class="principles rise">
+    <div class="p"><div class="idx">价值 1</div><h3>少做重复无效研究</h3><p>新想法先查本地历史与反例；失败和「未知」同样留档——不会换个说法再烧一遍预算。</p></div>
+    <div class="p"><div class="idx">价值 2</div><h3>让「提高」可检验</h3><p>改进只在同预算对照里说话：看新增数据下的质量保持、固定组合中的增量贡献；证据不足就继续观察，不拿单次最高值自称提升。</p></div>
+    <div class="p"><div class="idx">价值 3</div><h3>看清资源与下一步</h3><p>托盘「研究进展」里直接读：授权期限、学习状态、已知 / 未知成本、资料缺口和下一触发条件。</p></div>
+  </div>
+  <ul class="bullets after-notes rise">
+    <li><b>建议节奏</b>：每天扫一眼运行、阻塞与成本；每周看同预算的有效产出与规则反例；等新的市场数据到了再下结论。（这是使用建议，不是系统自动安装的提醒任务。）</li>
+    <li><b>状态语言</b>：「基线」保持原有做法，「观察对照」先积累再比较，「试用」只在已验证范围内采用学到的排序——学习臂参与试验，不等于已经提高。</li>
+    <li><b>14 个方向</b>是初始研究议题，不是已全部跑通、已验证或盈利的策略；可以继续注册新议题，仍需支持的数据来源与明确授权，资料缺失时可能需要你提供来源。</li>
+    <li><b>边界</b>：自动学习改进的是检索、计划与有界实验——不会自动修改程序、不会提高预算、不会绕过提交门槛。</li>
+  </ul>
+  <div class="goal rise">
+    <div class="goal-k">🥇 → 💼 每季度 $8,000+：WorldQuant 写给 Grandmaster 的数字</div>
+    <p>Gold、官方邀请、签约 / 激活、获得报酬资格、实际到账，是几个不同状态，以你所在地区的官方通知为准。按 WorldQuant 官方顾问页面的表述：<b>Grandmaster 级顾问每季度报酬可达 8,000 美元以上，Master 级可达 2,000 美元以上</b>。持续提高研究质量，就是朝这条轨道前进的走法——软件负责把研究做得更扎实，等级、邀请与报酬由平台和你共同决定。</p>
+    <a href="https://worldquantbrain.com/consultant" target="_blank" rel="noopener">WorldQuant 官方顾问计划说明 →</a>
+  </div>
 </section>
 
 <section id="install">
-  <h2><span class="no">05</span>下载与上手</h2>
+  <h2><span class="no">07</span>下载与上手</h2>
   <p class="lead">两条路，最后都走进同一个首启向导：想点开就用的下载桌面版，习惯终端的一行命令装好。</p>
   <div class="dl-grid rise">
     <div class="dl-card featured" data-os="macos">
@@ -276,10 +320,12 @@
 </section>
 
 <section id="faq">
-  <h2><span class="no">06</span>FAQ</h2>
+  <h2><span class="no">08</span>FAQ</h2>
   <details><summary>是 WorldQuant 官方产品吗？</summary><p>不是。autowq 是独立开源项目（Apache-2.0），与 WorldQuant 无隶属关系；BRAIN 商标、平台与数据归其权利人。</p></details>
   <details><summary>autowq 收费吗？</summary><p>项目本身免费开源。它编排的是你自己的模型订阅 / API Key 和你自己的 BRAIN 账号，费用由你与供应商结算；向导不会发起任何付费推理。没有订阅也可以用官方免费 API 起步（<code>wq providers free</code>：Gemini、OpenRouter、智谱、硅基流动等），额度用尽会自动暂停、恢复后自动继续。</p></details>
   <details><summary>自动研究 = 自动提交 = 收益吗？</summary><p>不等于。平台筛选通过、提交接收、顾问资格、实际到账是四种不同状态，提交有独立验收门禁。</p></details>
+  <details><summary>到了金牌之后，这个工具还有什么用？</summary><p>进入<a href="#after-gold">第二阶段</a>：持续研究框架把本地历史变成下一轮可检验的研究建议——新想法先查历史与反例，改进在同预算对照里验证，授权、成本、资料缺口和下一触发条件都在「研究进展」里。不用重装、不用重新初始化。</p></details>
+  <details><summary>金牌 = 顾问 = 收入吗？</summary><p>不等于。Gold 是平台等级；成为顾问需要官方邀请、签约与激活；报酬资格和实际到账又是后续状态，以所在地区官方通知为准。<a href="https://worldquantbrain.com/consultant" target="_blank" rel="noopener">WorldQuant 官方顾问页面</a>的表述：Grandmaster 级顾问每季度报酬可达 8,000 美元以上——那是平台的激励机制，不是本软件的承诺。</p></details>
   <details><summary>我的凭证和研究会上传吗？</summary><p>不会。一切状态存本地 SQLite 账本；导出不包含 Cookie、密码与任务输入；模型请求只发给你显式选择的渠道。</p></details>
   <details><summary>macOS 完整包和轻量包怎么选？</summary><p>两个都是已公证的 DMG，拖进“应用程序”即可，功能相同。完整包自带 Python，打开就能用。轻量包只有菜单和引擎，第一次设置时找本机的 Python 3.11+；没有的话按提示安装 Xcode 命令行工具。检查更新打开的是完整包。</p></details>
   <details><summary>Windows 支持到什么程度？</summary><p>只用 WorldQuantTray.exe 就能在原生 Windows 上跑完整流程（实验性）：向导、托盘、命令行和任务计划调度都在这个文件里。原生 Windows 没有模型进程的沙箱，因此只支持 API 渠道（含免费预设）；要用 Claude Code、Codex 等 CLI 订阅，请在 WSL2 里走 Linux + Docker 部署。</p></details>
