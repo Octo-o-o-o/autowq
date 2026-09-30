@@ -126,6 +126,66 @@ class OnboardingTests(unittest.TestCase):
               '--model','grok=chosen','--model','devin=review','--binary','grok='+sys.executable,
               '--binary','devin='+sys.executable,'--research','grok','--review','devin',
               '--engineering','devin','--reasoning-effort','grok=high','--skip-login']
-        with patch.dict('os.environ',{'LC_ALL':'zh_CN.UTF-8'}),patch('sys.stdin.isatty',return_value=True),patch('builtins.input',side_effect=['en','y']):
+        # inputs: language, intro screens 1-3 (Enter, Enter, default fresh), write confirmation
+        with patch.dict('os.environ',{'LC_ALL':'zh_CN.UTF-8'}),patch('sys.stdin.isatty',return_value=True),patch('builtins.input',side_effect=['en','','','','y']):
             self.assertEqual(onboard.main(args),0)
         self.assertEqual(json.loads((self.root/'config/config.json').read_text())['ui']['language'],'en')
+
+    def _interactive_args(self,*extra):
+        return ['--root',str(self.root),'--runtime',str(self.runtime),'--providers','grok,devin',
+                '--model','grok=chosen','--model','devin=review','--binary','grok='+sys.executable,
+                '--binary','devin='+sys.executable,'--research','grok','--review','devin',
+                '--engineering','devin','--skip-login',*extra]
+
+    def _run_interactive(self,inputs,env=None,*extra):
+        import io
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+        env=env or {'LC_ALL':'en_US.UTF-8'}
+        buf=io.StringIO()
+        with patch.dict('os.environ',env),patch('sys.stdin.isatty',return_value=True),patch('builtins.input',side_effect=inputs),redirect_stdout(buf):
+            code=onboard.main(self._interactive_args(*extra))
+        return code,buf.getvalue()
+
+    def test_intro_fresh_start_is_default_and_keeps_registration_pointer(self):
+        code,out=self._run_interactive(['en','','','','','y'])
+        self.assertEqual(code,0)
+        self.assertIn('FIRST-RUN INTRO',out)
+        self.assertIn('https://platform.worldquantbrain.com/sign-up',out)
+        saved=json.loads((self.root/'config/config.json').read_text())
+        self.assertEqual(saved['onboarding']['user_stage'],'fresh')
+
+    def test_intro_gold_stage_skips_newcomer_registration_guidance(self):
+        code,out=self._run_interactive(['en','','','2','','y'])
+        self.assertEqual(code,0)
+        self.assertIn('already Gold',out)
+        self.assertNotIn('platform.worldquantbrain.com/sign-up',out)
+        saved=json.loads((self.root/'config/config.json').read_text())
+        self.assertEqual(saved['onboarding']['user_stage'],'gold')
+
+    def test_intro_skipped_by_flag_and_never_shown_non_interactively(self):
+        code,out=self._run_interactive(['en','','y'],None,'--skip-intro')
+        self.assertEqual(code,0)
+        self.assertNotIn('FIRST-RUN INTRO',out)
+        saved=json.loads((self.root/'config/config.json').read_text())
+        self.assertEqual(saved['onboarding']['user_stage'],'fresh')
+
+    def test_intro_has_no_ansi_without_tty_or_with_no_color(self):
+        code,out=self._run_interactive(['en','','','','','y'],{'LC_ALL':'en_US.UTF-8','NO_COLOR':'1'})
+        self.assertEqual(code,0)
+        self.assertNotIn('\x1b[',out)
+
+    def test_login_flow_addresses_gold_users_without_registration_url(self):
+        import io
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+        self.configure()
+        path=self.root/'config/config.json'
+        cfg=json.loads(path.read_text());cfg['onboarding']['user_stage']='gold'
+        path.write_text(json.dumps(cfg,ensure_ascii=False,indent=2)+'\n')
+        buf=io.StringIO()
+        with patch('builtins.input',side_effect=['n','n','n']),redirect_stdout(buf):
+            code=onboard.login_flow(self.root,'en')
+        self.assertEqual(code,3)
+        self.assertIn('already Gold or a consultant',buf.getvalue())
+        self.assertNotIn('sign-up',buf.getvalue())
