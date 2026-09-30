@@ -8,6 +8,12 @@ A local WorldQuant BRAIN research workflow: propose a hypothesis → review thro
 
 **A research tool, not a promise of income.** Passing a screen, an accepted submission, consultant eligibility and actual payment are separate states. Research automation does not automatically authorize submissions.
 
+## How to use it: one tool, two stages
+
+**Stage one · [reach Gold fast](https://autowq.octoooo.com/en/#reach-gold)** — for anyone starting BRAIN research, or not yet at Gold. The first-run wizard opens with a three-screen intro (where the compute comes from, how the road goes, where you start), then detects providers, writes config and launches logins. Inside your own budget and authorization window, a gated cycle drives hypothesis → cross-provider review → bounded simulation; real outcomes, failure reasons and platform receipts are all recorded as-is; qualified candidates pass pre-submission acceptance before the next cycle begins. Research can run entirely on the surplus tokens of subscriptions you already have (free API tiers work too) — zero extra metered spend. Gold is awarded by the platform as alphas and OS performance accumulate; there is no fixed number of days. In the author's own run (a 2026-09 historical case, not a promise): the account reached Gold on day 5.
+
+**Stage two · [after Gold, keep improving](https://autowq.octoooo.com/en/#after-gold)** — no reinstall, no re-initialization; pick "I am already Gold / a consultant" at the wizard's starting-point screen to skip the newcomer guidance. The continuous-research framework turns local history into verifiable next steps: spot a question → name the missing evidence → collect it, bounded → run a small testable experiment → reassess when results land → feed lessons and counterexamples back. Improvements speak only inside same-budget comparisons, and failures stay on record; Research progress in the tray shows authorization deadlines, learning state, known/unknown costs, evidence gaps and the next trigger. On the consultant track, Gold, the official invitation, contracting, payout eligibility and actual payouts are distinct states governed by the official process in your region; WorldQuant states Grandmaster-level consultants can earn upwards of $8,000 per quarter — better research is how you walk that line. Mechanism details: [Research learning](RESEARCH_LEARNING.md).
+
 ## Install
 
 Requirements: your own CLI subscription accounts or API keys. Without a subscription you can start on official free API tiers (`wq providers free` lists Gemini, OpenRouter, BigModel, SiliconFlow and other presets that need only one key). The macOS DMG bundles its runtime; every other install method needs Python 3.11+. The core runtime uses the Python standard library only. macOS is supported; Linux and Windows WSL2 use Docker-isolated providers. Native Windows has experimental support with API providers only (see the Windows note under Option 2).
@@ -133,3 +139,9 @@ All-cycle review supports manual and automatic runs: `./wq auto-research report`
 ### Evidence-driven research
 
 Local trial lineage, versioned feedback, counterexample-aware shadow rules and bounded plan selection reuse the existing queue and review/budget gates. Software checks do not establish Alpha quality improvements. See [Research learning](RESEARCH_LEARNING.md) for replay, frozen comparisons and read-only feedback refresh.
+
+## Contributing
+
+[Issues](https://github.com/Octo-o-o-o/autowq/issues) and [PRs](https://github.com/Octo-o-o-o/autowq/pulls) are genuinely welcome — bugs, ideas, doc fixes, proposals for new research topics. Every one gets a careful read; making this project better is a team effort.
+
+Interested in collaborating? Reach me via [OctoLab](https://www.octoooo.com) or [GitHub @Octo-o-o-o](https://github.com/Octo-o-o-o).
