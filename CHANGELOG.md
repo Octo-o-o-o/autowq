@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.20
+
+- First-run wizard opens with a three-screen intro: how the loop turns idle subscription tokens (free APIs and self-hosted models too) into gated BRAIN research, the road from sign-up to Gold to the consultant track, and a starting-point choice — already-Gold/consultant users skip newcomer registration guidance (persisted as onboarding.user_stage; BRAIN login is still required because the loop runs under their account).
+- The intro mirrors the website's amber terminal style, respects NO_COLOR and non-TTY output, can open worldquantbrain.com on a keypress, and is skipped by --non-interactive/--skip-intro or pre-answered with --stage.
+
 ## 0.2.19
 
 - Added a bounded continuous-research loop on the existing task ledger: evidence gaps, registered collectors, late-observation reassessment, scoped paired findings, and versioned issue proposals.

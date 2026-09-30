@@ -117,11 +117,93 @@ def configure(root, runtime, selected, models, binaries, roles, efforts, platfor
 
 
 BRAIN_REGISTER_URL = 'https://platform.worldquantbrain.com/sign-up'
+BRAIN_PLATFORM_URL = 'https://worldquantbrain.com'
 PROVIDER_URLS = {'grok':'https://grok.com/', 'devin':'https://app.devin.ai/',
                  'cursor':'https://cursor.com/', 'zcode':'https://z.ai/',
                  'claude':'https://claude.ai/', 'codex':'https://chatgpt.com/',
                  'gemini':'https://geminicli.com/', 'copilot':'https://github.com/features/copilot',
                  'qwen':'https://qwenlm.github.io/qwen-code-docs/', 'opencode':'https://opencode.ai/'}
+
+
+def intro_flow(lang):
+    """First-run welcome: what autowq does, the road to Gold and beyond, and where you start.
+
+    Returns 'fresh' (new to BRAIN / not yet Gold) or 'gold' (already Gold or consultant).
+    The choice only tailors guidance copy; BRAIN login is still required either way,
+    because the research loop runs under the user's own account.
+    """
+    zh = lang == 'zh'
+    color = sys.stdout.isatty() and not os.environ.get('NO_COLOR')
+    if color and sys.platform == 'win32':
+        os.system('')  # enable VT escape processing on legacy conhost
+    amber = '\x1b[38;5;214m' if color else ''
+    hot = '\x1b[38;5;220m' if color else ''
+    dim = '\x1b[38;5;245m' if color else ''
+    bold = '\x1b[1m' if color else ''
+    rst = '\x1b[0m' if color else ''
+    say = lambda cn, en: print(cn if zh else en)
+    ask = lambda cn, en: input(cn if zh else en).strip().lower()
+
+    def screen(no, title):
+        print()
+        print(amber + '─' * 66 + rst)
+        print(hot + ('● AUTOWQ · 首次使用引导    %d/3' % no if zh else '● AUTOWQ · FIRST-RUN INTRO    %d/3' % no) + rst)
+        print(bold + title + rst)
+        print(amber + '─' * 66 + rst)
+
+    screen(1, '把沉睡的 token，变成你的研究算力。' if zh else 'Turn idle tokens into research compute.')
+    say('autowq 跑在你已订阅的 Agent（Grok、Cursor、Claude Code、Codex 等）用不完的',
+        'autowq runs on the surplus tokens of the agent subscriptions you already pay for')
+    say('token 富余量里——官方免费 API、自己部署的模型同样可以。',
+        '(Grok, Cursor, Claude Code, Codex …) — official free APIs and self-hosted models work too.')
+    say('它把这些算力组织成一条受控的 WorldQuant BRAIN 研究回路：',
+        'It turns that idle compute into a gated WorldQuant BRAIN research loop:')
+    say('假设 → 异渠道审查 → 有限回测 → 提交前验收，日夜自动循环。',
+        'hypothesis → cross-provider review → bounded simulation → gated submission, on repeat.')
+    say('软件开源免费，不多花一分钱；研究成果与报酬来自 WorldQuant 平台，规则以官方为准。',
+        'Free and open source — not a cent extra. Results and rewards come from the WorldQuant platform.')
+    print(dim + ('平台本身由官方自己介绍：按 o 打开 WorldQuant 官网，这里不越俎代庖。' if zh
+                 else 'Under its official rules. The platform speaks for itself — press o to open their site.') + rst)
+    while True:
+        pick = ask('[Enter 继续 · o 了解 WorldQuant] ', '[Enter to continue · o for worldquantbrain.com] ')
+        if pick != 'o':
+            break
+        say('正在打开 ' + BRAIN_PLATFORM_URL + ' ……', 'Opening ' + BRAIN_PLATFORM_URL + ' ...')
+        try:
+            import webbrowser
+            webbrowser.open(BRAIN_PLATFORM_URL)
+        except Exception:
+            pass
+
+    screen(2, '这条路，分三段走。' if zh else 'The road has three legs.')
+    say('① 第一周 · 从注册到金牌 —— 受控循环把「提出—验证—复盘」缩到最短。',
+        '① Week one · sign-up to Gold — the gated loop shrinks every propose-verify-review cycle.')
+    say('   作者实测：装上第 5 天账号升上金牌（个人案例，速度不作承诺）。',
+        '   In the author\'s own run the account reached Gold on day 5 (one person\'s history, not a promise).')
+    say('② 金牌之后 · 等待官方邀请期间 —— 持续自动研究，让每一枚 Alpha 都比上一枚更有依据。',
+        '② After Gold · while the official invitation is pending — keep researching, so each alpha')
+    say('   邀请、签约与激活以你所在地区的官方通知为准。',
+        '   stands on better evidence than the last. Invitation and contracting follow official notice.')
+    say('③ 成为顾问 · 冲向 Grandmaster —— WorldQuant 官方写明：Grandmaster 级顾问',
+        '③ Consultant · on toward Grandmaster — WorldQuant states Grandmaster-level consultants')
+    say('   每季度报酬可达 8,000 美元以上。持续提高研究质量，就是朝这条线走。',
+        '   can earn upwards of $8,000 per quarter. Better research is how you walk that line.')
+    ask('[Enter 继续] ', '[Enter to continue] ')
+
+    screen(3, '你从哪里开始？' if zh else 'Where do you start?')
+    say('1) 全新开始 —— 还没有 BRAIN 账号，或还没到金牌。向导会带你走完注册指引、',
+        '1) Fresh start — no BRAIN account yet, or not yet Gold. The wizard guides you through')
+    say('   登录与第一次研究设置。', '   registration pointers, login and the first research setup.')
+    say('2) 我已是金牌或顾问 —— 跳过新手引导，直接进入持续研究的设置；',
+        '2) I am already Gold / a consultant — skip the newcomer guidance and go straight to the')
+    say('   BRAIN 登录仍然需要，因为回路跑的正是你的账号。',
+        '   continuous-research setup; BRAIN login is still required, since the loop runs as you.')
+    choice = ask('选择 [1]: ', 'Choose [1]: ')
+    if choice in ('2', 'gold', 'g'):
+        say('好的——直接进入持续研究设置。', 'Got it — straight to the continuous-research setup.')
+        return 'gold'
+    say('好的——从第一段开始。', 'Got it — starting from leg one.')
+    return 'fresh'
 
 
 def login_flow(root, lang, persist=None):
@@ -130,10 +212,16 @@ def login_flow(root, lang, persist=None):
     providers=info.get('providers',list(cfg.get('models',{})))
     say=lambda zh,en: print(zh if lang=='zh' else en)
     ask=lambda zh,en: input(zh if lang=='zh' else en).strip().lower()
-    say('步骤：账号注册与登录（不会启动研究或付费推理）','Step: account registration and login (no research or paid inference)')
-    print('WorldQuant BRAIN: '+BRAIN_REGISTER_URL)
-    say('请在浏览器自行注册、验证邮箱并接受条款；已有账号可直接登录。','Register, verify your email and accept terms yourself in the browser, or sign in with your existing account.')
     status=info.get('login',{})
+    stage=info.get('user_stage','fresh')
+    if stage=='gold':
+        say('步骤：账号登录（不会启动研究或付费推理）','Step: account login (no research or paid inference)')
+        say('你已是金牌或顾问——BRAIN 登录会把账号绑定到本地工作区，研究才能以你的身份进行。',
+            'You are already Gold or a consultant — signing in binds your BRAIN account to this workspace so research runs as you.')
+    else:
+        say('步骤：账号注册与登录（不会启动研究或付费推理）','Step: account registration and login (no research or paid inference)')
+        print('WorldQuant BRAIN: '+BRAIN_REGISTER_URL)
+        say('请在浏览器自行注册、验证邮箱并接受条款；已有账号可直接登录。','Register, verify your email and accept terms yourself in the browser, or sign in with your existing account.')
     for name in providers:
         login_env=None
         if name in PROTOCOLS:
@@ -193,6 +281,8 @@ def main(argv=None):
     p.add_argument('--runtime',type=Path,default=Path.home()/'.local/share/autowq-runtime')
     p.add_argument('--login-only',action='store_true',help='Resume login without regenerating config')
     p.add_argument('--skip-login',action='store_true',help='Skip interactive login and leave it pending')
+    p.add_argument('--skip-intro',action='store_true',help='Skip the first-run welcome screens')
+    p.add_argument('--stage',choices=['fresh','gold'],help='Starting point: fresh (new to BRAIN) or gold (already Gold or consultant)')
     p.add_argument('--list',action='store_true',help='Detect host executables only; no writes or model calls')
     p.add_argument('--non-interactive',action='store_true')
     p.add_argument('--providers',help='Comma-separated: '+','.join(NAMES))
@@ -224,7 +314,14 @@ def main(argv=None):
             return login_flow(a.root,a.lang,a.lang_pref)
         if (a.root/'config/config.json').exists(): raise ValueError('Existing deployment: refusing to overwrite config/config.json. See docs/onboarding.md.')
         if not a.non_interactive and not sys.stdin.isatty(): raise ValueError('Interactive terminal required, or use --non-interactive with explicit choices.')
-        say('步骤：选择模型渠道。BRAIN注册入口：'+BRAIN_REGISTER_URL,'Step: select model providers. BRAIN registration: '+BRAIN_REGISTER_URL)
+        stage=a.stage
+        if stage is None and not a.skip_intro and not a.non_interactive and sys.stdin.isatty():
+            stage=intro_flow(a.lang)
+        stage=stage or 'fresh'
+        if stage=='gold':
+            say('步骤：选择模型渠道。','Step: select model providers.')
+        else:
+            say('步骤：选择模型渠道。BRAIN注册入口：'+BRAIN_REGISTER_URL,'Step: select model providers. BRAIN registration: '+BRAIN_REGISTER_URL)
         say('检测到的宿主CLI（不代表已登录或模型有权限）：','Detected host CLIs (not proof of login/model access):');print(json.dumps(found,ensure_ascii=False))
         if sys.platform=='win32':
             say('原生 Windows 只支持 API 渠道：官方免费预设、OpenAI/Anthropic 协议或自建兼容接口；模型 CLI 需在 macOS 或 WSL2 使用。',
@@ -312,6 +409,7 @@ def main(argv=None):
         if not a.non_interactive and ask('写入？[y/N]：','Write configuration? [y/N]: ').lower()!='y':
             say('已取消，没有写入。','Cancelled; no files written.');return 0
         cfg=configure(a.root,a.runtime,selected,models,binaries,roles,efforts,apis=apis)
+        cfg['onboarding']['user_stage']=stage
         if free:
             # 免费预设的额度重置规则写在渠道层，额度暂停据此等到重置时刻。
             pp=a.root/'config/profiles.json';profiles=json.loads(pp.read_text())
@@ -332,13 +430,16 @@ def main(argv=None):
             pp.write_text(json.dumps(profiles,ensure_ascii=False,indent=2)+'\n')
         cfg['ui']={'language':a.lang_pref}
         (a.root/'config/config.json').write_text(json.dumps(cfg,ensure_ascii=False,indent=2)+'\n')
-        say('WorldQuant BRAIN 注册：'+BRAIN_REGISTER_URL,'WorldQuant BRAIN registration: '+BRAIN_REGISTER_URL)
+        if stage!='gold':
+            say('WorldQuant BRAIN 注册：'+BRAIN_REGISTER_URL,'WorldQuant BRAIN registration: '+BRAIN_REGISTER_URL)
         login_code=0
         if not a.non_interactive and not a.skip_login:
             login_code=login_flow(a.root,a.lang,a.lang_pref)
         else:
             say('登录待完成：wq onboard --login-only','Login pending: wq onboard --login-only')
         say('配置已保存。下一步：完成待办登录 → doctor → 离线导入 → 预算/授权 → 真实单轮核验 → 开启调度。','Configuration saved. Next: finish pending logins → doctor → offline import → budgets/authorization → verify one real cycle → enable scheduling.')
+        if stage=='gold':
+            say('你已是金牌或顾问：登录完成后，托盘「研究进展」与持续研究功能就是你的主场。','Already Gold or a consultant: after login, Research progress in the tray and the continuous-research features are your home turf.')
         if len(selected)==1:say('仅一个渠道：可做离线/单模型工作；自动研究要求不同渠道审查，暂不具备条件。','One provider: offline/single-model use only; autopilot requires a distinct review provider.')
         say('完整操作单：docs/onboarding.md；未发起付费推理或安装调度服务。','Full checklist: docs/onboarding.md. No paid inference or scheduler installation performed.')
         return login_code
