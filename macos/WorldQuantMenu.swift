@@ -132,6 +132,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var standbyMenu = NSMenu()
     let research = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     var researchMenu = NSMenu()
+    var researchWindow: NSWindow?
+    var researchText: NSTextView?
+    var researchResponse: [String: Any] = [:]
+
     let tick = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     let nextAt = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     let researchModel = NSMenuItem(title: "", action: nil, keyEquivalent: "")
@@ -214,6 +218,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(info(t("正在检查内置引擎更新…", "Checking bundled engine updates…")))
             runSetup(["setup", "--workspace", root, "--allow-busy"]) { self.finishEngineSetup($0) }
         } else { buildFirstRunMenu() }
+    }
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if ready { showResearch() }
+        return true
+    }
+    @objc func showResearch() {
+        if researchWindow == nil {
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 680),
+                                  styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.minSize = NSSize(width: 620, height: 440)
+            let content = window.contentView!
+            let refreshButton = NSButton(title: t("刷新", "Refresh"), target: self, action: #selector(refreshResearch))
+            refreshButton.frame = NSRect(x: 20, y: 635, width: 100, height: 28)
+            refreshButton.autoresizingMask = [.minYMargin]
+            content.addSubview(refreshButton)
+            let menuButton = NSButton(title: t("托盘菜单", "Tray menu"), target: self, action: #selector(openTrayMenu))
+            menuButton.frame = NSRect(x: 130, y: 635, width: 130, height: 28)
+            menuButton.autoresizingMask = [.minYMargin]
+            content.addSubview(menuButton)
+            let scroll = NSScrollView(frame: NSRect(x: 20, y: 20, width: 760, height: 600))
+            scroll.hasVerticalScroller = true
+            scroll.autoresizingMask = [.width, .height]
+            let view = NSTextView(frame: scroll.contentView.bounds)
+            view.isEditable = false; view.isSelectable = true
+            view.isVerticallyResizable = true; view.isHorizontallyResizable = false
+            view.autoresizingMask = [.width]
+            view.textContainer?.widthTracksTextView = true
+            view.textContainerInset = NSSize(width: 12, height: 12)
+            view.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+            scroll.documentView = view; content.addSubview(scroll)
+            researchWindow = window; researchText = view
+            window.center()
+        }
+        updateResearchWindow()
+        researchWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        perform("research")
+    }
+    @objc func refreshResearch() { perform("research") }
+    @objc func openTrayMenu() { item.button?.performClick(nil) }
+    func updateResearchWindow() {
+        researchWindow?.title = "WorldQuant " + (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "") + " · " + t("研究进展", "Research progress")
+        let result = NSMutableAttributedString()
+        for entry in researchResponse["entries"] as? [[String: Any]] ?? [] {
+            result.append(NSAttributedString(string: (entry["title"] as? String ?? "") + "\n", attributes: [
+                .font: NSFont.systemFont(ofSize: 16, weight: .semibold), .foregroundColor: NSColor.labelColor]))
+            result.append(NSAttributedString(string: (entry["lines"] as? [String] ?? []).joined(separator: "\n") + "\n\n", attributes: [
+                .font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.labelColor]))
+        }
+        if result.length == 0 { result.append(NSAttributedString(string: t("正在读取本地账本…", "Reading the local ledger…"))) }
+        researchText?.textStorage?.setAttributedString(result)
     }
     func buildFirstRunMenu() {
         menu.removeAllItems()
@@ -431,6 +487,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if !skipLaunchBecauseBusy { perform("launch") }
         perform("identity-refresh")
         perform("history"); perform("submissions"); perform("standby"); perform("research"); perform("notifications"); perform("settings")
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
+        if UserDefaults.standard.string(forKey: "WQResearchWindowVersion") != version {
+            UserDefaults.standard.set(version, forKey: "WQResearchWindowVersion")
+            showResearch()
+        }
         if timer == nil {
             timer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in self?.refresh() }
         }
@@ -698,6 +759,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let target = kind == "research" ? researchMenu : (kind == "history" ? historyMenu : (kind == "standby" ? standbyMenu : submissionsMenu))
         target.removeAllItems()
         let entries = response["entries"] as? [[String: Any]] ?? []
+        if kind == "research" {
+            researchResponse = response; updateResearchWindow()
+            let row = NSMenuItem(title: t("打开研究进展窗口…", "Open research progress window…"), action: #selector(showResearch), keyEquivalent: "")
+            row.target = self; row.isEnabled = true; target.addItem(row); target.addItem(.separator())
+        }
         if entries.isEmpty { target.addItem(info(t("暂无记录", "No records"))) }
         if kind == "history" {
             target.addItem(info(t("共 \(entries.count) 轮 · 北京时间", "\(entries.count) cycles · Beijing time")))
