@@ -1,6 +1,6 @@
 {
-  "version": "0.2.20",
-  "dmg": "https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.20/WorldQuant-0.2.20.dmg",
-  "dmg_light": "https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.20/WorldQuant-0.2.20-light.dmg",
-  "notes": "首次向导三屏引导：沉睡 token、三段旅程与金牌/顾问起点分流。macOS 完整包与轻量包均已签名及 Apple 公证。"
+  "version": "0.2.21",
+  "dmg": "https://github.com/Octo-o-o-o/autowq/releases/download/macos-v0.2.21/WorldQuant-0.2.21.dmg",
+  "dmg_light": "https://github.com/Octo-o-o-o/autowq/releases/download/macos-v0.2.21/WorldQuant-0.2.21-light.dmg",
+  "notes": "菜单栏界面焕新：统一设计规范、长文本折行、卡片式研究进展窗口。macOS 完整包与轻量包均已签名及 Apple 公证。"
 }

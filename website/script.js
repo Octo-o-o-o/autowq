@@ -118,7 +118,7 @@ document.documentElement.classList.add('js');
   var hero = document.getElementById('heroCta');
   if (hero) {
     if (isMac) {
-      hero.href = 'https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.20/WorldQuant-0.2.20.dmg';
+      hero.href = 'https://github.com/Octo-o-o-o/autowq/releases/download/macos-v0.2.21/WorldQuant-0.2.21.dmg';
       hero.textContent = ZH ? '下载 macOS 版 · 56.7 MB' : 'Download for macOS · 56.7 MB';
     } else if (isWin) {
       hero.href = 'https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.20/WorldQuantTray.exe';
