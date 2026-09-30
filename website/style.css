@@ -508,6 +508,38 @@ footer a:hover { color: var(--amber); }
   }
 }
 
+/* ── 两阶段路径：首屏入口、持续研究闭环条、顾问目标卡 ── */
+.stage-links { margin-top: 14px; display: flex; gap: 12px; flex-wrap: wrap; }
+.stage-links .btn { font-size: 13px; padding: 9px 16px; }
+.stage-links .sn { color: var(--amber); margin-right: 8px; font-family: ui-monospace, Menlo, monospace; }
+.stage-links .btn:hover .sn { color: inherit; }
+
+.loopline {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--panel);
+  padding: 16px 20px; margin-bottom: 34px;
+  font-family: ui-monospace, Menlo, monospace; font-size: 12.5px;
+}
+.loopline span {
+  color: var(--paper); border: 1px solid var(--line); border-radius: 999px;
+  padding: 4px 12px; background: var(--panel-2);
+}
+.loopline i { color: var(--amber); font-style: normal; }
+.loopline i:last-child { font-size: 15px; }
+
+.after-notes { margin-top: 26px; }
+
+.goal {
+  margin-top: 30px; border: 1px solid var(--amber); border-radius: 6px;
+  background: var(--amber-soft); padding: 24px 26px;
+}
+.goal-k {
+  font-family: ui-monospace, Menlo, monospace; font-size: 15px; font-weight: 700;
+  color: var(--amber); margin-bottom: 10px;
+}
+.goal p { color: var(--dim); font-size: 14px; margin-bottom: 12px; }
+.goal p b { color: var(--paper); font-weight: 600; }
+
 /* ── 配色切换按钮（与 .lang 芯片同款外观） ── */
 nav .theme {
   font-family: ui-monospace, Menlo, monospace; font-size: 13px;
