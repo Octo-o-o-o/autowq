@@ -41,7 +41,7 @@
       "name": "autowq",
       "applicationCategory": "DeveloperApplication",
       "operatingSystem": "macOS, Windows, Linux",
-      "softwareVersion": "0.2.19",
+      "softwareVersion": "0.2.20",
       "isAccessibleForFree": true,
       "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
       "license": "https://www.apache.org/licenses/LICENSE-2.0",
@@ -99,8 +99,8 @@
 <div class="wrap">
 <section class="hero">
   <div>
-    <div class="kicker">Open source · Apache-2.0 · Local-first</div>
-    <h1>用沉睡的 token 冲<span class="amber">金牌</span>，<br>再冲每季度 $8,000。</h1>
+    <div class="kicker"><span class="keep">Open source</span> · <span class="keep">Apache-2.0</span> · <span class="keep">Local-first</span></div>
+    <h1><span class="keep">用沉睡的 token 冲<span class="amber">金牌</span>，</span> <span class="keep">再冲每季度 $8,000。</span></h1>
     <p class="sub">一分钱不用多花：autowq 跑在你已订阅 Agent 的 token 富余量里（免费 API 也能起步），受控循环日夜推进「假设 → 异渠道审查 → 有限回测 → 提交前验收」——作者实测，装上第 5 天账号升上金牌。金牌不是终点：WorldQuant 官方写明 Grandmaster 级顾问每季度报酬可达 8,000 美元以上，第二阶段帮你持续提高研究质量，一站一站朝那条线走。</p>
     <div class="cta">
       <div class="cta-dl">
@@ -110,9 +110,9 @@
         </button>
         <div class="cta-menu" id="heroMenu" role="menu" aria-label="下载选项" hidden>
           <div class="cm-head">桌面版 · 打开即用</div>
-          <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/macos-v0.2.19/WorldQuant-0.2.19.dmg" data-os="macos"><span class="cm-l">macOS 完整包</span><span class="cm-r">DMG · 56.7 MB</span></a>
-          <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/macos-v0.2.19/WorldQuant-0.2.19-light.dmg"><span class="cm-l">macOS 轻量包</span><span class="cm-r">DMG · 1.4 MB</span></a>
-          <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.18/WorldQuantTray.exe" data-os="windows"><span class="cm-l">Windows 托盘版</span><span class="cm-r">.exe · 实验性</span></a>
+          <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.20/WorldQuant-0.2.20.dmg" data-os="macos"><span class="cm-l">macOS 完整包</span><span class="cm-r">DMG · 56.7 MB</span></a>
+          <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.20/WorldQuant-0.2.20-light.dmg"><span class="cm-l">macOS 轻量包</span><span class="cm-r">DMG · 1.4 MB</span></a>
+          <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.20/WorldQuantTray.exe" data-os="windows"><span class="cm-l">Windows 托盘版</span><span class="cm-r">.exe · 实验性</span></a>
           <hr>
           <div class="cm-head">开发者</div>
           <button role="menuitem" type="button" data-cmd="pipx install wq-pilot"><span class="cm-l">命令行 CLI</span><span class="cm-r">pipx install wq-pilot</span></button>
@@ -155,7 +155,7 @@
     <div class="pillar"><div class="k">可见</div><div class="d">轮次、预算、进度全在托盘</div></div>
     <div class="pillar"><div class="k">可控制</div><div class="d">预算、授权、暂停随时在手</div></div>
     <div class="pillar"><div class="k">安全</div><div class="d">状态留在本地账本，闸门默认关闭</div></div>
-    <div class="pillar"><div class="k">开源</div><div class="d">Apache-2.0 · 0.2.19 共 804 项工程测试</div></div>
+    <div class="pillar"><div class="k">开源</div><div class="d">Apache-2.0 · 0.2.20 共 809 项工程测试</div></div>
   </div>
 </section>
 
@@ -168,6 +168,7 @@
       <pre id="typewriter"></pre>
     </div>
     <ul class="bullets rise">
+      <li><b>三屏引导开场</b>：第一次运行先看懂整条路——算力从哪来、金牌怎么走、顾问怎么冲；已是金牌或顾问可直选第二阶段，跳过新手引导。</li>
       <li><b>向导只做三件事</b>：检测你已安装的 CLI、按你的选择生成配置、调起登录。模型、自动研究、提交默认全关。</li>
       <li><b>双通道登录</b>：BRAIN 与各模型 CLI 的登录由向导逐个调起，状态如实标记，可跳过、可续跑 <code>wq onboard --login-only</code>。</li>
       <li><b>不烙路径、不装调度</b>：任意空目录就是一个工作区；调度器只有在你明确启用后才安装。</li>
@@ -280,24 +281,24 @@
       <h3>macOS 完整包</h3>
       <div class="dl-size">56.7 <span>MB</span></div>
       <p>自带 Python 3.12——不需要系统 Python、Xcode 命令行工具或 pip。拖进「应用程序」双击，首启向导直接接管。</p>
-      <a class="btn primary dl-btn" href="https://github.com/Octo-o-o-o/autowq/releases/download/macos-v0.2.19/WorldQuant-0.2.19.dmg" target="_blank" rel="noopener">下载完整版 DMG</a>
-      <div class="dl-meta">0.2.19 · Apple 已公证 · 菜单栏 App</div>
+      <a class="btn primary dl-btn" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.20/WorldQuant-0.2.20.dmg" target="_blank" rel="noopener">下载完整版 DMG</a>
+      <div class="dl-meta">0.2.20 · Apple 已公证 · 菜单栏 App</div>
     </div>
     <div class="dl-card" data-os="macos">
       <div class="dl-tag">已装 Python 的选这个</div>
       <h3>macOS 轻量包</h3>
       <div class="dl-size">1.4 <span>MB</span></div>
       <p>不含 Python。首次设置自动使用本机 Python 3.11+（Homebrew 或 Xcode 命令行工具），没有会引导你装。功能与完整包完全相同。</p>
-      <a class="btn dl-btn" href="https://github.com/Octo-o-o-o/autowq/releases/download/macos-v0.2.19/WorldQuant-0.2.19-light.dmg" target="_blank" rel="noopener">下载轻量版 DMG</a>
-      <div class="dl-meta">0.2.19 · Apple 已公证 · 菜单栏 App</div>
+      <a class="btn dl-btn" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.20/WorldQuant-0.2.20-light.dmg" target="_blank" rel="noopener">下载轻量版 DMG</a>
+      <div class="dl-meta">0.2.20 · Apple 已公证 · 菜单栏 App</div>
     </div>
     <div class="dl-card" data-os="windows">
       <div class="dl-tag">Windows · 实验性</div>
       <h3>Windows 托盘版</h3>
       <div class="dl-size">17 <span>MB</span></div>
       <p>单个 <code>WorldQuantTray.exe</code>，自带引擎：托盘、命令行和任务计划调度都在里面，双击后向导直接接管。仅支持 API 渠道（含免费预设）。未做代码签名，SmartScreen 拦截时点「更多信息 → 仍要运行」。</p>
-      <a class="btn dl-btn" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.18/WorldQuantTray.exe">下载 Windows 版 .exe</a>
-      <div class="dl-meta">0.2.18 · 单文件 · 无需安装 Python</div>
+      <a class="btn dl-btn" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.20/WorldQuantTray.exe">下载 Windows 版 .exe</a>
+      <div class="dl-meta">0.2.20 · 单文件 · 无需安装 Python</div>
     </div>
   </div>
   <p class="dl-choose">两个 macOS 包功能完全相同，区别只在「要不要自带 Python」。拿不准，就选完整包。</p>
@@ -324,7 +325,7 @@
   <details><summary>是 WorldQuant 官方产品吗？</summary><p>不是。autowq 是独立开源项目（Apache-2.0），与 WorldQuant 无隶属关系；BRAIN 商标、平台与数据归其权利人。</p></details>
   <details><summary>autowq 收费吗？</summary><p>项目本身免费开源。它编排的是你自己的模型订阅 / API Key 和你自己的 BRAIN 账号，费用由你与供应商结算；向导不会发起任何付费推理。没有订阅也可以用官方免费 API 起步（<code>wq providers free</code>：Gemini、OpenRouter、智谱、硅基流动等），额度用尽会自动暂停、恢复后自动继续。</p></details>
   <details><summary>自动研究 = 自动提交 = 收益吗？</summary><p>不等于。平台筛选通过、提交接收、顾问资格、实际到账是四种不同状态，提交有独立验收门禁。</p></details>
-  <details><summary>到了金牌之后，这个工具还有什么用？</summary><p>进入<a href="#after-gold">第二阶段</a>：持续研究框架把本地历史变成下一轮可检验的研究建议——新想法先查历史与反例，改进在同预算对照里验证，授权、成本、资料缺口和下一触发条件都在「研究进展」里。不用重装、不用重新初始化。</p></details>
+  <details><summary>到了金牌之后，这个工具还有什么用？</summary><p>进入<a href="#after-gold">第二阶段</a>：持续研究框架把本地历史变成下一轮可检验的研究建议——新想法先查历史与反例，改进在同预算对照里验证，授权、成本、资料缺口和下一触发条件都在「研究进展」里。不用重装、不用重新初始化；第一次运行向导时在起点选择「我已是金牌或顾问」，即直接进入持续研究设置。</p></details>
   <details><summary>金牌 = 顾问 = 收入吗？</summary><p>不等于。Gold 是平台等级；成为顾问需要官方邀请、签约与激活；报酬资格和实际到账又是后续状态，以所在地区官方通知为准。<a href="https://worldquantbrain.com/consultant" target="_blank" rel="noopener">WorldQuant 官方顾问页面</a>的表述：Grandmaster 级顾问每季度报酬可达 8,000 美元以上——那是平台的激励机制，不是本软件的承诺。</p></details>
   <details><summary>我的凭证和研究会上传吗？</summary><p>不会。一切状态存本地 SQLite 账本；导出不包含 Cookie、密码与任务输入；模型请求只发给你显式选择的渠道。</p></details>
   <details><summary>macOS 完整包和轻量包怎么选？</summary><p>两个都是已公证的 DMG，拖进“应用程序”即可，功能相同。完整包自带 Python，打开就能用。轻量包只有菜单和引擎，第一次设置时找本机的 Python 3.11+；没有的话按提示安装 Xcode 命令行工具。检查更新打开的是完整包。</p></details>
@@ -354,6 +355,8 @@ window.ONBOARD_LINES = [
   { text: '$ brew install --cask Octo-o-o-o/autowq/worldquant', cls: 'w', pause: 500 },
   { text: '# 双击图标，首启向导接管 —— 或在任意目录：', cls: 'c', fast: true, pause: 350 },
   { text: '$ wq onboard', cls: 'w', pause: 500 },
+  { text: '● 首次使用引导：沉睡 token → 金牌 → 顾问（按 o 了解 WorldQuant）', cls: 'p_g', fast: true, pause: 500 },
+  { text: '你从哪里开始？① 全新开始  ② 已是金牌/顾问 ⏎', cls: 'w', pause: 450 },
   { text: '检测到宿主 CLI：grok ✓  devin ✓  cursor ✓  claude ✓  codex ✓', cls: 'c', fast: true, pause: 400 },
   { text: '选择渠道：grok,cursor', cls: 'w', pause: 350 },
   { text: '研究渠道 [grok] ⏎    审查渠道 [cursor] ⏎', cls: 'w', pause: 500 },

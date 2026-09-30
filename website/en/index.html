@@ -41,7 +41,7 @@
       "name": "autowq",
       "applicationCategory": "DeveloperApplication",
       "operatingSystem": "macOS, Windows, Linux",
-      "softwareVersion": "0.2.19",
+      "softwareVersion": "0.2.20",
       "isAccessibleForFree": true,
       "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
       "license": "https://www.apache.org/licenses/LICENSE-2.0",
@@ -99,8 +99,8 @@
 <div class="wrap">
 <section class="hero">
   <div>
-    <div class="kicker">Open source · Apache-2.0 · Local-first</div>
-    <h1>Idle tokens → <span class="amber">Gold</span>,<br>Gold → $8,000 a quarter.</h1>
+    <div class="kicker"><span class="keep">Open source</span> · <span class="keep">Apache-2.0</span> · <span class="keep">Local-first</span></div>
+    <h1><span class="keep">Idle tokens → <span class="amber">Gold</span>,</span> <span class="keep">Gold → $8,000 a quarter.</span></h1>
     <p class="sub">Not a cent of extra spend: autowq runs on the surplus tokens of the agent subscriptions you already pay for (free API tiers work too), driving a gated cycle of hypothesis → cross-provider review → bounded simulation → pre-submission acceptance, around the clock. The author's account reached Gold on day 5. Gold is not the finish line — WorldQuant states that Grandmaster-level consultants can earn upwards of $8,000 per quarter, and stage two keeps raising your research quality, station by station, toward that bar.</p>
     <div class="cta">
       <div class="cta-dl">
@@ -110,9 +110,9 @@
         </button>
         <div class="cta-menu" id="heroMenu" role="menu" aria-label="Download options" hidden>
           <div class="cm-head">Desktop · just open it</div>
-          <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/macos-v0.2.19/WorldQuant-0.2.19.dmg" data-os="macos"><span class="cm-l">macOS full package</span><span class="cm-r">DMG · 56.7 MB</span></a>
-          <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/macos-v0.2.19/WorldQuant-0.2.19-light.dmg"><span class="cm-l">macOS light package</span><span class="cm-r">DMG · 1.4 MB</span></a>
-          <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.18/WorldQuantTray.exe" data-os="windows"><span class="cm-l">Windows tray</span><span class="cm-r">.exe · experimental</span></a>
+          <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.20/WorldQuant-0.2.20.dmg" data-os="macos"><span class="cm-l">macOS full package</span><span class="cm-r">DMG · 56.7 MB</span></a>
+          <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.20/WorldQuant-0.2.20-light.dmg"><span class="cm-l">macOS light package</span><span class="cm-r">DMG · 1.4 MB</span></a>
+          <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.20/WorldQuantTray.exe" data-os="windows"><span class="cm-l">Windows tray</span><span class="cm-r">.exe · experimental</span></a>
           <hr>
           <div class="cm-head">Developers</div>
           <button role="menuitem" type="button" data-cmd="pipx install wq-pilot"><span class="cm-l">Command line</span><span class="cm-r">pipx install wq-pilot</span></button>
@@ -155,7 +155,7 @@
     <div class="pillar"><div class="k">Visible</div><div class="d">Cycles, budget, progress — all in the tray</div></div>
     <div class="pillar"><div class="k">Control</div><div class="d">Budgets, authorization, pause — always yours</div></div>
     <div class="pillar"><div class="k">Safe</div><div class="d">State stays in a local ledger; gates closed by default</div></div>
-    <div class="pillar"><div class="k">Open</div><div class="d">Apache-2.0 · 804 engineering tests on 0.2.19</div></div>
+    <div class="pillar"><div class="k">Open</div><div class="d">Apache-2.0 · 809 engineering tests on 0.2.20</div></div>
   </div>
 </section>
 
@@ -168,6 +168,7 @@
       <pre id="typewriter"></pre>
     </div>
     <ul class="bullets rise">
+      <li><b>A three-screen intro first</b>: the first run shows you the whole road — where the compute comes from, how Gold works, how the consultant track pays; already Gold or a consultant? Pick stage two and skip the newcomer guidance.</li>
       <li><b>The wizard does three things</b>: detects your installed CLIs, writes config from your choices, launches logins. Models, automation and submission stay off.</li>
       <li><b>Honest login tracking</b>: BRAIN and vendor CLI sign-ins are launched one by one, states recorded as-is; skip and resume anytime with <code>wq onboard --login-only</code>.</li>
       <li><b>No baked-in paths, no scheduler</b>: any empty directory becomes a workspace; scheduling is installed only when you explicitly enable it.</li>
@@ -280,24 +281,24 @@
       <h3>macOS full package</h3>
       <div class="dl-size">56.7 <span>MB</span></div>
       <p>Ships with Python 3.12 — no system Python, Xcode CLT or pip needed. Drag into Applications, double-click, and the wizard takes over.</p>
-      <a class="btn primary dl-btn" href="https://github.com/Octo-o-o-o/autowq/releases/download/macos-v0.2.19/WorldQuant-0.2.19.dmg" target="_blank" rel="noopener">Download the full DMG</a>
-      <div class="dl-meta">0.2.19 · Notarized by Apple · menu-bar app</div>
+      <a class="btn primary dl-btn" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.20/WorldQuant-0.2.20.dmg" target="_blank" rel="noopener">Download the full DMG</a>
+      <div class="dl-meta">0.2.20 · Notarized by Apple · menu-bar app</div>
     </div>
     <div class="dl-card" data-os="macos">
       <div class="dl-tag">If you already have Python</div>
       <h3>macOS light package</h3>
       <div class="dl-size">1.4 <span>MB</span></div>
       <p>No bundled Python. First setup uses your local Python 3.11+ (Homebrew or Xcode CLT) and guides you if it's missing. Features are identical.</p>
-      <a class="btn dl-btn" href="https://github.com/Octo-o-o-o/autowq/releases/download/macos-v0.2.19/WorldQuant-0.2.19-light.dmg" target="_blank" rel="noopener">Download the light DMG</a>
-      <div class="dl-meta">0.2.19 · Notarized by Apple · menu-bar app</div>
+      <a class="btn dl-btn" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.20/WorldQuant-0.2.20-light.dmg" target="_blank" rel="noopener">Download the light DMG</a>
+      <div class="dl-meta">0.2.20 · Notarized by Apple · menu-bar app</div>
     </div>
     <div class="dl-card" data-os="windows">
       <div class="dl-tag">Windows · experimental</div>
       <h3>Windows tray</h3>
       <div class="dl-size">17 <span>MB</span></div>
       <p>One <code>WorldQuantTray.exe</code> with the engine inside: tray, CLI and Task Scheduler runs. Double-click and the wizard takes over. API providers only (free presets included). Not code-signed yet; if SmartScreen stops it, choose “More info → Run anyway”.</p>
-      <a class="btn dl-btn" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.18/WorldQuantTray.exe">Download the Windows .exe</a>
-      <div class="dl-meta">0.2.18 · single file · no Python install needed</div>
+      <a class="btn dl-btn" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.20/WorldQuantTray.exe">Download the Windows .exe</a>
+      <div class="dl-meta">0.2.20 · single file · no Python install needed</div>
     </div>
   </div>
   <p class="dl-choose">Both macOS packages are feature-identical; the only difference is the bundled Python. When in doubt, take the full one.</p>
@@ -324,7 +325,7 @@
   <details><summary>Is this an official WorldQuant product?</summary><p>No. autowq is an independent open-source project (Apache-2.0), unaffiliated with WorldQuant; BRAIN trademarks, platform and data belong to their owners.</p></details>
   <details><summary>Does autowq itself cost anything?</summary><p>No — it's free and open source. It orchestrates your own model subscriptions / API keys and your own BRAIN account; those costs are between you and the vendors. The wizard never starts paid inference. Without a subscription you can start on official free API tiers (<code>wq providers free</code>: Gemini, OpenRouter, BigModel, SiliconFlow and more); an exhausted quota pauses and resumes automatically.</p></details>
   <details><summary>Does automation mean submissions and income?</summary><p>No. Passing screens, accepted submissions, consultant eligibility and actual payouts are four different states, and submission has its own acceptance gates.</p></details>
-  <details><summary>What is the tool good for after I reach Gold?</summary><p>Enter <a href="#after-gold">stage two</a>: the continuous-research framework turns your local history into verifiable next-step suggestions — new ideas are checked against past results and counterexamples, improvements are compared under the same budget, and authorization, costs, evidence gaps and the next trigger are all visible in Research progress. No reinstall, no re-initialization.</p></details>
+  <details><summary>What is the tool good for after I reach Gold?</summary><p>Enter <a href="#after-gold">stage two</a>: the continuous-research framework turns your local history into verifiable next-step suggestions — new ideas are checked against past results and counterexamples, improvements are compared under the same budget, and authorization, costs, evidence gaps and the next trigger are all visible in Research progress. No reinstall, no re-initialization — on the first run, just pick “I am already Gold / a consultant” at the starting-point screen and go straight to the continuous-research setup.</p></details>
   <details><summary>Does Gold mean consultant status and income?</summary><p>No. Gold is a platform tier; becoming a consultant requires an official invitation, contracting and activation; payout eligibility and actual payouts are further states, governed by the official process in your region. <a href="https://worldquantbrain.com/consultant" target="_blank" rel="noopener">WorldQuant's consultant page</a> states that Grandmaster-level consultants can potentially earn upwards of $8,000 per quarter — that is the platform's incentive structure, not a promise made by this software.</p></details>
   <details><summary>Do my credentials or research get uploaded?</summary><p>No. All state lives in a local SQLite ledger; exports exclude cookies, passwords and task inputs; model calls go only to providers you explicitly select.</p></details>
   <details><summary>Full or light macOS DMG?</summary><p>Both are notarized and install by dragging into Applications. The features match. The full DMG includes Python and opens ready to use. The light DMG is only the menu and the engine; first setup looks for Python 3.11+ on the machine, and the prompt tells you to install Xcode Command Line Tools if it is missing. Check for Updates opens the full DMG.</p></details>
@@ -354,6 +355,8 @@ window.ONBOARD_LINES = [
   { text: '$ brew install --cask Octo-o-o-o/autowq/worldquant', cls: 'w', pause: 500 },
   { text: '# double-click the icon; the wizard takes over — or anywhere:', cls: 'c', fast: true, pause: 350 },
   { text: '$ wq onboard', cls: 'w', pause: 500 },
+  { text: '● first-run intro: idle tokens → Gold → consultant (o = WorldQuant)', cls: 'p_g', fast: true, pause: 500 },
+  { text: 'where do you start? ① fresh  ② already Gold/consultant ⏎', cls: 'w', pause: 450 },
   { text: 'host CLIs detected: grok ✓  devin ✓  cursor ✓  claude ✓  codex ✓', cls: 'c', fast: true, pause: 400 },
   { text: 'providers: grok,cursor', cls: 'w', pause: 350 },
   { text: 'research [grok] ⏎    review [cursor] ⏎', cls: 'w', pause: 500 },

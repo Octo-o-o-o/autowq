@@ -78,10 +78,13 @@ section[id] { scroll-margin-top: 72px; }
   color: var(--amber); text-transform: uppercase; margin-bottom: 18px;
 }
 .kicker::before { content: "● "; animation: pulse 2.2s infinite; }
+.kicker .keep { white-space: nowrap; }
 .hero h1 {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: clamp(30px, 4.6vw, 50px); line-height: 1.18; letter-spacing: -0.01em; font-weight: 700;
+  font-size: clamp(27px, 4.6vw, 50px); line-height: 1.18; letter-spacing: -0.01em; font-weight: 700;
+  text-wrap: balance;
 }
+.hero h1 .keep { white-space: nowrap; }
 .hero h1 .amber { color: var(--amber); }
 .hero .sub { color: var(--dim); margin-top: 18px; max-width: 520px; }
 .hero .cta { margin-top: 28px; display: flex; gap: 12px; flex-wrap: wrap; }
@@ -443,6 +446,11 @@ footer a:hover { color: var(--amber); }
   nav .inner { gap: 12px; }
   nav .links { gap: 12px; }
   footer .inner { justify-content: center; text-align: center; }
+}
+@media (max-width: 480px) {
+  nav .links { gap: 10px 12px; }
+  nav .links a { font-size: 12px; }
+  .kicker { letter-spacing: 0.14em; font-size: 11px; }
 }
 
 /* 无障碍：用户偏好减少动效时，仅停掉无限循环的装饰动画 */
