@@ -144,6 +144,35 @@ def forward_report(conn, at=None):
     return result
 
 
+def prepare_contributions(conn, trials):
+    """Retry incomplete preparation only on changed inputs; never refit a frozen pool."""
+    from . import research_campaign_v2 as records
+    contracts=[json.loads(r[0]) for r in conn.execute('SELECT document_json FROM learning_pool_contracts')]
+    complete={c.get('candidate') for c in contracts if c['status']=='frozen'}
+    previous={d['candidate']:d for _,d in records.records(conn,'contribution_prepared')}
+    for candidate in trials:
+        tid=candidate['trial_id']
+        if tid in complete:continue
+        references=[t for t in trials if t['trial_id']!=tid and
+                    t['document'].get('settings')==candidate['document'].get('settings') and
+                    t['execution_id']!=candidate['execution_id']]
+        inputs={'candidate':(tid,candidate['outcome_version']),
+                'references':[(t['trial_id'],t['outcome_version']) for t in references]}
+        digest=util.sha256_json(inputs)
+        if previous.get(tid,{}).get('input_hash')==digest:continue
+        doc={'candidate':tid,'input_hash':digest,'state':'waiting_reference',
+             'reason':'A separate comparable reference is required','pool_id':None}
+        if references:
+            pid='auto-contrib-'+util.sha256_json(tid)[:12]+'-'+digest[:16]
+            old=conn.execute('SELECT document_json FROM learning_pool_contracts WHERE pool_id=?',(pid,)).fetchone()
+            contract=json.loads(old[0]) if old else freeze_contract(conn,pid,[references[0]['trial_id']],tid)
+            doc.update(pool_id=pid,state='frozen' if contract['status']=='frozen' else 'waiting_calibration',
+                       reason=contract.get('errors') or None)
+        records.append_once(conn,'contribution:'+tid+':'+digest,'contribution_prepared',doc)
+        return doc
+    return {'state':'no_changed_inputs'}
+
+
 def coverage(conn):
     tables={r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     def count(sql):return conn.execute(sql).fetchone()[0]
@@ -199,13 +228,23 @@ def comparison(conn, experiment_id):
     row=conn.execute('SELECT document_json FROM learning_experiments WHERE experiment_id=?',(experiment_id,)).fetchone()
     if not row:raise ValueError('Unknown experiment')
     contract=json.loads(row[0]); assignments=list(conn.execute('SELECT * FROM learning_assignments WHERE experiment_id=?',(experiment_id,)))
-    trials=as_of(conn); arms={};pending=0;family_sets={}
+    trials=as_of(conn); arms={};pending=0;family_sets={};campaign_measurements=0
+    from . import research_campaign
+    campaign_cycles={cid for cid,_ in research_campaign.all_assignments(conn)} | {t['cycle_id'] for t in trials if t['document'].get('source')=='campaign'}
+    assigned_cycles={r['cycle_id'] for r in assignments}
+    resource_table=conn.execute("SELECT 1 FROM sqlite_master WHERE name='learning_resource_cycles'").fetchone()
+    resource_cycles={r[0] for r in conn.execute('SELECT cycle_id FROM learning_resource_cycles WHERE experiment_id=?',(experiment_id,))} if resource_table else set()
+    all_cycles=assigned_cycles | resource_cycles
+    campaign_measurements=sum(t.get('task_id') is not None and t['cycle_id'] in all_cycles & campaign_cycles for t in trials)
     for arm in ('baseline','learning'):
-        cycles={r['cycle_id'] for r in assignments if r['arm']==arm}
+        cycles={r['cycle_id'] for r in assignments if r['arm']==arm} - campaign_cycles
         groups={}; requests=0
         for t in trials:
             if t['cycle_id'] not in cycles or not t.get('task_id'):continue
-            outcome=t['outcome'] or {};requests+=bool(outcome.get('request_started'))
+            outcome=t['outcome'] or {}
+            if t['document'].get('source')=='campaign':
+                campaign_measurements+=1;continue
+            requests+=bool(outcome.get('request_started'))
             family=t['family_id'] or t['execution_id'];g=groups.setdefault(family,{'usable':False,'pending':False})
             g['usable']|=outcome.get('quality')=='usable';g['pending']|=outcome.get('execution') in ('pending','unknown')
         family_sets[arm]=set(groups)
@@ -215,6 +254,8 @@ def comparison(conn, experiment_id):
                    'interval_95':wilson(successes,len(groups)),'requests':requests,'cost':costs}
     closed=all(conn.execute('SELECT state FROM research_cycles WHERE cycle_id=?',(r['cycle_id'],)).fetchone()[0]=='closed' for r in assignments)
     reasons=[]
+    contaminated=bool(assigned_cycles & campaign_cycles)
+    if contaminated:reasons.append('campaign_measurements_require_separate_comparison; ordinary_promotion_remains_shadow')
     if family_sets['baseline'] & family_sets['learning']:reasons.append('shared_families_between_arms')
     if len(assignments)<contract['max_cycles'] or not closed:reasons.append('allocation_or_execution_incomplete')
     if pending:reasons.append('unresolved_outcomes')
@@ -224,8 +265,9 @@ def comparison(conn, experiment_id):
     if a['families'] and b['families'] and b['cost']['known_usd']/b['families']>a['cost']['known_usd']/a['families']:
         reasons.append('learning_cost_per_family_higher')
     superior=not reasons and b['interval_95'][0]>a['interval_95'][1]
-    worse=closed and len(assignments)>=contract['max_cycles'] and a['interval_95'][0]>b['interval_95'][1]
+    worse=not contaminated and closed and len(assignments)>=contract['max_cycles'] and a['interval_95'][0]>b['interval_95'][1]
     return {'experiment_id':experiment_id,'arms':arms,'decision':'eligible' if superior else 'rollback' if worse else 'inconclusive',
+            'global_resource_cost':model_cost(conn,all_cycles),'campaign_resource_cost':model_cost(conn,all_cycles & campaign_cycles),
             'reasons':reasons,'minimum_families':20,'auto_promotion':False,
             'interpretation':'Conservative descriptive family intervals; alternating assignment is not a randomized causal estimate. Forward validation is additionally required.'}
 

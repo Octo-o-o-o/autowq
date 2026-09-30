@@ -12,12 +12,15 @@ IDS = ('H-N1','H-N2','H-N3','H-R1','H-R2','H-R3','H-O1','H-O2','H-O3','H-V1','H-
 def baseline(p):
     root = Path(__file__).parent
     source = {str(f.relative_to(root)): hashlib.sha256(f.read_bytes()).hexdigest() for f in root.rglob('*.py')}
-    return util.sha256_json({'source': source, 'policy': {k:v for k,v in p.items() if k != 'campaign'}})
+    return util.sha256_json({'source': source, 'policy': {k:v for k,v in p.items() if k != 'campaign'}, **({'profiles':p['campaign']['execution_profiles']} if (p.get('campaign') or {}).get('schema')=='wq.research-campaign/v2' else {})})
 
 
 def validate(p):
     c = p.get('campaign')
     if c is None: return None
+    if isinstance(c,dict) and c.get('schema')=='wq.research-campaign/v2':
+        from . import research_campaign_v2
+        return research_campaign_v2.validate(p)
     if not isinstance(c, dict) or c.get('schema') != SCHEMA or type(c.get('enabled')) is not bool:
         raise ValueError('Campaign contract invalid')
     if not isinstance(c.get('id'), str) or not c['id'].strip() or type(c.get('version')) is not int or c['version'] < 1:
@@ -72,12 +75,16 @@ def events(conn, kind):
     return [(r['cycle_id'],json.loads(r['detail'])) for r in conn.execute('SELECT cycle_id,detail FROM research_events WHERE kind=? ORDER BY event_id',(kind,))]
 
 
+def all_assignments(conn):
+    return events(conn,'campaign_assignment') + events(conn,'campaign_v2_assignment')
+
+
 def assignment(conn, cid):
-    return next((a for cycle,a in events(conn,'campaign_assignment') if cycle == cid), None)
+    return next((a for cycle,a in all_assignments(conn) if cycle == cid), None)
 
 
 def reservations(conn, campaign_id):
-    allocated = {cid:a for cid,a in events(conn,'campaign_assignment') if a['campaign_id'] == campaign_id}
+    allocated = {cid:a for cid,a in all_assignments(conn) if a['campaign_id'] == campaign_id}
     out = []
     for row in conn.execute("SELECT task_id,payload_json,status FROM tasks WHERE kind='brain_simulation' ORDER BY rowid"):
         cid = json.loads(row['payload_json']).get('research_cycle_id')
@@ -86,6 +93,9 @@ def reservations(conn, campaign_id):
 
 
 def active(conn, p):
+    if (p.get('campaign') or {}).get('schema')=='wq.research-campaign/v2':
+        from . import research_campaign_v2
+        return research_campaign_v2.active(conn,p)
     c = validate(p)
     if not c or not c['enabled']: raise ValueError('Campaign disabled; existing receipts may reconcile only')
     if util.now() >= util.parse_iso(c['valid_until']): raise ValueError('Campaign expired')
@@ -97,6 +107,9 @@ def active(conn, p):
 
 
 def select(conn, p):
+    if (p.get('campaign') or {}).get('schema')=='wq.research-campaign/v2':
+        from . import research_campaign_v2
+        return research_campaign_v2.select(conn,p)
     c = active(conn,p)
     used = reservations(conn,c['id'])
     if len(used) >= min(c['pilot_cap'], c['total_cap']): raise ValueError('Campaign review_required; pilot reservations exhausted')
@@ -110,6 +123,9 @@ def select(conn, p):
 
 
 def allocate(conn, p, cid):
+    if (p.get('campaign') or {}).get('schema')=='wq.research-campaign/v2':
+        from . import research_campaign_v2
+        return research_campaign_v2.allocate(conn,p,cid)
     from . import autopilot
     autopilot.setup(conn)
     c = active(conn,p); a = select(conn,p)
@@ -127,6 +143,9 @@ def hypothesis(p, a):
 
 
 def prompt(p, a):
+    if a.get('schema')=='wq.research-campaign/v2':
+        from . import research_campaign_v2
+        return research_campaign_v2.prompt(p,a)
     h = hypothesis(p,a)
     return '\n\n有界增量研究合同（不得代入平台字段；沿用原review/DSL）：'+json.dumps({
         'id':h['id'],'phase':a['phase'],'claim':h['claim'],'falsifier':h['falsifier'],
@@ -146,6 +165,9 @@ def validate_candidate(conn, cid, p, candidate):
 def check_budget(conn,cfg,cid,task_id=None):
     a = assignment(conn,cid)
     if not a: return
+    if a.get('schema')=='wq.research-campaign/v2':
+        from . import research_campaign_v2
+        return research_campaign_v2.check_budget(conn,cfg,cid,task_id)
     from . import autopilot
     p = autopilot.policy(cfg); c = active(conn,p)
     if (a['campaign_id'],a['version']) != (c['id'],c['version']): raise ValueError('Campaign assignment no longer authorized')
@@ -163,13 +185,16 @@ def check_budget(conn,cfg,cid,task_id=None):
 
 
 def report(conn,p):
+    if (p.get('campaign') or {}).get('schema')=='wq.research-campaign/v2':
+        from . import research_campaign_v2
+        return research_campaign_v2.report(conn,p)
     c = p.get('campaign')
     if not c: return {'enabled':False,'opportunities':[]}
     rows = reservations(conn,c['id']); ids = {r['task_id'] for r in rows}
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     runs = [dict(r) for r in conn.execute('SELECT * FROM brain_runs') if r['task_id'] in ids] if 'brain_runs' in tables else []
     uncertain = sum(r['state'] == 'post_started' for r in runs)
-    confirmed = len(runs)-uncertain
+    confirmed = sum(r['state'] not in ('post_started','not_sent') for r in runs)
     allocations = [(cid,a) for cid,a in events(conn,'campaign_assignment') if a['campaign_id'] == c['id']]
     cycles = {cid for cid,_ in allocations}
     references = {r[0] for r in conn.execute('SELECT task_id,cycle_id FROM cycle_simulations') if r[1] in cycles} if 'cycle_simulations' in tables else set()
@@ -198,7 +223,8 @@ def report(conn,p):
                 required_roles=h['required_roles'],settings=h['settings'],required_evidence=h.get('required_evidence',[]),
                 allocated_cycles=sum(a['hypothesis'] == h['id'] for _,a in allocations),
                 reserved=sum(r['allocation']['hypothesis'] == h['id'] for r in rows)) for h in c['hypotheses']],
-           'note':'Reservations include queued/failed/UNKNOWN. Dispatch uncertainty is not zero POSTs. Reuse is not a new sample. No official uniqueness estimate.'}
+           'measurement_contract':'legacy_phase_labels_not_strict_pairs',
+           'note':'Reservations include queued/failed/UNKNOWN/not_sent. Dispatch uncertainty is not zero POSTs. Reuse is not a new sample. No official uniqueness estimate.'}
     try: out['next'] = select(conn,p)
     except ValueError as exc: out['stop_reason'] = str(exc)
     return out
@@ -210,13 +236,34 @@ def command(args):
     cfg = Config.load(args.config,str(Path.cwd())); conn = db.connect(cfg.db_path)
     try:
         p = autopilot.policy(cfg)
-        print(json.dumps(template(p) if args.action == 'template' else report(conn,p),ensure_ascii=False,indent=2)); return 0
+        from . import research_campaign_v2
+        if args.action=='replay':
+            result=research_campaign_v2.replay_evaluation(conn,args.pair_id,args.observation_hash)
+        elif args.action=='migrate':
+            result=research_campaign_v2.migrate(conn,p,args.reason);conn.commit()
+        elif args.action=='stop':
+            if not args.reason or len(args.reason.strip())<8:raise ValueError('Concrete stop reason required')
+            conn.execute('BEGIN IMMEDIATE')
+            result={'campaign_id':p['campaign']['id'],'reason':args.reason,'stopped':True}
+            research_campaign_v2.append_once(conn,'stop:'+p['campaign']['id'],'campaign_stop',result)
+            conn.commit()
+        elif args.action=='combinations':
+            from . import feedback,workflow
+            advanced=workflow.load(cfg)
+            cap=advanced['combinations']['max_plans'] if advanced else cfg.get('research_feedback','max_combination_plans',default=2)
+            result=feedback.combination_diagnostics(conn,cap,current_policy=p)
+        else:
+            result=template(p) if args.action=='template' else research_campaign_v2.template(p,cfg.get('account_alias')) if args.action=='template-v2' else report(conn,p)
+        print(json.dumps(result,ensure_ascii=False,indent=2)); return 0
     finally: conn.close()
 
 
 def add_parser(sub,lang='zh'):
     parser=sub.add_parser('research-campaign',help='Read campaign opportunity and reservation diagnostics')
-    parser.add_argument('action',choices=['report','template'],nargs='?',default='report')
+    parser.add_argument('action',choices=['report','template','template-v2','combinations','migrate','stop','replay'],nargs='?',default='report')
+    parser.add_argument('--reason')
+    parser.add_argument('--pair-id')
+    parser.add_argument('--observation-hash')
     parser.set_defaults(fn=command)
 
 

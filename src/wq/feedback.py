@@ -45,19 +45,32 @@ def daily_pnl(doc):
             for i in range(1, len(rows))}
 
 
-def correlation(left, right, minimum=252):
-    a, b = daily_pnl(left), daily_pnl(right)
-    dates = sorted(a.keys() & b.keys())
+def correlation_input(doc):
+    values=daily_pnl(doc);dates=tuple(sorted(values));series=[values[d] for d in dates]
+    mean=sum(series)/len(series) if series else 0
+    return {'daily':values,'dates':dates,'content_hash':util.sha256_json(doc),
+            'intervals_hash':util.sha256_json(dates),'centered':[v-mean for v in series],
+            'variance':sum((v-mean)**2 for v in series)}
+
+
+def correlation(left, right, minimum=252, *, prepared=None):
+    a,b=prepared if prepared is not None else (correlation_input(left),correlation_input(right))
+    same_grid=a['dates']==b['dates']
+    dates=a['dates'] if same_grid else sorted(a['daily'].keys() & b['daily'].keys())
     contract={'algorithm':'cumulative-delta-interval-correlation-v1','minimum':minimum,
-              'left_content_hash':util.sha256_json(left),'right_content_hash':util.sha256_json(right),
-              'aligned_intervals_hash':util.sha256_json(dates),'pool_kind':'local_pair'}
-    if len(dates) < minimum: return {'value': None, 'observations': len(dates), 'reason': '共同日区间不足','contract':contract}
-    x, y = [a[d] for d in dates], [b[d] for d in dates]
-    mx, my = sum(x)/len(x), sum(y)/len(y)
-    vx, vy = sum((v-mx)**2 for v in x), sum((v-my)**2 for v in y)
-    value = sum((u-mx)*(v-my) for u,v in zip(x,y))/math.sqrt(vx*vy) if vx > 0 and vy > 0 else None
-    return {'value': value, 'contract':contract, 'observations': len(dates), 'from': dates[0][1], 'to': dates[-1][1],
-            'note': '探索期累计PnL差分相关性；不是官方SELF_CORRELATION，也不是独立样本外证据'}
+              'left_content_hash':a['content_hash'],'right_content_hash':b['content_hash'],
+              'aligned_intervals_hash':a['intervals_hash'] if same_grid else util.sha256_json(dates),'pool_kind':'local_pair'}
+    if len(dates)<minimum:return {'value':None,'observations':len(dates),'reason':'共同日区间不足','contract':contract}
+    if same_grid:
+        x,y=a['centered'],b['centered'];vx,vy=a['variance'],b['variance']
+    else:
+        x,y=[a['daily'][d] for d in dates],[b['daily'][d] for d in dates]
+        mx,my=sum(x)/len(x),sum(y)/len(y)
+        vx,vy=sum((v-mx)**2 for v in x),sum((v-my)**2 for v in y)
+        x,y=[v-mx for v in x],[v-my for v in y]
+    value=sum(u*v for u,v in zip(x,y))/math.sqrt(vx*vy) if vx>0 and vy>0 else None
+    return {'value':value,'contract':contract,'observations':len(dates),'from':dates[0][1],'to':dates[-1][1],
+            'note':'探索期累计PnL差分相关性；不是官方SELF_CORRELATION，也不是独立样本外证据'}
 
 
 SEGMENT_RULES = {'min_sharpe': 1.25, 'min_fitness': 1.0, 'min_years': 3, 'max_negative_years': 0}
@@ -538,86 +551,121 @@ def simulation_settings(settings):
     return {k: v for k, v in settings.items() if k not in DISPLAY_ONLY_SETTINGS}
 
 
+def combination_diagnostics(conn, max_plans=2, min_parent_sharpe=MIN_PARENT_SHARPE, current_policy=None):
+    """Private read-only explanation; selection consumes these exact predicates."""
+    from collections import Counter
+    from itertools import combinations
+    from . import research_dsl
+    tables={r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if not {'research_cycles','brain_runs','combination_plans','research_feedback'} <= tables:
+        return {'registered':0,'cap':max_plans,'pairs':[],'counts':{},'first_reason_counts':{},'all_reason_counts':{}}
+    plans=[dict(r) for r in conn.execute('SELECT * FROM combination_plans')]
+    registered={r['pair_key'] for r in plans}
+    parents={}
+    for row in conn.execute("""SELECT c.*,b.alpha_id FROM research_cycles c
+            JOIN brain_runs b ON b.task_id=c.simulation_task WHERE c.state='closed' AND b.alpha_id IS NOT NULL"""):
+        if row['candidate_json']: parents[row['alpha_id']]=dict(row)
+    if 'cycle_simulations' in tables:
+        for row in conn.execute("""SELECT c.*,b.alpha_id FROM cycle_simulations s
+                JOIN research_cycles c ON c.cycle_id=s.cycle_id JOIN brain_runs b ON b.task_id=s.task_id
+                WHERE s.label='sign_flip' AND c.state='closed' AND c.candidate_json IS NOT NULL AND b.alpha_id IS NOT NULL"""):
+            cand=json.loads(row['candidate_json']);cand['ast']={'op':'neg','arg':cand['ast']}
+            parents[row['alpha_id']]={**dict(row),'candidate_json':json.dumps(cand)}
+    reports={r['alpha_id']:json.loads(r['report_json']) for r in conn.execute('SELECT alpha_id,report_json FROM research_feedback')}
+    strengths={}
+    for row in conn.execute('SELECT remote_id,stats_json FROM simulations WHERE synthetic=0'):
+        try: value=json.loads(row['stats_json']).get('sharpe')
+        except (ValueError,TypeError,AttributeError):value=None
+        strengths[row['remote_id']]=value if number(value) else None
+    submitted={r[0] for r in conn.execute("SELECT alpha_id FROM brain_submissions WHERE state='accepted'")} if 'brain_submissions' in tables else set()
+    lineage={r['alpha_id']:r['pair_key'].split(':') for r in conn.execute("""SELECT p.pair_key,b.alpha_id FROM combination_plans p
+        JOIN research_cycles c ON c.cycle_id=p.cycle_id JOIN brain_runs b ON b.task_id=c.simulation_task""")}
+    def tainted(aid, seen=()):
+        return aid in submitted or any(tainted(x,seen+(aid,)) for x in lineage.get(aid,[]) if x not in seen)
+    def complete(aid):
+        doc=reports.get(aid,{})
+        return doc.get('collection_status')=='complete' and not doc.get('validation_gaps')
+    policies={aid:json.loads(parent['policy_json']) for aid,parent in parents.items()}
+    candidates={aid:json.loads(parent['candidate_json']) for aid,parent in parents.items()}
+    pnls={}; daily={}; prepared={}; pnl_errors={}
+    for aid, doc in reports.items():
+        try:
+            pnl=util.read_json(doc['pnl_path']);parsed=correlation_input(pnl)
+            pnls[aid]=pnl;prepared[aid]=parsed;daily[aid]=parsed['dates']
+        except (KeyError,TypeError,ValueError,OSError) as exc:pnl_errors[aid]=type(exc).__name__
+    def comparable(left,right):
+        if left not in parents or right not in parents or left not in pnls or right not in pnls:return False
+        a,b=(policies[x] for x in (left,right))
+        return (simulation_settings(a['settings'])==simulation_settings(b['settings']) and
+                daily[left]==daily[right])
+    failed=Counter()
+    for child, ancestors in lineage.items():
+        value=strengths.get(child)
+        if not number(value) or not complete(child):continue
+        for parent in ancestors:
+            strength=strengths.get(parent)
+            if number(strength) and complete(parent) and comparable(parent,child) and (value<=max(strength,MIN_PARENT_SHARPE) or value<1.25):
+                failed[parent]+=1
+    output=[]
+    for ids in combinations(sorted(parents),2):
+        key=':'.join(ids); reasons=[]; unknown=False
+        def block(code, missing=False):
+            nonlocal unknown
+            if code not in reasons:reasons.append(code)
+            unknown=unknown or missing
+        if len(plans)>=max_plans:block('PLAN_CAP_REACHED')
+        if key in registered:block('PAIR_ALREADY_REGISTERED')
+        if any(tainted(a) for a in ids):block('SUBMITTED_ANCESTOR')
+        for aid in ids:
+            doc=reports.get(aid,{})
+            if not complete(aid):block('FEEDBACK_INCOMPLETE',True)
+            if not doc.get('retain_for_complementarity'):block('PARENT_NOT_RETAINED')
+            value=strengths.get(aid)
+            if not number(value):block('PARENT_QUALITY_UNKNOWN',True)
+            elif value<min_parent_sharpe:block('PARENT_QUALITY_BELOW_THRESHOLD')
+            submitted_corr=(doc.get('submitted_correlation') or {}).get('max')
+            if number(submitted_corr) and submitted_corr>SUBMITTED_CORR_PARENT:block('SUBMITTED_CORRELATION_HIGH')
+            test=next((t.get('sharpe') for t in doc.get('temporal',[]) if t.get('segment')=='test'),None)
+            if not number(test):block('TEST_PERIOD_UNKNOWN',True)
+            elif test<0:block('TEST_PERIOD_NEGATIVE')
+            if failed[aid]>=MAX_FAILED_BLENDS:block('PARENT_EXHAUSTED_BY_COMPARABLE_FAILURES')
+        a,b=[parents[x] for x in ids]
+        pa,pb=[policies[x] for x in ids]
+        if simulation_settings(pa['settings'])!=simulation_settings(pb['settings']):block('SETTINGS_MISMATCH')
+        corr={'value':None}
+        if all(x in pnls for x in ids):
+            if daily[ids[0]]!=daily[ids[1]]:block('EVALUATION_PERIOD_MISMATCH')
+            corr=correlation(pnls[ids[0]],pnls[ids[1]],prepared=(prepared[ids[0]],prepared[ids[1]]))
+            if corr['value'] is None:block('PNL_OR_CORRELATION_UNKNOWN',True)
+            elif abs(corr['value'])>=.3:block('PAIR_CORRELATION_HIGH')
+        else:block('PNL_OR_CORRELATION_UNKNOWN',True)
+        ast={'op':'add','left':{'op':'rank','arg':candidates[ids[0]]['ast']},
+             'right':{'op':'rank','arg':candidates[ids[1]]['ast']}}
+        policy=current_policy or pa; bindings=policy['bindings']; paused=set(policy.get('paused_clusters') or [])
+        if any(bindings.get(r,{}).get('cluster') in paused for r in research_dsl.roles_used(ast)):block('PAUSED_ROLE')
+        try:research_dsl.compile_ast(ast,bindings,'combination')
+        except (ValueError,KeyError,TypeError):block('AST_INVALID')
+        rank_key=(-(strengths[ids[0]]+strengths[ids[1]]),abs(corr['value'])) if not reasons else None
+        output.append({'pair_key':key,'parents':list(ids),'parent_cycles':[a['cycle_id'],b['cycle_id']],
+            'eligibility':'unknown' if unknown else 'blocked' if reasons else 'eligible',
+            'first_block_reason':reasons[0] if reasons else None,'reason_codes':reasons,
+            'parent_sharpes':[strengths.get(i) for i in ids], 'minimum_parent_sharpe':min_parent_sharpe,
+            'correlation':corr,'rank_key':rank_key,'ast':ast,
+            'experiment':'一次固定等权rank组合；不优化权重、窗口、符号；失败终止该父对'})
+    return {'registered':len(plans),'cap':max_plans,'snapshot_at':util.now_iso(),'pairs':output,
+            'counts':dict(Counter(x['eligibility'] for x in output)),
+            'first_reason_counts':dict(Counter(x['first_block_reason'] for x in output if x['first_block_reason'])),
+            'all_reason_counts':dict(Counter(r for x in output for r in x['reason_codes'])),
+            'note':'Private local report; unknown quality is not zero and incomplete failures do not exhaust parents.'}
+
+
 def next_combination(conn, max_plans=2, min_parent_sharpe=MIN_PARENT_SHARPE, current_policy=None):
     setup(conn)
-    if conn.execute('SELECT COUNT(*) FROM combination_plans').fetchone()[0] >= max_plans: return None
-    # 只组合经过模型审查的父提案（含已审查的组合轮本身，允许一层再组合；复杂度上限
-    # 由 compile_ast 把关）；直接诊断实验没有模型审查来源，不作父信号。每个父对只登记一次。
-    parents = {}
-    for r in conn.execute('''SELECT c.cycle_id,c.candidate_json,c.policy_json,b.alpha_id FROM research_cycles c
-            JOIN brain_runs b ON b.task_id=c.simulation_task
-            WHERE c.state='closed' '''):
-        if r['candidate_json']: parents[r['alpha_id']]=dict(r)
-    # 预登记的符号翻转复核结果也可作父信号：AST 即 neg(基础 AST)，基础提案已经过审查。
-    from .autopilot import setup as _ap_setup
-    _ap_setup(conn)
-    for r in conn.execute('''SELECT c.cycle_id,c.candidate_json,c.policy_json,b.alpha_id FROM cycle_simulations s
-            JOIN research_cycles c ON c.cycle_id=s.cycle_id JOIN brain_runs b ON b.task_id=s.task_id
-            WHERE s.label='sign_flip' AND c.state='closed' AND c.candidate_json IS NOT NULL'''):
-        cand=json.loads(r['candidate_json']); cand['ast']={'op':'neg','arg':cand['ast']}
-        parents[r['alpha_id']]={**dict(r),'candidate_json':json.dumps(cand,ensure_ascii=False)}
-    # 低相关只是准入条件；在准入的配对里优先父信号更强的组合（唯一一次全过门槛的
-    # 提交 vRrlJZpQ 就是强父信号的等权组合，弱+弱组合的第 30 轮未能救活）。
-    def strength(aid):
-        row = conn.execute('SELECT stats_json FROM simulations WHERE remote_id=? AND synthetic=0', (aid,)).fetchone()
-        try: value = json.loads(row['stats_json']).get('sharpe') if row else None
-        except (ValueError, TypeError): value = None
-        return value if number(value) else 0.0
-    # 已正式提交的信号不再作父信号：其组合会与已提交 alpha 高度自相关，无法通过官方 SELF_CORRELATION。
-    tables={x[0] for x in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    submitted={x[0] for x in conn.execute("SELECT alpha_id FROM brain_submissions WHERE state='accepted'")} if 'brain_submissions' in tables else set()
-    # 谱系：组合轮的 alpha → 其父 alpha；祖先里含已提交信号的也排除。
-    lineage={}
-    for r in conn.execute('''SELECT p.pair_key,b.alpha_id FROM combination_plans p
-            JOIN research_cycles c ON c.cycle_id=p.cycle_id JOIN brain_runs b ON b.task_id=c.simulation_task'''):
-        lineage[r['alpha_id']]=r['pair_key'].split(':')
-    def tainted(aid,seen=()):
-        if aid in submitted: return True
-        return any(tainted(x,seen+(aid,)) for x in lineage.get(aid,[]) if x not in seen)
-    reports={r['alpha_id']:json.loads(r['report_json']) for r in conn.execute('SELECT alpha_id,report_json FROM research_feedback')}
-    def correlated(aid):
-        value=(reports.get(aid,{}).get('submitted_correlation') or {}).get('max')
-        return number(value) and value > SUBMITTED_CORR_PARENT
-    # 父信号测试段不得为负：训练段强而最近测试年为负的信号会把衰减带进组合（9qjVXgN1/KPNgk2xk型）。
-    # 缺测试段资料时先放行（与correlated缺PnL的口径一致）：diagnose侧retain=False是第一层拦截。
-    def test_year_ok(aid):
-        temporal=(reports.get(aid,{}).get('temporal') or [])
-        sharpe=next((t.get('sharpe') for t in temporal if t.get('segment')=='test'), None)
-        return not number(sharpe) or sharpe >= 0
-    # 已被反复组合但从未产出更强结果的父信号视为"已挖尽"。
-    # 审查拒绝、主动放弃、结构重复没有回测，blend 记 0 会把好父信号提前耗尽（LLNzJGK9 两次配弱信号都死在审查）。
-    failed_blends={}
-    for r in conn.execute('''SELECT p.pair_key,b.alpha_id FROM combination_plans p
-            JOIN research_cycles c ON c.cycle_id=p.cycle_id LEFT JOIN brain_runs b ON b.task_id=c.simulation_task'''):
-        if not r['alpha_id']: continue
-        blend=strength(r['alpha_id'])
-        for parent in r['pair_key'].split(':'):
-            if blend <= max(strength(parent), MIN_PARENT_SHARPE) or blend < 1.25:
-                failed_blends[parent]=failed_blends.get(parent,0)+1
-    exhausted={a for a,n in failed_blends.items() if n >= MAX_FAILED_BLENDS}
-    pairs = [x for x in report(conn)['pairs'] if x['worth_combination_review'] and not any(tainted(i) or correlated(i) or not test_year_ok(i) or i in exhausted for i in x['parents'])]
-    for pair in sorted(pairs, key=lambda x: (-(strength(x['parents'][0])+strength(x['parents'][1])), abs(x['value']))):
-        ids = pair['parents']; key = ':'.join(ids)
-        if not all(x in parents for x in ids): continue
-        if conn.execute('SELECT 1 FROM combination_plans WHERE pair_key=?',(key,)).fetchone(): continue
-        a,b = [parents[x] for x in ids]
-        # 只比较影响持仓的设置；testPeriod/visualization 只影响展示与分段，不影响回测本身。
-        if simulation_settings(json.loads(a['policy_json'])['settings']) != simulation_settings(json.loads(b['policy_json'])['settings']): continue
-        if min(strength(ids[0]), strength(ids[1])) < min_parent_sharpe: continue
-        ast = {'op':'add','left':{'op':'rank','arg':json.loads(a['candidate_json'])['ast']},
-               'right':{'op':'rank','arg':json.loads(b['candidate_json'])['ast']}}
-        from . import research_dsl
-        active_policy = current_policy or json.loads(a['policy_json'])
-        bindings = active_policy['bindings']
-        paused = set(active_policy.get('paused_clusters') or [])
-        if any(bindings.get(role, {}).get('cluster') in paused for role in research_dsl.roles_used(ast)):
-            continue
-        try:
-            research_dsl.compile_ast(ast,bindings,'combination')
-        except ValueError: continue
-        return {'pair_key':key,'parents':ids,'parent_cycles':[a['cycle_id'],b['cycle_id']],
-                'ast':ast,'correlation':pair,'experiment':'一次固定等权rank组合；不优化权重、窗口、符号；失败终止该父对'}
-    return None
+    result=combination_diagnostics(conn,max_plans,min_parent_sharpe,current_policy)
+    eligible=[x for x in result['pairs'] if x['eligibility']=='eligible']
+    if not eligible:return None
+    selected=min(eligible,key=lambda x:x['rank_key'])
+    return {k:selected[k] for k in ('pair_key','parents','parent_cycles','ast','correlation','experiment')}
 
 
 def require_submission_evidence(conn, alpha):

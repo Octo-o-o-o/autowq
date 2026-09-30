@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.19
+
+- Added a bounded continuous-research loop on the existing task ledger: evidence gaps, registered collectors, late-observation reassessment, scoped paired findings, and versioned issue proposals.
+- Separated ordinary learning allocation from campaign resources; retry contribution preparation only when its inputs change, and preserve successful frozen calibration.
+- Added explicit epoch transitions that inherit remaining budgets and respect permanent owner stops, plus deterministic work selection and desktop progress diagnostics.
+- Preserved paired-review, request identity, replay, authorization and reservation gates. Missing real-world measurement contracts still block execution; these changes do not establish improved Alpha returns or grant additional budget.
+
 ## 0.2.17
 
 - Add versioned research lineage, scoped edit/counterexample retrieval, bounded plan selection, typed mutation suggestions and structural-family collision auditing.

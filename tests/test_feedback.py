@@ -1,4 +1,5 @@
 import json
+import datetime as dt
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -9,6 +10,34 @@ from wq.brain_submission import REQUIRED
 
 def recordset(names, rows):
     return {'schema':{'properties':[{'name':n} for n in names]},'records':rows}
+
+
+from contextlib import contextmanager
+
+
+@contextmanager
+def combination_fixture(conn, tmp, pairs):
+    """Complete isolated receipt fixtures; only pair correlation is controlled here."""
+    from pathlib import Path
+    aids=[r[0] for r in conn.execute('SELECT alpha_id FROM brain_runs WHERE alpha_id IS NOT NULL')]
+    for aid in aids:
+        if not conn.execute('SELECT 1 FROM simulations WHERE remote_id=?',(aid,)).fetchone():
+            conn.execute("INSERT INTO families(family_id,family_key,origin,synthetic,created_at) VALUES(?,?,?,?,?)",('fam'+aid,'fk'+aid,'fixture',0,util.now_iso()))
+            conn.execute("INSERT INTO candidates(candidate_id,family_id,expression,config_json,config_hash,synthetic,created_at) VALUES(?,?,?,?,?,?,?)",('cand'+aid,'fam'+aid,'fixture','{}','ch'+aid,0,util.now_iso()))
+            conn.execute("INSERT INTO simulations(sim_id,candidate_id,remote_id,source,synthetic,status,stats_json,imported_at) VALUES(?,?,?,?,?,?,?,?)",('sim'+aid,'cand'+aid,aid,'fixture',0,'failed',json.dumps({'sharpe':0}),util.now_iso()))
+        path=Path(tmp)/(aid+'-pnl.json')
+        rows=[[(dt.date(2020,1,1)+dt.timedelta(days=i)).isoformat(),float(i)] for i in range(260)]
+        pnl=recordset(['date','pnl'],rows);pnl['fixture_alpha']=aid;util.write_json(str(path),pnl)
+        previous=conn.execute('SELECT report_json FROM research_feedback WHERE alpha_id=?',(aid,)).fetchone()
+        report=json.loads(previous[0]) if previous else {}
+        report.update(collection_status='complete',pnl_path=str(path),retain_for_complementarity=True)
+        report.setdefault('temporal',[{'segment':'test','sharpe':1.0}])
+        conn.execute('INSERT OR REPLACE INTO research_feedback VALUES(?,?,?,?)',(aid,'fixture',json.dumps(report),util.now_iso()))
+    values={tuple(sorted(p['parents'])):p['value'] for p in pairs}
+    def correlation(left,right,minimum=252,**kwargs):
+        return {'value':values.get(tuple(sorted((left['fixture_alpha'],right['fixture_alpha']))),.95),
+                'observations':259,'from':'2020-01-02','to':'2020-09-16'}
+    with patch('wq.feedback.correlation',side_effect=correlation): yield
 
 
 class FeedbackTests(unittest.TestCase):
@@ -111,7 +140,7 @@ class FeedbackTests(unittest.TestCase):
                 candidate={'ast':{'op':'mean','arg':{'op':'field','name':role},'window':20}}
                 c.execute("INSERT INTO research_cycles(cycle_id,state,policy_json,policy_hash,candidate_json,simulation_task,created_at,updated_at) VALUES(?,'closed',?,'hash',?,?,?,?)",(i,json.dumps(policy),json.dumps(candidate),'task'+str(i),util.now_iso(),util.now_iso()))
                 c.execute('INSERT INTO brain_runs VALUES(?,?)',('task'+str(i),'alpha'+str(i)))
-            with patch('wq.feedback.report',return_value={'pairs':[{'parents':['alpha1','alpha2'],'value':-.1,'worth_combination_review':True}]}):
+            with combination_fixture(c,tmp,[{'parents':['alpha1','alpha2'],'value':-.1}]):
                 policy['bindings']['daily_return']['cluster'] = 'price'
                 policy['paused_clusters'] = ['price']
                 self.assertIsNone(feedback.next_combination(c,min_parent_sharpe=0,current_policy=policy))
@@ -143,22 +172,22 @@ class CombinationRankingTests(unittest.TestCase):
             for i,(aid,sharpe) in enumerate([('strongA',1.5),('strongB',1.3),('weakA',0.2),('weakB',0.1)]): add(i+1,aid,sharpe,roles[i])
             pairs=[{'parents':['strongA','strongB'],'value':0.25,'worth_combination_review':True},
                    {'parents':['weakA','weakB'],'value':0.01,'worth_combination_review':True}]
-            with patch('wq.feedback.report',return_value={'pairs':pairs}):
+            with combination_fixture(c,tmp,pairs):
                 plan=feedback.next_combination(c,max_plans=4)
             self.assertEqual(plan['parents'],['strongA','strongB'])
             # testPeriod 只影响展示，不应阻止配对；其它设置不同才阻止
             c.execute("UPDATE research_cycles SET policy_json=? WHERE cycle_id=1",(json.dumps({'settings':{'decay':0,'testPeriod':'P1Y'},'bindings':bindings}),))
-            with patch('wq.feedback.report',return_value={'pairs':pairs}):
+            with combination_fixture(c,tmp,pairs):
                 self.assertEqual(feedback.next_combination(c,max_plans=4)['parents'],['strongA','strongB'])
             c.execute("UPDATE research_cycles SET policy_json=? WHERE cycle_id=1",(json.dumps({'settings':{'decay':4},'bindings':bindings}),))
-            with patch('wq.feedback.report',return_value={'pairs':pairs}):
+            with combination_fixture(c,tmp,pairs):
                 self.assertNotEqual(feedback.next_combination(c,max_plans=4,min_parent_sharpe=0)['parents'],['strongA','strongB'])
             c.execute("UPDATE research_cycles SET policy_json=? WHERE cycle_id=1",(policy,))
             # 已提交的父信号被排除，退到下一对（弱父信号需放宽最低强度才允许）
             from wq import brain_submission; brain_submission.setup(c)
             tsub=store.enqueue_task(c,'brain_submission',{},'ksub')[0]
             c.execute("INSERT INTO brain_submissions(task_id,alpha_id,sim_id,state,started_at,updated_at) VALUES(?,?,?,?,?,?)",(tsub,'strongA','simstrongA','accepted',util.now_iso(),util.now_iso()))
-            with patch('wq.feedback.report',return_value={'pairs':pairs}):
+            with combination_fixture(c,tmp,pairs):
                 self.assertIsNone(feedback.next_combination(c,max_plans=4))          # 默认最低父强度 1.2 挡住 weak 对
                 plan=feedback.next_combination(c,max_plans=4,min_parent_sharpe=0)
             self.assertEqual(plan['parents'],['weakA','weakB'])
@@ -166,7 +195,7 @@ class CombinationRankingTests(unittest.TestCase):
             add(5,'blendA',1.5,roles[4])
             c.execute("INSERT INTO combination_plans VALUES(?,?,?,?)",('strongA:strongB',5,'{}',util.now_iso()))
             pairs.append({'parents':['blendA','weakA'],'value':0.02,'worth_combination_review':True})
-            with patch('wq.feedback.report',return_value={'pairs':pairs}):
+            with combination_fixture(c,tmp,pairs):
                 plan=feedback.next_combination(c,max_plans=6,min_parent_sharpe=0)
             self.assertEqual(plan['parents'],['weakA','weakB'])
             c.close()
@@ -193,12 +222,12 @@ class NegativeTestYearParentTests(unittest.TestCase):
             add(1,'decayed',1.4,roles[0],-0.57)   # 训练段强、最近测试年为负
             add(2,'healthy',1.5,roles[1],1.32)
             pairs=[{'parents':['decayed','healthy'],'value':0.1,'worth_combination_review':True}]
-            with patch('wq.feedback.report',return_value={'pairs':pairs}):
+            with combination_fixture(c,tmp,pairs):
                 self.assertIsNone(feedback.next_combination(c,max_plans=5))
             # 测试段转正后同一对可登记
             c.execute("UPDATE research_feedback SET report_json=? WHERE alpha_id='decayed'",
                       (json.dumps({'retain_for_complementarity':True,'temporal':[{'segment':'train','sharpe':1.8},{'segment':'test','sharpe':0.6}]}),))
-            with patch('wq.feedback.report',return_value={'pairs':pairs}):
+            with combination_fixture(c,tmp,pairs):
                 self.assertEqual(feedback.next_combination(c,max_plans=5)['parents'],['decayed','healthy'])
             c.close()
 
@@ -224,7 +253,7 @@ class ExhaustedParentTests(unittest.TestCase):
             for k,(cid,aid) in enumerate([(4,'b1'),(5,'b2'),(6,'b3')]): add(cid,aid,0.5,roles[3],plan=f'tired:x{k}')
             pairs=[{'parents':['fresh','tired'],'value':0.01,'worth_combination_review':True},
                    {'parents':['fresh','other'],'value':0.2,'worth_combination_review':True}]
-            with patch('wq.feedback.report',return_value={'pairs':pairs}):
+            with combination_fixture(c,tmp,pairs):
                 plan=feedback.next_combination(c,max_plans=10)
             self.assertEqual(plan['parents'],['fresh','other'])
             c.close()
@@ -250,8 +279,42 @@ class ExhaustedParentTests(unittest.TestCase):
                           (10+k,'closed',policy,'h','模型审查拒绝，不回测',util.now_iso(),util.now_iso()))
                 c.execute("INSERT INTO combination_plans VALUES(?,?,?,?)",(f'kept:ghost{k}',10+k,'{}',util.now_iso()))
             pairs=[{'parents':['kept','peer'],'value':0.1,'worth_combination_review':True}]
-            with patch('wq.feedback.report',return_value={'pairs':pairs}):
+            with combination_fixture(c,tmp,pairs):
                 plan=feedback.next_combination(c,max_plans=10)
             self.assertEqual(plan['parents'],['kept','peer'])
             c.close()
 
+
+
+class SharedCombinationDiagnosticsTests(unittest.TestCase):
+    def test_readonly_explanation_matches_frozen_quality_order_and_unknown_is_not_zero(self):
+        from itertools import combinations
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg,c=make_env(tmp);self.addCleanup(c.close);autopilot.setup(c);feedback.setup(c)
+            c.execute('CREATE TABLE brain_runs(task_id TEXT,alpha_id TEXT)')
+            roles=['daily_return','activity_rank','cashflow_strength','market_cap_rank']
+            policy={'settings':{'region':'USA','universe':'TOP3000','delay':1},
+                    'bindings':{r:{'expression':'fixture_'+r,'fields':['fixture_'+r]} for r in roles}}
+            for i,role in enumerate(roles):
+                candidate={'ast':{'op':'mean','arg':{'op':'field','name':role},'window':20}}
+                c.execute("INSERT INTO research_cycles(cycle_id,state,policy_json,policy_hash,candidate_json,simulation_task,created_at,updated_at) VALUES(?,'closed',?,'hash',?,?,?,?)",
+                    (i+1,json.dumps(policy),json.dumps(candidate),'task'+str(i),util.now_iso(),util.now_iso()))
+                c.execute('INSERT INTO brain_runs VALUES(?,?)',('task'+str(i),'alpha'+str(i)))
+            fixtures=[{'parents':list(ids),'value':.1} for ids in combinations(['alpha0','alpha1','alpha2','alpha3'],2)]
+            with combination_fixture(c,tmp,fixtures):
+                for i,value in enumerate((1.2,1.4,1.7,None)):
+                    c.execute('UPDATE simulations SET stats_json=? WHERE remote_id=?',(json.dumps({'sharpe':value}),'alpha'+str(i)))
+                c.commit();before=c.total_changes;c.execute('PRAGMA query_only=ON')
+                result=feedback.combination_diagnostics(c,40,current_policy=policy)
+                c.execute('PRAGMA query_only=OFF')
+                self.assertEqual(c.total_changes,before)
+                eligible=sorted([r for r in result['pairs'] if r['eligibility']=='eligible'],key=lambda r:r['rank_key'])
+                expected=['alpha1:alpha2','alpha0:alpha2','alpha0:alpha1']
+                self.assertEqual([r['pair_key'] for r in eligible],expected)
+                unknown=[r for r in result['pairs'] if 'alpha3' in r['parents']]
+                self.assertTrue(all(r['eligibility']=='unknown' and 'PARENT_QUALITY_UNKNOWN' in r['reason_codes'] for r in unknown))
+                for offset,key in enumerate(expected):
+                    selected=feedback.next_combination(c,40,current_policy=policy)
+                    self.assertEqual(selected['pair_key'],key)
+                    c.execute('INSERT INTO combination_plans VALUES(?,?,?,?)',(key,99+offset,json.dumps(selected),util.now_iso()))
+                self.assertIsNone(feedback.next_combination(c,40,current_policy=policy))

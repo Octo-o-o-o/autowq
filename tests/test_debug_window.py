@@ -84,6 +84,43 @@ class TestWindowStates(unittest.TestCase):
         st, _ = self._state(_window(starts_at="not-a-date"))
         self.assertEqual(st, "invalid")
 
+    def test_explicit_renewals_cover_boundaries_and_stop_at_final_deadline(self):
+        from wq.config import Config
+        start = util.now() - dt.timedelta(days=6)
+        middle = start + dt.timedelta(days=7)
+        end = middle + dt.timedelta(days=7)
+        w = _window(starts_at=start.isoformat(), expires_at=end.isoformat())
+        w['debug_authorization']['windows'] = [
+            {'starts_at':start.isoformat(), 'expires_at':middle.isoformat(), 'evidence':'Original user authorization'},
+            {'starts_at':middle.isoformat(), 'expires_at':end.isoformat(), 'evidence':'Explicit user renewal to fixed deadline'}]
+        cfg = Config(w, self.tmp, None)
+        for now in (start, middle-dt.timedelta(microseconds=1), middle, end-dt.timedelta(microseconds=1)):
+            self.assertEqual(cfg.debug_window('grok', now)[0], 'ok')
+        self.assertEqual(cfg.debug_window('grok', end)[0], 'invalid')
+        self.assertEqual(cfg.debug_window('devin', middle)[0], 'off')
+        self.assertEqual(cfg.debug_window('grok', start-dt.timedelta(seconds=1))[0], 'invalid')
+
+    def test_renewal_rejects_gaps_overlap_missing_evidence_and_unbounded_segments(self):
+        import copy
+        from wq.config import Config
+        start = util.now()-dt.timedelta(days=1)
+        middle = start+dt.timedelta(days=7)
+        end = middle+dt.timedelta(days=2)
+        w = _window(starts_at=start.isoformat(), expires_at=end.isoformat())
+        w['debug_authorization']['windows'] = [
+            {'starts_at':start.isoformat(),'expires_at':middle.isoformat(),'evidence':'Original user authorization'},
+            {'starts_at':middle.isoformat(),'expires_at':end.isoformat(),'evidence':'Explicit fixed renewal'}]
+        changes = [([],), (None,), ('evidence',''),
+                   ('starts_at',(middle+dt.timedelta(seconds=1)).isoformat()),
+                   ('starts_at',(middle-dt.timedelta(seconds=1)).isoformat()),
+                   ('expires_at',(middle+dt.timedelta(days=8)).isoformat()),
+                   ('expires_at',(end-dt.timedelta(seconds=1)).isoformat())]
+        for change in changes:
+            broken = copy.deepcopy(w)
+            if len(change)==1: broken['debug_authorization']['windows']=change[0]
+            else: broken['debug_authorization']['windows'][1][change[0]]=change[1]
+            self.assertEqual(Config(broken,self.tmp,None).debug_window('grok')[0],'invalid',change)
+
     def test_missing_evidence_invalid(self):
         st, info = self._state(_window(evidence=""))
         self.assertEqual((st, "evidence" in info), ("invalid", True))

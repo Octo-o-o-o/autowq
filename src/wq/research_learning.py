@@ -26,6 +26,13 @@ CREATE TABLE IF NOT EXISTS learning_experiments(
 CREATE TABLE IF NOT EXISTS learning_assignments(
  cycle_id INTEGER PRIMARY KEY, experiment_id TEXT NOT NULL, arm TEXT NOT NULL,
  baseline_hash TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS learning_allocation_scopes(
+ cycle_id INTEGER PRIMARY KEY, stratum TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS learning_resource_cycles(
+ cycle_id INTEGER PRIMARY KEY, experiment_id TEXT NOT NULL, work_kind TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS learning_stop_types(
+ experiment_id TEXT NOT NULL, stop_type TEXT NOT NULL, reason TEXT NOT NULL,
+ created_at TEXT NOT NULL, PRIMARY KEY(experiment_id,stop_type));
 CREATE TABLE IF NOT EXISTS learning_observations(
  observation_id TEXT PRIMARY KEY, alpha_id TEXT NOT NULL, document_json TEXT NOT NULL,
  available_at TEXT NOT NULL);
@@ -79,9 +86,9 @@ def arm_report(conn,trials,experiment_id,at=None):
     result={}
     for arm,items in groups.items():
         counts=Counter((x['outcome'] or {}).get('execution','not_run') for x in items)
-        families={x['family_id'] or x['execution_id'] for x in items if (x['outcome'] or {}).get('quality')=='usable'}
+        families={x['family_id'] or x['execution_id'] for x in items if (x['outcome'] or {}).get('quality')=='usable' and x['document'].get('source')!='campaign'}
         result[arm]={'allocated_cycles':sum(v==arm for v in mapping.values()),'execution':dict(counts),
-            'usable_families':len(families),'actual_requests':sum(bool((x['outcome'] or {}).get('request_started')) for x in items),
+            'usable_families':len(families),'campaign_measurements':sum(x['document'].get('source')=='campaign' for x in items),'actual_requests':sum(bool((x['outcome'] or {}).get('request_started')) for x in items),
             'quality_failures':sum((x['outcome'] or {}).get('quality')=='weak' for x in items),
             'conclusion':'not_evidence_of_superiority','human_seconds':None}
     return result
@@ -216,6 +223,10 @@ def sync(conn):
         document = {**ids, 'ast': candidate['ast'], 'settings': policy.get('settings', {}),
                     'roles': research_dsl.roles_used(candidate['ast']), 'parent_id': None, 'edit': [],
                     'policy_hash': row['policy_hash'], 'source': 'automatic', 'version': VERSION}
+        from . import research_campaign, research_campaign_v2
+        allocation=research_campaign.assignment(conn,row['cycle_id'])
+        if allocation and allocation.get('schema')==research_campaign_v2.SCHEMA:
+            document['source']='campaign'
         selected=conn.execute('SELECT document_json FROM learning_selections WHERE cycle_id=?',(row['cycle_id'],)).fetchone()
         if selected and not conn.execute('SELECT 1 FROM learning_trials WHERE trial_id=?',(key,)).fetchone():
             parent_id=json.loads(selected[0]).get('selected_parent_id')
@@ -285,6 +296,19 @@ def _sync_task(conn, task_id, parent_id, parent, label, cycle_id):
            'roles': parent.get('roles', []) if parent else [], 'parent_id': parent_id,
            'edit': ast_diff({'ast': parent.get('ast'), 'settings': parent['settings']}, {'ast': ast, 'settings': settings}) if parent else [],
            'label': label, 'source': 'automatic' if parent else 'direct', 'version': VERSION}
+    from . import research_campaign_v2
+    frozen_pair=research_campaign_v2.pair_for_cycle(conn,cycle_id) if cycle_id is not None else None
+    if frozen_pair:
+        arm='control' if label=='campaign_control' else 'treatment'
+        candidate=frozen_pair['candidates'][arm]
+        policy=json.loads(conn.execute('SELECT policy_json FROM research_cycles WHERE cycle_id=?',(cycle_id,)).fetchone()[0])
+        actual=identities(candidate['ast'],policy['bindings'],settings)
+        if actual['expression']!=expression:raise ValueError('Campaign actual AST does not match task request')
+        original_family=conn.execute('SELECT family_hash FROM research_cycles WHERE cycle_id=?',(frozen_pair['parent_ref']['cycle_id'],)).fetchone()
+        doc.update(ast=candidate['ast'],structure_id=actual['structure_id'],scope_id=actual['scope_id'],
+                   roles=research_dsl.roles_used(candidate['ast']),source='campaign',pair_id=frozen_pair['pair_id'],
+                   family_id=original_family[0] if original_family else doc['family_id'])
+        doc['edit']=ast_diff({'ast':parent.get('ast'),'settings':parent['settings']},{'ast':doc['ast'],'settings':settings}) if parent else []
     key = 'task:'+task_id
     existing=conn.execute('SELECT document_json FROM learning_trials WHERE trial_id=?',(key,)).fetchone()
     if existing:
@@ -318,7 +342,7 @@ def _sync_task(conn, task_id, parent_id, parent, label, cycle_id):
         elif complete or sim['status'] in ('failed','quality_failed'): quality='weak'
     outcome = {'execution': execution, 'quality': quality, 'evidence_complete': complete,
                'simulation_status': sim['status'] if sim else None, 'observation_id': obs['observation_id'] if obs else None,
-               'request_started': bool(run), 'task_status': task['status'], 'data_through': observed.get('data_through'),
+               'request_started': bool(run and run['state']!='not_sent'), 'task_status': task['status'], 'data_through': observed.get('data_through'),
                'content_hash': observed.get('content_hash'), 'origin': observed.get('origin'),
                'diagnostic_tags': sorted(k for k in ('platform_blockers','validation_gaps') if report.get(k)),
                'task_id': task_id, 'model_cost': None, 'human_seconds': None}
@@ -332,6 +356,7 @@ def derive_rules(conn, ttl_days=30):
     trials = as_of(conn); by_id = {t['trial_id']: t for t in trials}; groups = defaultdict(list)
     for trial in trials:
         doc = trial['document']; parent = by_id.get(doc.get('parent_id'))
+        if doc.get('source')=='campaign' or (parent and parent['document'].get('source')=='campaign'):continue
         if not parent or not doc.get('edit') or not doc.get('ast') or not parent['document'].get('ast'): continue
         if trial['scope_id'] != parent['scope_id']: continue
         a, b = parent['outcome'], trial['outcome']
@@ -369,13 +394,13 @@ def rules(conn, at=None):
 
 def model_context(conn, bindings, settings, candidate=None, limit=12):
     """Only abstract validated ASTs and categorical outcomes leave local storage."""
-    from . import research_strategy
+    from . import research_strategy, research_knowledge
     selected = research_strategy.retrieval(conn, bindings, settings, candidate, limit)
     facts = [{'trial_id': t['trial_id'], 'ast': t['document']['ast'],
               'quality': (t['outcome'] or {}).get('quality', 'unassessed'),
               'execution': (t['outcome'] or {}).get('execution', 'not_run'),
               'parent_id': t['document'].get('parent_id')} for t in selected]
-    return {'version': VERSION, 'facts': facts, 'rules_mode': 'evidence_bound_experimental',
+    return {'version': VERSION, 'facts': facts, 'paired_findings':research_knowledge.context(conn,bindings,settings), 'rules_mode': 'evidence_bound_experimental',
             'search': research_strategy.search_packet(conn, bindings, settings),
             'interpretation': 'Categorical historical evidence, not causal or out-of-sample proof.'}
 
@@ -449,7 +474,9 @@ def freeze_experiment(conn, experiment_id, baseline, max_cycles, max_requests_pe
     if active_experiment(conn):
         raise ValueError('An experiment is already frozen; no overlapping experiment')
     doc={'baseline':baseline,'baseline_hash':util.sha256_json(baseline),'max_cycles':max_cycles,
-         'max_requests_per_arm':request_cap,'allocation':'alternating_prospective','arms':['baseline','learning'],'version':VERSION}
+         'max_requests_per_arm':request_cap,'allocation':'stratified_ordinary_alternating_v2',
+         'population':'ordinary_only_v2','root_experiment':experiment_id,
+         'arms':['baseline','learning'],'version':VERSION}
     conn.execute('INSERT INTO learning_experiments VALUES(?,?,?)',(experiment_id,json.dumps(doc),util.now_iso()))
     return doc
 
@@ -461,13 +488,30 @@ def assign(conn, cycle_id, experiment_id, baseline):
     if conn.execute('SELECT 1 FROM learning_experiment_stops WHERE experiment_id=?',(experiment_id,)).fetchone():raise ValueError('Experiment stopped')
     doc=json.loads(row['document_json']);digest=util.sha256_json(baseline)
     if digest!=doc['baseline_hash']:raise ValueError('Frozen experiment baseline changed')
+    from .research_lifecycle import lineage,stop_kind
+    if any(stop_kind(conn,e)=='owner_stop' for e in lineage(conn,experiment_id)[1]):raise ValueError('Owner stopped this experiment lineage')
+    from . import research_campaign
+    if research_campaign.assignment(conn,cycle_id):
+        conn.execute('INSERT OR IGNORE INTO learning_resource_cycles VALUES(?,?,?)',
+                     (cycle_id,experiment_id,'campaign'))
+        return None
+    if any(research_campaign.assignment(conn,r[0]) for r in conn.execute(
+            'SELECT cycle_id FROM learning_assignments WHERE experiment_id=?',(experiment_id,))):
+        raise ValueError('Legacy mixed experiment requires a new reviewed epoch')
     cycle=conn.execute('SELECT research_task,state,created_at FROM research_cycles WHERE cycle_id=?',(cycle_id,)).fetchone()
     if not cycle or cycle['state']!='researching' or cycle['created_at']<row['created_at'] or cycle[0] or conn.execute('SELECT 1 FROM learning_trials WHERE cycle_id=?',(cycle_id,)).fetchone():raise ValueError('Assign an existing cycle before dispatch or observation')
     if conn.execute('SELECT 1 FROM learning_assignments WHERE cycle_id=?',(cycle_id,)).fetchone():raise ValueError('Cycle already assigned')
     n=conn.execute('SELECT COUNT(*) FROM learning_assignments WHERE experiment_id=?',(experiment_id,)).fetchone()[0]
     if n>=doc['max_cycles']:raise ValueError('Experiment allocation budget exhausted')
-    arm=doc['arms'][n%2]
+    policy=json.loads(conn.execute('SELECT policy_json FROM research_cycles WHERE cycle_id=?',(cycle_id,)).fetchone()[0])
+    stratum=util.sha256_json({'settings':policy.get('settings'), 'bindings':policy.get('bindings')})
+    counts=Counter(r['arm'] for r in conn.execute('''SELECT a.arm FROM learning_assignments a
+        JOIN learning_allocation_scopes s ON s.cycle_id=a.cycle_id
+        WHERE a.experiment_id=? AND s.stratum=?''',(experiment_id,stratum)))
+    arm=min(doc['arms'],key=lambda a:(counts[a],doc['arms'].index(a))) if doc.get('population')=='ordinary_only_v2' else doc['arms'][n%2]
     conn.execute('INSERT INTO learning_assignments VALUES(?,?,?,?,?)',(cycle_id,experiment_id,arm,digest,util.now_iso()))
+    conn.execute('INSERT INTO learning_allocation_scopes VALUES(?,?)',(cycle_id,stratum))
+    conn.execute('INSERT INTO learning_resource_cycles VALUES(?,?,?)',(cycle_id,experiment_id,'ordinary'))
     return arm
 
 
@@ -477,19 +521,25 @@ def check_request_budget(conn, cycle_id, cfg=None):
     if not assignment:return
     if conn.execute('SELECT 1 FROM learning_experiment_stops WHERE experiment_id=?',(assignment['experiment_id'],)).fetchone():raise ValueError('Experiment stopped before dispatch')
     experiment=json.loads(conn.execute('SELECT document_json FROM learning_experiments WHERE experiment_id=?',(assignment['experiment_id'],)).fetchone()[0])
+    from .research_lifecycle import lineage,stop_kind
+    if any(stop_kind(conn,e)=='owner_stop' for e in lineage(conn,assignment['experiment_id'])[1]):raise ValueError('Owner stopped this experiment lineage')
     if cfg and current_baseline(cfg)!=experiment['baseline']:raise ValueError('Frozen experiment baseline changed before request')
-    cycles={r[0] for r in conn.execute('SELECT cycle_id FROM learning_assignments WHERE experiment_id=? AND arm=?',(assignment['experiment_id'],assignment['arm']))}
+    from .research_lifecycle import arm_cycles
+    cycles=arm_cycles(conn,assignment['experiment_id'],assignment['arm'])
     reserved=sum(json.loads(r[0]).get('research_cycle_id') in cycles for r in conn.execute("SELECT payload_json FROM tasks WHERE kind='brain_simulation'"))
     if reserved>=experiment['max_requests_per_arm']:
         raise ValueError('Frozen experiment request budget exhausted; queued/failed/unknown reservations count')
 
 
-def stop_experiment(conn,experiment_id,reason):
+def stop_experiment(conn,experiment_id,reason,stop_type='owner_stop'):
     setup(conn)
     if not conn.execute('SELECT 1 FROM learning_experiments WHERE experiment_id=?',(experiment_id,)).fetchone():raise ValueError('Unknown experiment')
     if not isinstance(reason,str) or not 8<=len(reason)<=1000:raise ValueError('Concrete stop reason required')
+    if stop_type not in ('owner_stop','authority_expired','budget_exhausted','baseline_superseded','technical_blocked'):
+        raise ValueError('Unknown experiment stop type')
     conn.execute('INSERT OR IGNORE INTO learning_experiment_stops VALUES(?,?,?)',(experiment_id,reason,util.now_iso()))
-    return {'experiment_id':experiment_id,'stopped':True,'in_flight_requests':'Continue reconciliation only; no replay'}
+    conn.execute('INSERT OR IGNORE INTO learning_stop_types VALUES(?,?,?,?)',(experiment_id,stop_type,reason,util.now_iso()))
+    return {'experiment_id':experiment_id,'stopped':True,'stop_type':stop_type,'in_flight_requests':'Continue reconciliation only; no replay'}
 
 
 def freeze_pool(conn,pool_id,trial_ids):
@@ -535,18 +585,22 @@ def validate_dispatch(conn,cfg,task_id,payload):
     if not assignment:return
     if conn.execute('SELECT 1 FROM learning_experiment_stops WHERE experiment_id=?',(assignment['experiment_id'],)).fetchone():raise ValueError('Experiment stopped before dispatch')
     experiment=json.loads(conn.execute('SELECT document_json FROM learning_experiments WHERE experiment_id=?',(assignment['experiment_id'],)).fetchone()[0])
+    from .research_lifecycle import lineage,stop_kind
+    if any(stop_kind(conn,e)=='owner_stop' for e in lineage(conn,assignment['experiment_id'])[1]):raise ValueError('Owner stopped this experiment lineage')
     if current_baseline(cfg)!=experiment['baseline']:raise ValueError('Frozen experiment baseline changed before dispatch')
-    cycles={r[0] for r in conn.execute('SELECT cycle_id FROM learning_assignments WHERE experiment_id=? AND arm=?',(assignment['experiment_id'],assignment['arm']))}
+    from .research_lifecycle import arm_cycles
+    cycles=arm_cycles(conn,assignment['experiment_id'],assignment['arm'])
     reserved=[r['task_id'] for r in conn.execute("SELECT task_id,payload_json FROM tasks WHERE kind='brain_simulation' ORDER BY rowid") if json.loads(r['payload_json']).get('research_cycle_id') in cycles]
     if task_id not in reserved or reserved.index(task_id)>=experiment['max_requests_per_arm']:
         raise ValueError('Frozen experiment dispatch reservation exceeded')
 
 
-def model_cost(conn, cycle_ids):
+def model_cost(conn, cycle_ids, task_ids=None):
     from . import usage
     calls=set()
     for row in conn.execute("SELECT task_id,payload_json FROM tasks WHERE kind='agent_call'"):
         if json.loads(row['payload_json']).get('autopilot_cycle') not in cycle_ids: continue
+        if task_ids is not None and row['task_id'] not in task_ids:continue
         for attempt in conn.execute('SELECT detail_json FROM attempts WHERE task_id=?',(row['task_id'],)):
             detail=json.loads(attempt[0] or '{}')
             if isinstance(detail,dict) and isinstance(detail.get('call_id'),str):calls.add(detail['call_id'])

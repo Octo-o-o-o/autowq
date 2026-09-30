@@ -833,6 +833,8 @@ def build_parser(lang=None) -> argparse.ArgumentParser:
     research_learning.add_parser(sub, lang)
     from . import research_campaign
     research_campaign.add_parser(sub, lang)
+    from . import research_framework
+    research_framework.add_parser(sub, lang)
 
     sub.add_parser('help', help=text(lang, '显示命令帮助：wq help [命令]', 'Show command help: wq help [command]'))
     s=sub.add_parser('login', help=text(lang, '登录 BRAIN（含注册链接）', 'Sign in to BRAIN (includes the registration URL)'))

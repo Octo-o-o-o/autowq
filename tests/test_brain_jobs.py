@@ -168,3 +168,60 @@ class PreflightTransientTests(BrainJobTests):
 for _name in list(vars(BrainJobTests)):
     if _name.startswith('test_'):
         setattr(PreflightTransientTests, _name, None)
+
+
+class FinalSendBoundaryTests(BrainJobTests):
+    def direct_after_commit(self, action):
+        tid=self.enqueue();task=dict(self.c.execute('SELECT * FROM tasks WHERE task_id=?',(tid,)).fetchone())
+        inner=self.c
+        class Connection:
+            def __getattr__(self,name):return getattr(inner,name)
+            def commit(self):
+                inner.commit()
+                if inner.execute("SELECT 1 FROM brain_runs WHERE task_id=? AND state='post_started'",(tid,)).fetchone():action()
+        result=brain_jobs.step(Connection(),self.cfg,task,self.doc)
+        return tid,task,result
+
+    def test_commit_crossing_deadline_sends_zero_and_cannot_retry(self):
+        moment=util.now();deadline=moment+dt.timedelta(seconds=1)
+        self.cfg.data['brain_api']['authorized_until']=deadline.isoformat();util.write_json(self.cfg.path,self.cfg.data)
+        clock=[moment]
+        with patch('wq.brain_jobs.util.now',side_effect=lambda:clock[0]):
+            tid,task,result=self.direct_after_commit(lambda:clock.__setitem__(0,deadline))
+        self.assertEqual(result[0],'blocked');self.assertEqual(FakeClient.calls,[])
+        self.assertEqual(self.c.execute('SELECT state FROM brain_runs WHERE task_id=?',(tid,)).fetchone()[0],'not_sent')
+        self.assertEqual(brain_jobs.step(self.c,self.cfg,task,self.doc)[0],'blocked')
+        self.assertEqual(FakeClient.calls,[])
+
+    def test_stop_committed_after_intent_before_final_check_sends_zero(self):
+        from wq import store
+        from wq.db import connect
+        def stop():
+            c=connect(self.cfg.db_path)
+            try:store.set_flag(c,'paused','1');c.commit()
+            finally:c.close()
+        tid,_,result=self.direct_after_commit(stop)
+        self.assertEqual(result[0],'blocked');self.assertEqual(FakeClient.calls,[])
+        self.assertEqual(self.c.execute('SELECT state FROM brain_runs WHERE task_id=?',(tid,)).fetchone()[0],'not_sent')
+
+    def test_current_file_revocation_is_read_after_slow_preflight(self):
+        tid=self.enqueue()
+        def preflight(cls,cfg):
+            doc=util.read_json(cfg.path);doc['brain_api']['enabled']=False;util.write_json(cfg.path,doc)
+            return 200,{},{}
+        with patch.object(FakeClient,'preflight',classmethod(preflight)):
+            self.assertEqual(self.tick(tid),'blocked')
+        self.assertEqual(FakeClient.calls,[])
+
+    def test_crash_immediately_after_committed_intent_stays_unknown(self):
+        def crash():raise RuntimeError('fixture process crash after commit')
+        with self.assertRaises(RuntimeError):self.direct_after_commit(crash)
+        tid=self.c.execute('SELECT task_id FROM brain_runs').fetchone()[0]
+        task=dict(self.c.execute('SELECT * FROM tasks WHERE task_id=?',(tid,)).fetchone())
+        self.assertEqual(brain_jobs.step(self.c,self.cfg,task,self.doc)[0],'unknown')
+        self.assertEqual(FakeClient.calls,[])
+
+
+for _name in list(vars(BrainJobTests)):
+    if _name.startswith('test_'):
+        setattr(FinalSendBoundaryTests,_name,None)

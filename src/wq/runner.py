@@ -29,6 +29,9 @@ def dispatch_task(conn, cfg, task: dict) -> tuple[str, dict, str | None]:
     payload = json.loads(task["payload_json"])
     adapter = build_adapter(cfg)
     try:
+        if kind in ('research_evidence','research_reassess'):
+            from . import research_framework
+            return research_framework.dispatch(conn,cfg,task,payload)
         if kind == "brain_feedback":
             from .feedback import step
             return step(conn, cfg, task, payload)
@@ -150,16 +153,23 @@ def _run_once(conn, cfg, lease_s: int) -> tuple[int, list[str]]:
 
     from . import history_research
     autopilot.setup(conn)
-    from . import research_maintenance
+    from . import research_maintenance,research_framework
+    allow_research=True
     try:
-        research_maintenance.tick(conn, cfg)
+        if research_framework.enabled(cfg):
+            work=research_framework.tick(conn,cfg)
+            allow_research=work['allow_research']
+        else:research_maintenance.tick(conn, cfg)
         conn.commit()
     except (ValueError, OSError, KeyError, TypeError) as exc:
         conn.rollback()
+        if research_framework.enabled(cfg):allow_research=False
         store.set_flag(conn, 'research_learning_maintenance_error', str(exc)[:200])
         conn.commit()
-    history_research.tick(conn, cfg)
-    autopilot.tick(conn, cfg)
+    if allow_research:
+        history_research.tick(conn, cfg)
+        autopilot.tick(conn, cfg)
+    else:history_research.progress(conn,cfg)
 
     task = store.claim_task(conn, owner=f"wq-{os.getpid()}", lease_s=lease_s)
     conn.commit()
