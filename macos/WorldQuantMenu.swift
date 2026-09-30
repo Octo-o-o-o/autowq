@@ -134,6 +134,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var researchMenu = NSMenu()
     var researchWindow: NSWindow?
     var researchText: NSTextView?
+    var researchRefreshButton: NSButton?
+    var researchMenuButton: NSButton?
     var researchResponse: [String: Any] = [:]
 
     let tick = NSMenuItem(title: "", action: nil, keyEquivalent: "")
@@ -233,11 +235,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let refreshButton = NSButton(title: t("刷新", "Refresh"), target: self, action: #selector(refreshResearch))
             refreshButton.frame = NSRect(x: 20, y: 635, width: 100, height: 28)
             refreshButton.autoresizingMask = [.minYMargin]
-            content.addSubview(refreshButton)
+            content.addSubview(refreshButton); researchRefreshButton = refreshButton
             let menuButton = NSButton(title: t("托盘菜单", "Tray menu"), target: self, action: #selector(openTrayMenu))
             menuButton.frame = NSRect(x: 130, y: 635, width: 130, height: 28)
             menuButton.autoresizingMask = [.minYMargin]
-            content.addSubview(menuButton)
+            content.addSubview(menuButton); researchMenuButton = menuButton
             let scroll = NSScrollView(frame: NSRect(x: 20, y: 20, width: 760, height: 600))
             scroll.hasVerticalScroller = true
             scroll.autoresizingMask = [.width, .height]
@@ -258,8 +260,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         perform("research")
     }
     @objc func refreshResearch() { perform("research") }
-    @objc func openTrayMenu() { item.button?.performClick(nil) }
+    @objc func openTrayMenu() {
+        guard let content = researchWindow?.contentView, let button = researchMenuButton else { return }
+        menu.popUp(positioning: nil, at: NSPoint(x: button.frame.minX, y: button.frame.minY), in: content)
+    }
     func updateResearchWindow() {
+        researchRefreshButton?.title = t("刷新", "Refresh")
+        researchMenuButton?.title = t("托盘菜单", "Tray menu")
         researchWindow?.title = "WorldQuant " + (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "") + " · " + t("研究进展", "Research progress")
         let result = NSMutableAttributedString()
         for entry in researchResponse["entries"] as? [[String: Any]] ?? [] {
@@ -813,7 +820,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func fillSettings(_ response: [String: Any]) {
         let responseLang = response["language"] as? String ?? "zh"
-        if responseLang != lang { lang = responseLang; buildMainMenu() }   // 先按新语言重建，再回填动态数据
+        if responseLang != lang { lang = responseLang; buildMainMenu(); updateResearchWindow(); perform("research") }   // 先按新语言重建，再回填动态数据
         let notifications = response["notifications"] as? Bool ?? true
         notifyRow.state = notifications ? .on : .off
         notifyRow.representedObject = "config=notifications=" + (notifications ? "off" : "on")
