@@ -8,6 +8,12 @@
 
 **研究工具，不是收益承诺。** 平台筛选通过、正式提交接收、顾问资格和实际到账是不同状态。自动研究不自动授予正式提交权限。
 
+## 怎么用：同一个工具，两个阶段
+
+**阶段一 · [快速到达金牌](https://autowq.octoooo.com/#reach-gold)** —— 面向刚开始 BRAIN 研究、或还没到 Gold 的你。首次向导以三屏引导开场（算力从哪来、旅程怎么走、你从哪里开始），随后检测渠道、生成配置、调起登录；在你设定的预算与授权期限内，受控循环自动推进「提出假设 → 异渠道审查 → 有限回测」，真实结果、失败原因与平台回执全部如实入账；合格候选过提交前验收、核对回执后进入下一轮。研究用量可以全部落在已订阅渠道的 token 富余量里（免费 API 也能起步），不产生额外按量开销。Gold 由平台按 Alpha 与 OS 表现累计判定，没有写死的天数——作者个人实测（2026-09 历史案例，不代表人人如此）：装上第 5 天账号升金牌。
+
+**阶段二 · [金牌之后，持续提高](https://autowq.octoooo.com/#after-gold)** —— 不用重装、不用重新登录；向导起点选「我已是金牌或顾问」即可跳过新手引导直达设置。持续研究框架把本地历史变成下一轮可检验的建议：发现研究问题 → 明确资料缺口 → 授权内有界补证 → 可检验的小实验 → 新结果到来时重评 → 经验与反例回流。改进只在同预算对照里说话，失败与未知同样留档；托盘「研究进展」直接读授权期限、学习状态、已知/未知成本、资料缺口与下一触发条件。顾问之路上，Gold、官方邀请、签约/激活、报酬资格、实际到账是不同状态，以所在地区官方通知为准；WorldQuant 官方写明 Grandmaster 级顾问每季度报酬可达 8,000 美元以上——持续提高研究质量，就是朝这条线走。机制细节见 [Research learning](RESEARCH_LEARNING.md)。
+
 ## 安装
 
 需要你自己的模型 CLI 订阅账号或 API Key；没有订阅也可以用官方免费 API 起步（`wq providers free` 列出 Gemini、OpenRouter、智谱、硅基流动等免费预设，只需注册一个 Key）。macOS DMG 自带运行时；其余安装方式需要 Python 3.11+。核心运行时只使用 Python 标准库。支持 macOS；Linux/Windows WSL2 使用 Docker 隔离模型进程。原生 Windows 实验性支持，仅 API 渠道（见方式二下方的 Windows 说明）。
@@ -132,3 +138,9 @@ PYTHONPATH=src python3 -m unittest discover -s tests
 ### 历史驱动研究
 
 新增本地实验谱系、追加式反馈、带反例的 shadow 规则和单调用多计划筛选。沿用原预算、审查与提交边界；软件验证不代表 Alpha 质量提升。配置、回放、冻结实验和只读反馈刷新见 [Research learning](RESEARCH_LEARNING.md)。
+
+## 参与共建
+
+欢迎提 [Issue](https://github.com/Octo-o-o-o/autowq/issues) 和 [PR](https://github.com/Octo-o-o-o/autowq/pulls)——Bug、想法、文档勘误、新的研究议题建议都可以，每一个都会认真看。这个项目变得更好，靠的是大家一起动手。
+
+有合作意向？请通过 [OctoLab 千手实验室](https://www.octoooo.com) 或 [GitHub @Octo-o-o-o](https://github.com/Octo-o-o-o) 联系我。
