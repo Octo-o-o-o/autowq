@@ -21,6 +21,19 @@ class LearningTests(unittest.TestCase):
         autopilot.setup(self.c);feedback.setup(self.c);l.setup(self.c)
         self.bindings=bindings();self.settings={'region':'USA','universe':'TOP3000','delay':1,'decay':0}
 
+    def test_display_and_submission_settings_do_not_invalidate_research_baseline(self):
+        with patch('wq.autopilot.policy',return_value={'fixture':True}):
+            original=l.current_baseline(self.cfg)
+            for key in ('ui','notifications','brain_submission'):
+                self.cfg.data[key]={'changed':'fixture'}
+                self.assertEqual(original,l.current_baseline(self.cfg))
+            for key in ('models','brain_api','autopilot','debug_authorization','research_learning'):
+                old=copy.deepcopy(self.cfg.data.get(key))
+                self.cfg.data[key]={'changed':'fixture'}
+                self.assertNotEqual(original,l.current_baseline(self.cfg))
+                if old is None:self.cfg.data.pop(key)
+                else:self.cfg.data[key]=old
+
     def trial(self,key,ast=None,parent=None,settings=None):
         ast=ast or proposal()['ast'];settings=settings or self.settings
         ids=l.identities(ast,self.bindings,settings)

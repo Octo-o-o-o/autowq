@@ -196,7 +196,7 @@ def offer_submission(conn, cfg, cycle_id, alpha_id, report):
         return None
     quota = submission_quota(conn, cfg)
     now = util.now_iso()
-    if not quota['open']:
+    if not quota['open'] or cfg.get('brain_submission','standby_order',default='fifo') == 'evidence':
         conn.execute('INSERT INTO submission_standby VALUES(?,?,?,?,?)', (alpha_id, cycle_id, 'waiting', now, now))
         mark_standby_outcome(conn, cycle_id)
         return 'standby'
@@ -238,14 +238,23 @@ def sync_standby(conn, cfg):
     return actions
 
 
-def release_standby(conn, cfg):
+def _release_standby(conn, cfg):
     """限额窗口腾出空位后，把最早的备选提交入队。真正 POST 仍由提交任务重新检查官方结果。"""
     setup(conn)
     if not _authorized(cfg) or not submission_quota(conn, cfg)['open']:
         return None
     if conn.execute("SELECT 1 FROM tasks WHERE kind='brain_submission' AND status IN ('queued','claimed','running')").fetchone():
         return None
-    row = conn.execute("SELECT alpha_id, cycle_id FROM submission_standby WHERE state='waiting' ORDER BY created_at LIMIT 1").fetchone()
+    rows = conn.execute("SELECT alpha_id, cycle_id FROM submission_standby WHERE state='waiting' ORDER BY created_at,alpha_id").fetchall()
+    if cfg.get('brain_submission','standby_order',default='fifo') == 'evidence':
+        from . import submission_ranking
+        from .feedback import setup as feedback_setup
+        feedback_setup(conn)
+        def load(aid):
+            stored=conn.execute('SELECT report_json FROM research_feedback WHERE alpha_id=?',(aid,)).fetchone()
+            return source(conn,aid)[1], json.loads(stored[0]) if stored else {}
+        rows=submission_ranking.order(rows,load)
+    row = rows[0] if rows else None
     if not row:
         return None
     from .feedback import setup as feedback_setup
@@ -261,6 +270,20 @@ def release_standby(conn, cfg):
     enqueue(conn, cfg, row['alpha_id'], standby_review(alpha, report))
     conn.execute("UPDATE submission_standby SET state='queued', updated_at=? WHERE alpha_id=?", (util.now_iso(), row['alpha_id']))
     return row['alpha_id']
+
+
+
+def release_standby(conn, cfg):
+    setup(conn)
+    conn.execute('SAVEPOINT release_standby')
+    try:
+        conn.execute('UPDATE submission_standby SET updated_at=updated_at WHERE 0')
+        result = _release_standby(conn,cfg)
+        conn.execute('RELEASE release_standby')
+        return result
+    except BaseException:
+        conn.execute('ROLLBACK TO release_standby');conn.execute('RELEASE release_standby')
+        raise
 
 
 def enqueue(conn, cfg, alpha_id, review):

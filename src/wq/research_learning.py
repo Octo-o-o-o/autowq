@@ -55,7 +55,7 @@ def current_baseline(cfg):
     workflow_hash=hashlib.sha256(Path(cfg.resolve(workflow_path)).read_bytes()).hexdigest() if workflow_path else None
     source={str(p.relative_to(Path(__file__).parent)):hashlib.sha256(p.read_bytes()).hexdigest() for p in Path(__file__).parent.rglob('*.py')}
     return {'source':util.sha256_json(source),'policy':util.sha256_json(autopilot.policy(cfg)),
-            'models':util.sha256_json({'routing':cfg.get('routing',default={}), 'profiles':profile_hash,'workflow':workflow_hash,'config':util.sha256_json(cfg.data)}),
+            'models':util.sha256_json({'routing':cfg.get('routing',default={}), 'profiles':profile_hash,'workflow':workflow_hash,'config':util.sha256_json({k:v for k,v in cfg.data.items() if k not in ('ui','notifications','brain_submission')})}),
             'budget':util.sha256_json({k:cfg.get(k,default={}) for k in ('brain_api','autopilot','limits')}),
             'usable_definition':'latest_complete_feedback_no_validation_gaps_no_platform_blockers_v2'}
 

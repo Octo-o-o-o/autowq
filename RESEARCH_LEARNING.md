@@ -113,3 +113,18 @@ MCTS、BO、复杂 bandit、crossover、整体搬入第三方 miner、未经核�
 ## Deployment and rollback
 
 Run the full offline suite and build a clean wheel. Back up the live SQLite database with SQLite backup, config and runtime before deployment; wait for the runner lock and preserve pending remote requests. Install the exact wheel used in verification, compare all package files, run local sync/report, and check the real scheduler. Source tests do not prove market gains. Keep old runtime and database snapshots; disabling learning never deletes historical observations.
+
+
+## 增量研究与桌面进展（0.2.18）
+
+本次重新核对了本会话三个研究主题：Gold 后持续研究、生态借鉴和 Country 增量方向。上表覆盖已采纳的工程建议；15 条候选规则继续以限定语义、反例及证据资格实现，不把社区阈值升格为硬门禁。MCTS、BO、复杂 bandit、整体 miner 和 Numerai 仍为明确后置项。
+
+新增 `research_campaign` 保留 14 个方向：新闻 N1–N3、分析师 R1–R3、期权 O1–O3、向量 V1–V2、D0、TOP1000 与 TOPSP500。模板默认关闭并逐项列出缺失证据；没有真实语义、独立 scope 和原审查，不自动启动。H-V2 的逐事件加权仍不支持。首阶段最多 56 次预约，跨周总额 240 不代表已授权扩展，第 57 次预约仍被拒绝。
+
+`wq brain operator-evidence` 保存官方当前算子及 REGULAR scope；`field-evidence` 支持 `--region/--universe/--delay`，加 `--no-policy-update` 可仅保存核验材料。VECTOR 只开放有当前字段与算子合同的单叶 vec_avg/vec_sum，原复杂度和 review 仍生效。
+
+`brain_submission.standby_order=evidence` 可在完整且同条件的连续候选间排序；未知项隔断排序区间，已入队任务保持原状，默认仍为 FIFO。它不估计官方 Uniqueness。
+
+macOS 与 Windows 托盘新增「研究进展」：读取账本展示分别生效的授权期限、最新冻结实验、已知/未知成本、Campaign 预约及不明 POST、14 个方向的缺口。UI 及正式提交设置不再单独触发研究模型基线漂移；旧停止实验不会因此复活。
+
+尚需真实外部证据的部分：新闻时点/新鲜度方向、固定预测财期、期权聚合与缺失语义、VECTOR 事件单位，以及新市场日期的前瞻表现。采集元数据不等于完成真实模拟，离线测试不证明收益改善。用户侧仍需本人处理邀请、签约和实际现金/人工时间凭证；系统不能替代这些步骤。

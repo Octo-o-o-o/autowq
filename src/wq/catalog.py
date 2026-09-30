@@ -111,10 +111,15 @@ BINDING_OPERATORS = {'rank', 'reverse', 'abs', 'log', 'sign', 'sqrt', 'if_else',
                      'group_rank', 'group_zscore', 'group_neutralize'}
 
 
-def check_expression(expression, fields, group_field=False):
+def check_expression(expression, fields, group_field=False, vector_reduction=None):
     """绑定表达式只能引用声明的字段与已知算子；每个声明字段都必须出现；不允许负数参数。"""
     if not isinstance(expression, str) or not expression.strip():
         raise ValueError('缺表达式')
+    if vector_reduction is not None:
+        reducer = vector_reduction.get('reducer')
+        if group_field or reducer not in ('vec_avg','vec_sum') or len(fields) != 1 or not re.fullmatch(r'\s*'+re.escape(reducer)+r'\(\s*'+re.escape(fields[0])+r'\s*\)\s*', expression):
+            raise ValueError('VECTOR only supports one verified reducer around one field')
+        return
     if group_field:
         if expression.strip() != fields[0] or len(fields) != 1:
             raise ValueError('分组绑定的表达式必须就是该分组字段')
@@ -141,7 +146,7 @@ def mentions_field(text, fields):
 
 
 def add_role(policy_path, name, expression, fields, description, evidence_paths, cluster=None,
-             group_field=False, check=None):
+             group_field=False, check=None, vector_reduction=None):
     """把已核验字段登记为研究角色；写入 bindings 与 evidence_files，其他策略项不变。"""
     if not name or len(name) > ROLE_NAME_MAX or not name.replace('_', '').isalnum() or not name[0].isalpha():
         raise ValueError('角色名须为字母开头的标识符')
@@ -151,7 +156,7 @@ def add_role(policy_path, name, expression, fields, description, evidence_paths,
         raise ValueError('缺字段列表')
     if not isinstance(description, str) or len(description.strip()) < 8:
         raise ValueError('角色说明至少8字符，需写明它不代表什么')
-    check_expression(expression, fields, group_field)
+    check_expression(expression, fields, group_field, vector_reduction)
     policy = util.read_json(policy_path)
     if name in policy.get('bindings', {}):
         raise ValueError('角色已存在：' + name)
@@ -162,7 +167,7 @@ def add_role(policy_path, name, expression, fields, description, evidence_paths,
             raise ValueError('证据快照缺失或与策略设置不一致：' + path)
         if not doc.get('context'):
             raise ValueError('证据快照缺当前设置下的覆盖记录：' + path)
-        want = 'GROUP' if group_field else 'MATRIX'
+        want = 'GROUP' if group_field else 'VECTOR' if vector_reduction else 'MATRIX'
         if doc.get('field', {}).get('type') != want:
             raise ValueError(f"字段类型须为{want}：" + str(doc.get('field', {}).get('id')))
         snapshots[doc['field']['id']] = path
@@ -171,6 +176,9 @@ def add_role(policy_path, name, expression, fields, description, evidence_paths,
         raise ValueError('字段缺证据快照：' + ', '.join(missing))
     binding = {'expression': expression.strip(), 'fields': list(fields), 'description': description.strip(),
                'source': 'https://api.worldquantbrain.com/data-fields/' + fields[0]}
+    if vector_reduction:
+        binding['vector_reduction'] = vector_reduction
+        binding['output_type'] = 'MATRIX'
     if cluster: binding['cluster'] = cluster
     if group_field: binding['group_field'] = True
     candidate = json.loads(json.dumps(policy))
@@ -181,6 +189,11 @@ def add_role(policy_path, name, expression, fields, description, evidence_paths,
         digest = util.sha256_json(util.read_json(path))
         if path in known: known[path]['sha256'] = digest   # 本次登记即重新核验该快照
         else: candidate.setdefault('evidence_files', []).append({'path': path, 'sha256': digest})
+    if vector_reduction:
+        proof = vector_reduction.get('operator_evidence') or {}
+        if proof not in candidate['evidence_files']:
+            candidate['evidence_files'].append(proof)
+        validate_binding_scope(candidate, binding)
     candidate['verified_at'] = util.now_iso()
     if check: check(candidate)            # 完整策略校验通过后才落盘
     util.write_json(policy_path, candidate)
@@ -212,3 +225,52 @@ def search_scoped(doc, query, text=None, dataset=None, field_type='MATRIX', min_
             'results':found[:limit],'returned':min(len(found),limit),'truncated':len(found)>limit,
             'catalog_complete':doc.get('complete') is True,'queried_at':doc.get('queried_at'),
             'catalog_hash':util.sha256_json(doc),'no_match_is_exhaustive':not found and doc.get('complete') is True}
+
+
+def validate_binding_scope(policy, binding):
+    """Campaign roles and VECTOR leaves require scoped, hashed metadata and explicit semantics."""
+    evidence = {}
+    for proof in policy.get('evidence_files', []):
+        doc = util.read_json(proof['path'])
+        if util.sha256_json(doc) != proof['sha256']: raise ValueError('Binding evidence changed')
+        if isinstance(doc, dict) and doc.get('schema') == SNAPSHOT_SCHEMA:
+            evidence[doc.get('field', {}).get('id')] = doc
+    reduction = binding.get('vector_reduction')
+    check_expression(binding['expression'], binding['fields'], bool(binding.get('group_field')), reduction)
+    for field in binding['fields']:
+        doc = evidence.get(field, {})
+        query = query_from_settings(policy['settings'])
+        if doc.get('query') != query or not any(all(c.get(k) == query[k] for k in ('region','universe','delay')) for c in doc.get('context', [])):
+            raise ValueError('Binding field lacks matching scope evidence')
+        wanted = 'VECTOR' if reduction else 'GROUP' if binding.get('group_field') else 'MATRIX'
+        if doc.get('field', {}).get('type') != wanted: raise ValueError('Binding type mismatch; naked VECTOR is forbidden')
+        if reduction and not util.parse_iso(reduction['verified_at']) <= util.parse_iso(doc['queried_at']) <= util.now():
+            raise ValueError('VECTOR field snapshot predates verification')
+    if not reduction: return
+    if binding.get('output_type') != 'MATRIX': raise ValueError('VECTOR reduction output must be MATRIX')
+    for key in ('meaning','availability','missing'):
+        if not isinstance(reduction.get(key), str) or len(reduction[key].strip()) < 8:
+            raise ValueError('VECTOR reduction semantics missing: '+key)
+    import datetime as dt
+    start, end = util.parse_iso(reduction['verified_at']), util.parse_iso(reduction['valid_until'])
+    if start.tzinfo is None or end.tzinfo is None or not start <= util.now() < end or end-start > dt.timedelta(days=7):
+        raise ValueError('VECTOR evidence must be current and at most seven days')
+    proof = reduction.get('operator_evidence') or {}
+    if proof not in policy['evidence_files']: raise ValueError('VECTOR operator evidence not bound')
+    doc = util.read_json(proof['path'])
+    if util.sha256_json(doc) != proof['sha256']: raise ValueError('VECTOR operator evidence changed')
+    if doc.get('schema') != 'wq.operator-snapshot/v1' or doc.get('source') != 'https://api.worldquantbrain.com/operators':
+        raise ValueError('VECTOR operator snapshot provenance missing')
+    if not start <= util.parse_iso(doc['queried_at']) <= util.now(): raise ValueError('VECTOR operator evidence stale')
+    if not any(op.get('name') == reduction['reducer'] and 'REGULAR' in op.get('scope', []) for op in doc.get('operators', [])):
+        raise ValueError('VECTOR reducer unavailable for REGULAR')
+
+
+def operator_snapshot(client):
+    """Normalize the current official operator response without inventing capability scope."""
+    _, _, data = client.request('GET', '/operators')
+    rows = data if isinstance(data, list) else data.get('results') if isinstance(data, dict) else None
+    if not isinstance(rows, list) or not rows or not all(isinstance(r, dict) and isinstance(r.get('name'), str) and isinstance(r.get('scope'), list) for r in rows):
+        raise ValueError('Official operator response lacks explicit names/scopes')
+    return {'schema':'wq.operator-snapshot/v1','source':'https://api.worldquantbrain.com/operators',
+            'queried_at':util.now_iso(),'operators':rows}

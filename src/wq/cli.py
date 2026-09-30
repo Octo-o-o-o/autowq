@@ -12,6 +12,7 @@ import json
 import os
 import sys
 import time
+from pathlib import Path
 
 from . import contracts, dedup, importer, reconcile, report, runner, store, util
 from . import __version__
@@ -612,17 +613,27 @@ def cmd_brain(args):
             _out({'task_id':tid,'created':created,
                   'note':text(lang,'仅模拟，不提交 Alpha','Simulation only; no Alpha submission')})
             return OK if created else DUPLICATE
+        if args.action == 'operator-evidence':
+            from . import catalog
+            client = BrainClient(cfg.private_dir); client.preflight(cfg)
+            doc = catalog.operator_snapshot(client)
+            path = str(Path(cfg.private_dir) / 'operator-evidence.json')
+            util.write_json(path, doc); os.chmod(path, 0o600)
+            _out({'path':path, 'sha256':util.sha256_json(doc), 'count':len(doc['operators'])}); return OK
         if args.action in ('fields', 'field-evidence'):
             from . import catalog, autopilot
             query = catalog.query_from_settings(autopilot.policy(cfg)['settings'])
             if args.action == 'field-evidence':
+                for key in ('region','universe','delay'):
+                    value = getattr(args, key, None)
+                    if value is not None: query[key] = value
                 client = BrainClient(cfg.private_dir); client.preflight(cfg)
                 written = []
                 policy_path = cfg.resolve(cfg.get('autopilot', 'policy_file', default='config/autopilot-policy.json'))
                 for fid in args.field_id:
                     path = catalog.evidence_path(cfg.private_dir, fid, query)
                     util.write_json(path, catalog.field_snapshot(client, fid, query)); os.chmod(path, 0o600)
-                    rehashed = catalog.refresh_evidence_hash(policy_path, path)
+                    rehashed = catalog.refresh_evidence_hash(policy_path, path) if not args.no_policy_update else False
                     written.append({'field': fid, 'path': path, 'sha256': util.sha256_json(util.read_json(path)), 'policy_hash_refreshed': rehashed})
                 _out({'query': query, 'evidence': written,
                       'note': text(lang, '证据只在私有目录；用 wq policy add-role 登记角色',
@@ -660,7 +671,7 @@ def cmd_policy(args):
         evidence = args.evidence or [catalog.evidence_path(cfg.private_dir, f, query) for f in fields]
         try:
             binding = catalog.add_role(path, args.name, args.expression, fields, args.description, evidence, args.cluster, args.group_field,
-                                       check=autopilot.check_policy)
+                                       check=autopilot.check_policy, vector_reduction=util.read_json(args.vector_contract) if args.vector_contract else None)
         except ValueError as exc:
             _out({'error': text(lang, '未登记：', 'Not registered: ') + str(exc)}); return INVALID
         _out({'role': args.name, 'binding': binding,
@@ -820,6 +831,8 @@ def build_parser(lang=None) -> argparse.ArgumentParser:
     history_research.add_parser(sub, lang)
     from . import research_learning
     research_learning.add_parser(sub, lang)
+    from . import research_campaign
+    research_campaign.add_parser(sub, lang)
 
     sub.add_parser('help', help=text(lang, '显示命令帮助：wq help [命令]', 'Show command help: wq help [command]'))
     s=sub.add_parser('login', help=text(lang, '登录 BRAIN（含注册链接）', 'Sign in to BRAIN (includes the registration URL)'))
@@ -869,6 +882,9 @@ def build_parser(lang=None) -> argparse.ArgumentParser:
     b.add_argument('--min-coverage', type=float, default=0.0); b.add_argument('--limit', type=int, default=50); b.set_defaults(fn=cmd_brain)
     b=bs.add_parser('field-evidence', help=text(lang, '为字段生成当前设置下的证据快照', 'Capture evidence snapshots for fields under current settings'))
     b.add_argument('field_id', nargs='+'); b.set_defaults(fn=cmd_brain)
+    b.add_argument('--region'); b.add_argument('--universe'); b.add_argument('--delay', type=int, choices=(0,1))
+    b.add_argument('--no-policy-update', action='store_true', help='Save evidence without updating active policy hashes')
+    bs.add_parser('operator-evidence', help='Read official operator names and REGULAR scope evidence').set_defaults(fn=cmd_brain)
 
     s = sub.add_parser('policy', help=text(lang, '研究策略：查看角色、用已核验字段登记新角色',
                                                      'Research policy: inspect roles, register new roles from verified fields'))
@@ -883,6 +899,7 @@ def build_parser(lang=None) -> argparse.ArgumentParser:
     a.add_argument('--evidence', nargs='*', help=text(lang, '证据快照路径；默认按字段 ID 在私有目录查找',
                                                               'Evidence snapshot paths; defaults to private-dir lookup by field ID'))
     a.add_argument('--group-field', action='store_true')
+    a.add_argument('--vector-contract', help='Local JSON with verified single-field reducer semantics and operator evidence')
     a.set_defaults(fn=cmd_policy)
 
     s = sub.add_parser('config', help=text(lang, '查看或设置本机偏好（界面语言）', 'Inspect or change local preferences (interface language)'))

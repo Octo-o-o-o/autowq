@@ -417,6 +417,7 @@ def menu_model(state):
                      f"Standby Alphas ({state.get('standby', {}).get('count', '…')})"),
                 submission_items(state.get('standby') or {}, lang)),
         sep(),
+        submenu(text(lang, '研究进展', 'Research progress'), submission_items(state.get('research') or {}, lang)),
         submenu(text(lang, '设置', 'Settings'), settings_items(settings, lang)),
         sep(),
         *run_actions(st, lang),
@@ -494,7 +495,7 @@ class Tray:
     def call(self, act, arg=None, quiet=False):
         try:
             result = bridge.control(act, arg)
-            if act in ('status', 'settings', 'history', 'submissions', 'standby'):
+            if act in ('status', 'settings', 'history', 'submissions', 'standby', 'research'):
                 self.state[act] = result
             if act == 'update' and isinstance(result, dict) and result.get('update') and result.get('url'):
                 import webbrowser
@@ -562,7 +563,7 @@ class Tray:
             try:
                 self.call('status', quiet=True)
                 if ticks % 4 == 0:
-                    for act in ('history', 'submissions', 'standby', 'settings'):
+                    for act in ('history', 'submissions', 'standby', 'research', 'settings'):
                         self.call(act, quiet=True)
                     self.check_notifications()
                 self.refresh()

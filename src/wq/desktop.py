@@ -89,6 +89,10 @@ def next_models(conn, cfg, lang='zh'):
 def cycle_directive(conn, cycle, lang='zh'):
     """本轮预登记的研究指令：单角色基线 / 有限组合 / 自由探索。"""
     cid = cycle['cycle_id']
+    from . import research_campaign
+    campaign = research_campaign.assignment(conn, cid)
+    if campaign:
+        return text(lang, '增量研究 · ', 'Campaign · ') + campaign['hypothesis'] + ' · ' + campaign['phase']
     focus = store.get_flag(conn, f'autopilot_focus_{cid}')
     if focus:
         return text(lang, '单角色基线 · ', 'Single-role baseline · ') + focus
@@ -388,3 +392,58 @@ def standby(conn, lang='zh'):
                       text(lang, '表达式：', 'Expression: ') + (row['expression'] or unknown),
                       quota_note]})
     return {'entries': entries, 'count': len(entries)}
+
+
+def research(conn, cfg, lang='zh'):
+    """Read a consistent ledger snapshot without creating tables or changing research state."""
+    from . import autopilot, research_campaign, research_learning
+    entries = []
+    def add(zh, en, lines):
+        entries.append({'title': text(lang, zh, en), 'lines': lines})
+    p = autopilot.policy(cfg)
+    deadlines = [
+        ('研究策略', 'Research policy', p.get('valid_until')),
+        ('模型路由', 'Model routing', cfg.get('routing','authorized_until')),
+        ('BRAIN API', 'BRAIN API', cfg.get('brain_api','authorized_until')),
+        ('模型预算豁免', 'Model budget waiver', cfg.get('debug_authorization','expires_at')),
+        ('正式提交', 'Formal submission', cfg.get('brain_submission','authorized_until')),
+    ]
+    add('授权期限（北京时间）', 'Authorization deadlines (Beijing time)',
+        [text(lang,zh,en) + '：' + beijing(value,lang=lang) for zh,en,value in deadlines] +
+        [text(lang,'各授权分别生效；正式提交延期不会延长研究或模型授权。',
+                   'Each authorization is separate; extending submission does not extend research or models.')])
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    learning = [text(lang,'模式：','Mode: ') + ('enabled' if cfg.get('research_learning','enabled',default=False) else 'disabled')]
+    if 'learning_experiments' in tables:
+        exp = conn.execute('SELECT * FROM learning_experiments ORDER BY created_at DESC LIMIT 1').fetchone()
+        if exp:
+            doc = json.loads(exp['document_json'])
+            stop = conn.execute('SELECT reason FROM learning_experiment_stops WHERE experiment_id=?',(exp['experiment_id'],)).fetchone() if 'learning_experiment_stops' in tables else None
+            cycles = {r[0] for r in conn.execute('SELECT cycle_id FROM learning_assignments WHERE experiment_id=?',(exp['experiment_id'],))} if 'learning_assignments' in tables else set()
+            learning += [exp['experiment_id'], text(lang,'已分配轮次：','Allocated cycles: ') + f"{len(cycles)} / {doc['max_cycles']}"]
+            learning += [text(lang,'已停止：','Stopped: ') + stop[0]] if stop else [text(lang,'冻结实验状态以调度器准入检查为准。','Dispatch remains subject to the frozen experiment checks.')]
+            if {'tasks','attempts','agent_calls'} <= tables:
+                cost = research_learning.model_cost(conn,cycles)
+                learning += [text(lang,'已知模型成本：','Known model cost: ') + f"${cost['known_usd']:.4f}",
+                             text(lang,'已关联调用 / 成本未知调用：','Linked calls / calls with unknown cost: ') + f"{cost['linked_calls']} / {cost['unknown_cost_calls']}",
+                             text(lang,'未关联调用、人工时间和缺失成本不计为零。','Unlinked calls, human time and missing costs are not zero.')]
+    learning += [text(lang,'优越性未证实；后续市场日期与真实回执仍需持续积累。','Superiority is unproven; new market dates and real receipts are still needed.')]
+    add('自学习与成本', 'Learning and costs', learning)
+    if not p.get('campaign'): p = {**p, 'campaign': research_campaign.template(p)}
+    report = research_campaign.report(conn,p)
+    status = report.get('stop_reason') or text(lang,'有可执行机会，仍需原审查与额度检查','Executable opportunity; original review and quota checks remain')
+    add('增量研究预算', 'Campaign budget', [status,
+        text(lang,'已预约 / 首阶段上限：','Reserved / pilot cap: ') + f"{report['reserved']} / {report['pilot_cap']}",
+        text(lang,'已确认 POST / 发出状态不明：','Confirmed POSTs / uncertain dispatch: ') + f"{report['confirmed_posts']} / {report['dispatch_uncertain']}",
+        text(lang,'完整反馈 / 可提交候选：','Complete feedback / submission candidates: ') + f"{report['complete_feedback']} / {report['submission_candidates']}",
+        text(lang,'失败和 UNKNOWN 占用预约；复用不计新样本；第 57 个预约需另行批准。','Failed and UNKNOWN tasks retain reservations; reuse is not a new sample; reservation 57 requires separate approval.')])
+    for h in report['opportunities']:
+        label = text(lang,'待证据','Blocked') if h['state'] == 'blocked' else text(lang,'证据就绪','Evidence ready')
+        title = h['hypothesis_id'] + ' · ' + label
+        add(title,title,[h['claim'],h['reason'] or text(lang,'仍需当前授权与审查通过','Current authorization and review still required'),
+            f"{h['settings'].get('region')} / {h['settings'].get('universe')} / D{h['settings'].get('delay')}",
+            text(lang,'已分配轮次 / 已预约请求：','Allocated cycles / reserved requests: ') + f"{h['allocated_cycles']} / {h['reserved']}"])
+    order = cfg.get('brain_submission','standby_order',default='fifo')
+    add('备选提交顺序','Standby submission order',[text(lang,'同条件、完整证据的连续候选按质量与本地相关性排序；未知证据保留 FIFO 边界。','Continuous comparable candidates use quality and local correlation; unknown evidence preserves FIFO boundaries.') if order == 'evidence' else 'FIFO',
+        text(lang,'本地相关性不是官方 Uniqueness；已入队的提交不重排。','Local correlation is not official Uniqueness; queued submissions are not reordered.')])
+    return {'entries':entries,'count':len(entries),'campaign':report}

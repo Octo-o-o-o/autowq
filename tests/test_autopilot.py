@@ -230,6 +230,25 @@ class AutopilotTests(unittest.TestCase):
     def full_cycle(self):
         for _ in range(6):self.tick()
 
+    def test_country_campaign_preserves_reviewer_and_posts_only_reserved_candidate(self):
+        from wq import research_campaign as campaign, catalog
+        query=catalog.query_from_settings(self.p['settings'])
+        snap={'schema':catalog.SNAPSHOT_SCHEMA,'query':query,'context':[query],
+              'field':{'id':'returns','type':'MATRIX'},'queried_at':util.now_iso()}
+        proof=self.p['evidence_files'][0];util.write_json(proof['path'],snap);proof['sha256']=util.sha256_json(snap)
+        c=campaign.template(self.p);c['enabled']=True
+        h=c['hypotheses'][0];h.update(state='ready',reason='',required_roles=['daily_return'],
+            data_contract={'measurement':'Historical scalar proxy only','availability':'Available before configured delay',
+            'missing':'No missing values replaced by zero','source':'fixture source document','evidence':dict(proof),
+            'verified_at':'2026-01-01T00:00:00Z','valid_until':'2099-01-01T00:00:00Z'})
+        self.p['campaign']=c;self.save_policy()
+        self.full_cycle()
+        self.assertEqual(self.cycle()['state'],'closed');self.assertEqual(self.counter,2);self.assertEqual(self.posts,1)
+        self.assertEqual(campaign.assignment(self.c,1)['hypothesis'],'H-N1')
+        self.assertEqual(campaign.report(self.c,self.p)['reserved'],1)
+        self.assertIn('有界增量研究合同',(self.root/'job-1'/'prompt.txt').read_text())
+        self.assertIn('有界增量研究合同',(self.root/'job-2'/'prompt.txt').read_text())
+
     def test_two_cycles_resume_from_disk_and_real_state_transitions(self):
         self.tick();self.c.close();self.c=connect(self.cfg.db_path)
         for _ in range(5):self.tick()

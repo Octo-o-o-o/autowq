@@ -77,7 +77,8 @@ def check_policy(p):
     for name, b in bindings.items():
         if not isinstance(b, dict) or not isinstance(b.get('expression'),str) or not b.get('fields') or not b.get('source'):
             raise ValueError('字段绑定缺核验依据：'+name)
-        catalog.check_expression(b['expression'], b['fields'], bool(b.get('group_field')))
+        catalog.check_expression(b['expression'], b['fields'], bool(b.get('group_field')), b.get('vector_reduction'))
+        if b.get('vector_reduction'): catalog.validate_binding_scope(p, b)
         all_fields.update(b['fields'])
         if b.get('group_field'):
             if name not in research_dsl.GROUPS: raise ValueError('分组绑定名只允许 '+'/'.join(research_dsl.GROUPS)+'：'+name)
@@ -103,9 +104,17 @@ def check_policy(p):
     if not isinstance(p.get('evidence_files'),list) or not p['evidence_files']:
         raise ValueError('缺少真实目录证据文件')
     # 验收过的目录文件摘要防止静默替换；文件不向模型复制。
+    vector_fields = set()
     for doc in p['evidence_files']:
-        if util.sha256_json(util.read_json(doc['path'])) != doc['sha256']:
+        snapshot = util.read_json(doc['path'])
+        if util.sha256_json(snapshot) != doc['sha256']:
             raise ValueError('数据/运算符证据改变，需重新核验')
+        if isinstance(snapshot, dict) and (snapshot.get('field') or {}).get('type') == 'VECTOR':
+            vector_fields.add(snapshot['field']['id'])
+    for b in bindings.values():
+        if vector_fields.intersection(b['fields']): catalog.validate_binding_scope(p,b)
+    from . import research_campaign
+    research_campaign.validate(p)
     return p
 
 
@@ -1207,6 +1216,8 @@ def advance(conn,cfg,row,p):
         focus=store.get_flag(conn,f"autopilot_focus_{row['cycle_id']}")
         if focus and (not isinstance(candidate,dict) or research_dsl.roles_used(candidate.get('ast'))!=[focus]):
             raise ValueError('单角色基线实验只能使用聚焦角色：'+focus)
+        from . import research_campaign
+        research_campaign.validate_candidate(conn,row['cycle_id'],p,candidate)
         paused=set(p.get('paused_clusters') or [])
         if paused and not focus and isinstance(candidate,dict):
             bad=[r for r in research_dsl.roles_used(candidate.get('ast')) if p['bindings'].get(r,{}).get('cluster') in paused]
@@ -1227,7 +1238,10 @@ def advance(conn,cfg,row,p):
         history=[{'cycle':r[0],'candidate':json.loads(r[1])} for r in conn.execute('SELECT cycle_id,candidate_json FROM research_cycles WHERE candidate_json IS NOT NULL AND cycle_id!=? ORDER BY cycle_id DESC LIMIT 40',(row['cycle_id'],))]
         history.append({'title':'基线机制：经营现金流相对正资产的截面强度排名','note':'平滑该基线本身不构成独立新机制；需要额外可证伪信息，不提供成绩'})
         solo=routing.preset_is_solo(cfg,routing.active_preset(conn,cfg))
-        rt=make_job(conn,cfg,row['cycle_id'],'review',review_prompt(candidate,history,feedback.model_context(conn) if cfg.get('research_feedback','enabled') else None,public_plan,p['bindings']),[] if solo else [provider(conn,t['task_id'])],None if solo else alternate_order(cfg,row['cycle_id'],'review'))
+        review_text=review_prompt(candidate,history,feedback.model_context(conn) if cfg.get('research_feedback','enabled') else None,public_plan,p['bindings'])
+        allocation=research_campaign.assignment(conn,row['cycle_id'])
+        if allocation: review_text += research_campaign.prompt(p,allocation)
+        rt=make_job(conn,cfg,row['cycle_id'],'review',review_text,[] if solo else [provider(conn,t['task_id'])],None if solo else alternate_order(cfg,row['cycle_id'],'review'))
         conn.execute("UPDATE research_cycles SET state='reviewing',review_task=? WHERE cycle_id=?",(rt,row['cycle_id']))
         event(conn,row['cycle_id'],'review_enqueued',rt)
     else:
@@ -1301,6 +1315,9 @@ def tick(conn,cfg):
         used=sum(util.iso_week(util.parse_iso(r[0]))==util.iso_week(now) for r in conn.execute('SELECT started_at FROM brain_runs'))
         if used>=int(cfg.get('limits','sims_per_week',default=24)):
             message(conn,'达到平台本地周派发上限；下周自动检查');return
+        from . import research_campaign
+        campaign_on = bool((p.get('campaign') or {}).get('enabled'))
+        if campaign_on: research_campaign.select(conn,p)
         data=routing.catalog(cfg);preset=data['presets'][routing.active_preset(conn,cfg,data)]
         available={role:[n for n in preset['routes'][role] if not routing._unavailable(conn,cfg,n)] for role in ('research','review')}
         solo=preset.get('solo')
@@ -1327,6 +1344,7 @@ def tick(conn,cfg):
         conn.execute('BEGIN IMMEDIATE')
         cur=conn.execute("INSERT INTO research_cycles(state,policy_json,policy_hash,created_at,updated_at) VALUES('researching',?,?,?,?)",(json.dumps(p),util.sha256_json(p),util.now_iso(),util.now_iso()))
         cid=cur.lastrowid
+        allocation=research_campaign.allocate(conn,p,cid) if campaign_on else None
         once=store.get_flag(conn,'preset_once')
         if once:
             # 临时预设：绑定到本轮并递减剩余轮数；用尽后 active_preset 自动回到永久预设。
@@ -1337,7 +1355,7 @@ def tick(conn,cfg):
             else: store.set_flag(conn,'preset_once','');store.set_flag(conn,'preset_once_cycles','')
             event(conn,cid,'preset_once',once if left<=0 else f'{once}（临时，剩余 {left} 轮）')
         from . import feedback
-        context=None;public_plan=None;focus=next_focus_role(conn,p)
+        context=None;public_plan=None;focus=None if allocation else next_focus_role(conn,p)
         from . import workflow
         if cfg.get('research_feedback','enabled') and workflow.stage_enabled(cfg,'feedback'):
             feedback.setup(conn)
@@ -1347,7 +1365,7 @@ def tick(conn,cfg):
             # 组合轮与自由探索轮交替：上一轮已是组合实验时，本轮不再登记组合，保证新角色继续被探测。
             previous=conn.execute('SELECT cycle_id FROM research_cycles WHERE cycle_id<? ORDER BY cycle_id DESC LIMIT 1',(cid,)).fetchone()
             previous_was_plan=bool(previous and conn.execute('SELECT 1 FROM combination_plans WHERE cycle_id=?',(previous[0],)).fetchone())
-            plan=feedback.next_combination(conn,combo['max_plans'],current_policy=p) if combo['enabled'] and not previous_was_plan and not focus else None
+            plan=feedback.next_combination(conn,combo['max_plans'],current_policy=p) if combo['enabled'] and not previous_was_plan and not focus and not allocation else None
             if plan:
                 conn.execute('INSERT INTO combination_plans VALUES(?,?,?,?)',(plan['pair_key'],cid,json.dumps(plan),util.now_iso()))
                 public_plan={k:plan[k] for k in ('parent_cycles','ast','experiment')}
@@ -1355,7 +1373,9 @@ def tick(conn,cfg):
             store.set_flag(conn,f'autopilot_focus_{cid}',focus)
             event(conn,cid,'focus_role',focus)
         order=alternate_order(cfg,cid,'research')
-        tid=make_job(conn,cfg,cid,'research',generate_prompt(conn,context,public_plan,p['bindings'],focus,(p.get('paused_clusters') or None) if not focus else None,role_crowding(cfg,p),shadow_context(conn)),None,order)
+        research_prompt=generate_prompt(conn,context,public_plan,p['bindings'],focus,(p.get('paused_clusters') or None) if not focus else None,role_crowding(cfg,p),shadow_context(conn))
+        if allocation: research_prompt += research_campaign.prompt(p,allocation)
+        tid=make_job(conn,cfg,cid,'research',research_prompt,None,order)
         conn.execute('UPDATE research_cycles SET research_task=? WHERE cycle_id=?',(tid,cid))
         if order: event(conn,cid,'route_plan',json.dumps({'research_preferred':order[0],'review_preferred':order[1],'parity':'odd' if cid%2 else 'even'}))
         event(conn,cid,'research_enqueued',tid);conn.commit()

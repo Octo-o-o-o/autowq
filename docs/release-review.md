@@ -93,3 +93,15 @@ Added all-closed-cycle diagnostic snapshots, manual/idle periodic review, resear
 - `desktop_control` 调度操作按平台分流（launchctl vs schtasks）；Windows 未注册任务时 start 明确报错要求先跑 setup。
 - 队列核心可移植化：顶层 `import fcntl` 改平台分支（msvcrt.locking）；三处 `os.killpg` 统一为 `util.kill_tree`（Windows taskkill /T，异常不再中断 pause/超时流程）；`store.pid_alive` 在 Windows 用 tasklist（`os.kill(pid,0)` 在 Windows 是发 CTRL_C_EVENT，不能用于探活）。
 - 验证：全量 pytest 489 通过、2 项可选 Docker 跳过（test_onboarding 1 项失败为既有环境问题，已在 HEAD 工作树复现同样失败）；pystray 菜单构建/模拟点击/勾选求值在临时 venv 冒烟通过；macOS 控制桥实测 status/settings 正常、菜单栏应用持续运行。无 Windows 实机：schtasks/注册表/通知实测未做，文档已标注实验性与首次运行建议。
+
+
+## 0.2.18 research and desktop follow-up
+
+The accepted research recommendations are mapped in `RESEARCH_LEARNING.md`.
+Country opportunities remain evidence-gated; no additional live simulation or
+claim of market superiority is implied. The tray reads the existing ledger,
+including separate authorization deadlines, experiment stops, costs, reservation
+counts and all 14 opportunity blockers. Source tests: 732 run, 730 passed, two
+optional Docker tests skipped locally. Swift typecheck passed on macOS.
+Release packaging, installation and public artifact checks are recorded separately.
+CI DMGs remain workflow artifacts to protect notarized public downloads.

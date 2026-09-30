@@ -79,6 +79,12 @@ def compile_ast(ast, bindings, profile='proposal'):
             if set(node) != {'op', 'name'} or name not in bindings or bindings[name].get('group_field'):
                 raise ValueError('字段角色不在已核验范围')
             spec = bindings[name]
+            if spec.get('vector_reduction'):
+                from . import catalog
+                catalog.check_expression(spec['expression'],spec['fields'],False,spec['vector_reduction'])
+                if depth+1 > limits['depth'] or len(nodes) >= limits['nodes']:
+                    raise ValueError('VECTOR reducer exceeds AST node/depth limit')
+                nodes.append({'op':'vector_reduction'})
             fields.update(spec['fields']); signature.append('field:' + name); roles.add(name)
             return spec['expression']
         if op in UNARY:

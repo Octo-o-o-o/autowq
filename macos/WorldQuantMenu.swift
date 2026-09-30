@@ -130,6 +130,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let submissions = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     let standby = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     var standbyMenu = NSMenu()
+    let research = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    var researchMenu = NSMenu()
     let tick = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     let nextAt = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     let researchModel = NSMenuItem(title: "", action: nil, keyEquivalent: "")
@@ -428,7 +430,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
         if !skipLaunchBecauseBusy { perform("launch") }
         perform("identity-refresh")
-        perform("history"); perform("submissions"); perform("standby"); perform("notifications"); perform("settings")
+        perform("history"); perform("submissions"); perform("standby"); perform("research"); perform("notifications"); perform("settings")
         if timer == nil {
             timer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in self?.refresh() }
         }
@@ -445,7 +447,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func buildMainMenu() {
         // 语言切换后整棵静态菜单按当前 lang 重建；动态数据由后续 fill* 回填。
         for row in [accountRow, brainRow, headline, detail, tick, nextAt, researchModel, reviewModel,
-                    cycles, submissions, standby, launchRow, notifyRow, autoSubmitRow, submissionRow,
+                    cycles, submissions, standby, research, launchRow, notifyRow, autoSubmitRow, submissionRow,
                     activateRow, activateSep, cycleRow, powerRow] {
             detach(row)
         }
@@ -481,7 +483,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         historyMenu = NSMenu(title: t("轮次历史", "Cycle history"))
         submissionsMenu = NSMenu(title: t("已提交 Alpha", "Submitted Alphas"))
         standbyMenu = NSMenu(title: t("备选 Alpha", "Standby Alphas"))
-        for (row, submenu) in [(cycles, historyMenu), (submissions, submissionsMenu), (standby, standbyMenu)] {
+        researchMenu = NSMenu(title: t("研究进展", "Research progress"))
+        research.title = t("研究进展", "Research progress")
+        for (row, submenu) in [(research, researchMenu), (cycles, historyMenu), (submissions, submissionsMenu), (standby, standbyMenu)] {
             submenu.autoenablesItems = false; submenu.delegate = self
             submenu.addItem(info(t("正在读取本地账本…", "Reading the local ledger…")))
             row.submenu = submenu; row.isEnabled = true; menu.addItem(row)
@@ -586,6 +590,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if opened === historyMenu { load("history") }
         else if opened === submissionsMenu { load("submissions") }
         else if opened === standbyMenu { load("standby") }
+        else if opened === researchMenu { load("research") }
         else if opened === settingsMenu { updateActivateRow(); load("settings") }
         else if opened === menu { refresh() }
     }
@@ -690,7 +695,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func fill(_ kind: String, _ response: [String: Any]) {
-        let target = kind == "history" ? historyMenu : (kind == "standby" ? standbyMenu : submissionsMenu)
+        let target = kind == "research" ? researchMenu : (kind == "history" ? historyMenu : (kind == "standby" ? standbyMenu : submissionsMenu))
         target.removeAllItems()
         let entries = response["entries"] as? [[String: Any]] ?? []
         if entries.isEmpty { target.addItem(info(t("暂无记录", "No records"))) }
@@ -715,7 +720,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else {
             if kind == "standby" {
                 standby.title = t("备选 Alpha（\(entries.count)）", "Standby Alphas (\(entries.count))")
-            } else {
+            } else if kind == "submissions" {
                 submissions.title = t("已提交 Alpha（\(entries.count)）", "Submitted Alphas (\(entries.count))")
             }
             for entry in entries {
@@ -916,7 +921,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         perform("provider-add", spec, env: env)
     }
     func perform(_ action: String, _ arg: String? = nil, env: [String: String] = [:]) {
-        let readOnly = ["status", "history", "submissions", "standby", "settings", "notifications", "identity-refresh"].contains(action)
+        let readOnly = ["status", "history", "submissions", "standby", "research", "settings", "notifications", "identity-refresh"].contains(action)
         if loading.contains(action) || (!readOnly && actionBusy) { return }
         loading.insert(action)
         if !readOnly {
@@ -951,8 +956,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 if !ok {
                     let error = response["error"] as? String ?? self.t("读取失败", "Read failed")
                     if action == "identity-refresh" { return }
-                    if action == "history" || action == "submissions" || action == "standby" {
-                        let target = action == "history" ? self.historyMenu : (action == "standby" ? self.standbyMenu : self.submissionsMenu)
+                    if action == "history" || action == "submissions" || action == "standby" || action == "research" {
+                        let target = action == "research" ? self.researchMenu : (action == "history" ? self.historyMenu : (action == "standby" ? self.standbyMenu : self.submissionsMenu))
                         target.removeAllItems(); target.addItem(self.block([error])); return
                     }
                     self.fetched["settings"] = nil
@@ -965,7 +970,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                         let alert = NSAlert(); alert.messageText = self.t("操作未完成", "Action failed"); alert.informativeText = error; alert.runModal()
                     }
                 } else if action == "quit-after-cycle" || action == "quit-now" { NSApp.terminate(nil)
-                } else if action == "history" || action == "submissions" || action == "standby" { self.fill(action, response)
+                } else if action == "history" || action == "submissions" || action == "standby" || action == "research" { self.fill(action, response)
                 } else if action == "update" {
                     let message = response["message"] as? String ?? self.t("检查更新失败", "Update check failed")
                     self.alert("WorldQuant", message)

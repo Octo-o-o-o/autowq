@@ -761,10 +761,12 @@ def control(action, arg=None):
             return {'message': text(lang, f'每日轮数上限已设为 {value}；按 UTC 日计。', f'Daily cycle limit set to {value} (UTC days).')}
         return {'message': text(lang, '已取消累计轮数上限。', 'Total cycle limit removed.') if value is None
                 else text(lang, f'累计轮数上限已设为 {value}。', f'Total cycle limit set to {value}.')}
-    if action in ('history', 'submissions', 'standby'):
+    if action in ('history', 'submissions', 'standby', 'research'):
         cfg = _cfg()
         conn = desktop.connect_readonly(cfg)
         try:
+            if action == 'research':
+                return desktop.research(conn, cfg, lang)
             if action == 'history':
                 return desktop.history(conn, cfg, lang)
             if action == 'standby':
