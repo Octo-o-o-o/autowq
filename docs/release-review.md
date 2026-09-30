@@ -105,3 +105,10 @@ counts and all 14 opportunity blockers. Source tests: 732 run, 730 passed, two
 optional Docker tests skipped locally. Swift typecheck passed on macOS.
 Release packaging, installation and public artifact checks are recorded separately.
 CI DMGs remain workflow artifacts to protect notarized public downloads.
+
+Native macOS follow-up: the progress window was exercised through real UI,
+including reopen, refresh, scrolling, the tray menu, history, accepted and standby
+lists, settings and English/Chinese round-trip. Two UI defects found during the
+walkthrough (initial window language and the menu anchor) were fixed before release.
+Active research was preserved; cancel/stop and new platform POSTs were not invoked
+as UI smoke tests. Windows physical UI remains unverified.

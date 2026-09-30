@@ -125,6 +125,6 @@ Run the full offline suite and build a clean wheel. Back up the live SQLite data
 
 `brain_submission.standby_order=evidence` 可在完整且同条件的连续候选间排序；未知项隔断排序区间，已入队任务保持原状，默认仍为 FIFO。它不估计官方 Uniqueness。
 
-macOS 与 Windows 托盘新增「研究进展」：读取账本展示分别生效的授权期限、最新冻结实验、已知/未知成本、Campaign 预约及不明 POST、14 个方向的缺口。UI 及正式提交设置不再单独触发研究模型基线漂移；旧停止实验不会因此复活。
+macOS 与 Windows 托盘新增「研究进展」；macOS 另有可刷新、选择文字的独立窗口，再次打开 App 可显示：读取账本展示分别生效的授权期限、最新冻结实验、已知/未知成本、Campaign 预约及不明 POST、14 个方向的缺口。UI 及正式提交设置不再单独触发研究模型基线漂移；旧停止实验不会因此复活。
 
 尚需真实外部证据的部分：新闻时点/新鲜度方向、固定预测财期、期权聚合与缺失语义、VECTOR 事件单位，以及新市场日期的前瞻表现。采集元数据不等于完成真实模拟，离线测试不证明收益改善。用户侧仍需本人处理邀请、签约和实际现金/人工时间凭证；系统不能替代这些步骤。
