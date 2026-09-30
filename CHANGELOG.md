@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.21
+
+- Menu-bar app UI refresh: shared design tokens (4pt spacing grid, five-level type scale, semantic badge colors), wrapping menu rows that no longer truncate long status text, and a card-based Research progress window rebuilt on Auto Layout with a header toolbar and elastic spacer.
+- Language switches now rebuild every list submenu instead of potentially leaving stale titles; alert accessory views use fixed frames where NSStackView sizing was unreliable.
+- macOS-only release; engine behavior unchanged.
+
 ## 0.2.20
 
 - First-run wizard opens with a three-screen intro: how the loop turns idle subscription tokens (free APIs and self-hosted models too) into gated BRAIN research, the road from sign-up to Gold to the consultant track, and a starting-point choice — already-Gold/consultant users skip newcomer registration guidance (persisted as onboarding.user_stage; BRAIN login is still required because the loop runs under their account).
