@@ -54,6 +54,7 @@
       "featureList": [
         "异渠道审查：研究与审查渠道强制分离",
         "逐渠道预算与授权闸门，默认全关",
+        "多泳道并行研究：多条泳道并行推进研究→审查→模拟，同一渠道同一时刻只跑一个调用，模拟与提交保持串行",
         "本地 SQLite 账本与真实结果诊断",
         "提交前独立验收门禁",
         "金牌后的持续研究框架：有界补证、晚到重评、证据回流",
@@ -152,10 +153,10 @@
     <div class="pillar"><div class="k">方便</div><div class="d">开箱即用，有订阅的 Agent 就能跑</div></div>
     <div class="pillar"><div class="k">高质量</div><div class="d">异渠道审查 + 提交前验收门禁</div></div>
     <div class="pillar"><div class="k">零增量成本</div><div class="d">跑在订阅 token 富余量里，免费 API 也能起步</div></div>
-    <div class="pillar"><div class="k">可见</div><div class="d">轮次、预算、进度全在托盘</div></div>
+    <div class="pillar"><div class="k">可见</div><div class="d">每条泳道的轮次、渠道配对、预算全在托盘</div></div>
     <div class="pillar"><div class="k">可控制</div><div class="d">预算、授权、暂停随时在手</div></div>
     <div class="pillar"><div class="k">安全</div><div class="d">状态留在本地账本，闸门默认关闭</div></div>
-    <div class="pillar"><div class="k">开源</div><div class="d">Apache-2.0 · 0.2.20 共 809 项工程测试</div></div>
+    <div class="pillar"><div class="k">开源</div><div class="d">Apache-2.0 · 871 项工程测试</div></div>
   </div>
 </section>
 
@@ -215,10 +216,10 @@
   <div class="principles rise">
     <div class="p"><div class="idx">STEP 1</div><h3>跑一次首次向导</h3><p>检测你已订阅的 Agent CLI、按你的选择生成配置、调起 BRAIN 与渠道登录——就是上面那段演示，之后不用再做。</p></div>
     <div class="p"><div class="idx">STEP 2</div><h3>设定预算与期限</h3><p>在你的预算、你的授权期限内启用自动研究。模型、研究、提交默认全关，你显式打开才跑。</p></div>
-    <div class="p"><div class="idx">STEP 3</div><h3>每轮自动循环</h3><p>提出假设 → 异渠道审查 → 有限回测。研究渠道与审查渠道强制不同，减少自说自话。</p></div>
+    <div class="p"><div class="idx">STEP 3</div><h3>每轮自动循环</h3><p>提出假设 → 异渠道审查 → 有限回测。研究渠道与审查渠道强制不同；多条泳道并行跑，模拟与提交仍逐条串行。</p></div>
     <div class="p"><div class="idx">STEP 4</div><h3>看真实结果</h3><p>轮次历史、真实回执、失败与 UNKNOWN 如实记账；失败的候选能查到原因，不会静默重来。</p></div>
     <div class="p"><div class="idx">STEP 5</div><h3>过验收再提交</h3><p>合格候选先过独立的提交前验收，再核对平台回执——然后进入下一轮，把圈再缩一圈。</p></div>
-    <div class="p"><div class="idx">全程可见</div><h3>一切都在托盘里</h3><p>当前轮次、下轮研究 / 审查渠道、已提交 Alpha、真实回执与异常阻塞，随时可查、可暂停。</p></div>
+    <div class="p"><div class="idx">全程可见</div><h3>一切都在托盘里</h3><p>每条泳道的轮次、渠道配对与冷却、下轮研究 / 审查渠道、已提交 Alpha、真实回执与异常阻塞，随时可查、可暂停、可按泳道取消。</p></div>
   </div>
   <p class="fineprint">Gold 由 WorldQuant 平台按 Alpha 与 OS 表现持续累计判定，没有写死的天数，软件里也没有「冲金牌模式」开关。下面的账本是作者个人的历史案例，供参考，不代表人人如此。</p>
 </section>

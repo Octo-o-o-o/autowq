@@ -54,6 +54,7 @@
       "featureList": [
         "Cross-provider review: research and review channels are forced apart",
         "Per-provider budget and authorization gates, all off by default",
+        "Multi-lane research: parallel lanes each run research → review → simulation; one call per provider at a time, simulation and submission stay serial",
         "Local SQLite ledger with real-outcome diagnostics",
         "Independent pre-submission acceptance gates",
         "Continuous-research framework after Gold: bounded evidence collection, late reassessment, findings that feed the next round",
@@ -152,10 +153,10 @@
     <div class="pillar"><div class="k">Easy</div><div class="d">Out of the box; your subscribed agents suffice</div></div>
     <div class="pillar"><div class="k">Quality</div><div class="d">Cross-provider review + submission gates</div></div>
     <div class="pillar"><div class="k">$0 extra</div><div class="d">Runs on idle subscription tokens; free API tiers work too</div></div>
-    <div class="pillar"><div class="k">Visible</div><div class="d">Cycles, budget, progress — all in the tray</div></div>
+    <div class="pillar"><div class="k">Visible</div><div class="d">Per-lane cycles, provider pairs, budget — all in the tray</div></div>
     <div class="pillar"><div class="k">Control</div><div class="d">Budgets, authorization, pause — always yours</div></div>
     <div class="pillar"><div class="k">Safe</div><div class="d">State stays in a local ledger; gates closed by default</div></div>
-    <div class="pillar"><div class="k">Open</div><div class="d">Apache-2.0 · 809 engineering tests on 0.2.20</div></div>
+    <div class="pillar"><div class="k">Open</div><div class="d">Apache-2.0 · 871 engineering tests</div></div>
   </div>
 </section>
 
@@ -215,10 +216,10 @@
   <div class="principles rise">
     <div class="p"><div class="idx">STEP 1</div><h3>Run the wizard once</h3><p>It detects the agent CLIs you already subscribe to, writes config from your choices and launches BRAIN + provider logins — the demo above. You never repeat it.</p></div>
     <div class="p"><div class="idx">STEP 2</div><h3>Set budget &amp; window</h3><p>Enable research inside your own budget and authorization window. Models, research and submission are all off by default; nothing runs until you say so.</p></div>
-    <div class="p"><div class="idx">STEP 3</div><h3>Every cycle, automated</h3><p>Hypothesis → cross-provider review → bounded simulation. Research and review channels are forced apart, so the loop can't grade its own homework.</p></div>
+    <div class="p"><div class="idx">STEP 3</div><h3>Every cycle, automated</h3><p>Hypothesis → cross-provider review → bounded simulation. Research and review channels are forced apart; lanes run in parallel while simulation and submission stay serial.</p></div>
     <div class="p"><div class="idx">STEP 4</div><h3>Read real outcomes</h3><p>Cycle history, real receipts, failures and UNKNOWNs are all recorded as-is; failed candidates carry their reasons and never silently retry.</p></div>
     <div class="p"><div class="idx">STEP 5</div><h3>Gate, then submit</h3><p>Qualified candidates pass an independent pre-submission acceptance gate, then you verify the platform receipt — and the next cycle tightens the loop again.</p></div>
-    <div class="p"><div class="idx">ALWAYS ON</div><h3>Everything in the tray</h3><p>Current cycle, next research / review providers, submitted alphas, real receipts and blocked states — visible and pausable at any moment.</p></div>
+    <div class="p"><div class="idx">ALWAYS ON</div><h3>Everything in the tray</h3><p>Per-lane cycles, provider pairs and cooldowns, next research / review providers, submitted alphas, real receipts and blocked states — visible, pausable, cancellable per lane.</p></div>
   </div>
   <p class="fineprint">Gold is awarded by the WorldQuant platform as alphas and OS performance accumulate; there is no fixed number of days and no "Gold mode" switch in the software. The ledger below is the author's personal history, shared for reference — not a typical outcome.</p>
 </section>
