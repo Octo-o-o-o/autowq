@@ -460,6 +460,15 @@ def settings_snapshot(cfg, conn, lang='zh'):
                  for name, definition in data['providers'].items()]
     active = routing.active_preset(conn, cfg, data)
     routes = (data['presets'].get(active) or {}).get('routes') or {}
+    active_preset_def = data['presets'].get(active) or {}
+    lane_pair_options = []
+    for research in routes.get('research') or []:
+        for review in routes.get('review') or []:
+            if not active_preset_def.get('solo') and routing.same_channel(data, research, review):
+                continue
+            lane_pair_options.append({'research': research, 'review': review,
+                                      'label': f"{labels.get(research, research)} → {labels.get(review, review)}"})
+    from wq import autopilot as _autopilot
     return {'active_preset': active,
             'research_provider': (routes.get('research') or [''])[0],
             'review_provider': (routes.get('review') or [''])[0],
@@ -474,6 +483,8 @@ def settings_snapshot(cfg, conn, lang='zh'):
             'interval_s': cfg.get('autopilot', 'interval_s', default=3600),
             'concurrent_lanes': cfg.get('autopilot', 'concurrent_lanes', default=1),
             'lane_presets': [1, 2, 3, 4],
+            'lane_pins': {int(k): v for k, v in _autopilot.lane_pins(cfg).items()},
+            'lane_pair_options': lane_pair_options,
             'max_cycles_per_day': cfg.get('autopilot', 'max_cycles_per_day', default=4),
             'max_cycles_total': cfg.get('autopilot', 'max_cycles_total'),
             'experiment': _experiment_budget(conn),
@@ -747,6 +758,49 @@ def control(action, arg=None):
                                         'On: the next time this app launches, automatic research starts.')}
             return {'message': text(lang, '已关闭：下次启动会保持退出时的暂停，直到手动开始。',
                                     'Off: the next launch stays paused until you start it.')}
+        if key == 'lane_pin':
+            # config=lane_pin=<泳道号>:<研究渠道>:<审查渠道> 或 lane_pin=<泳道号>:off
+            lane_s, _, pair_s = (raw or '').partition(':')
+            try:
+                lane_no = int(lane_s)
+            except ValueError:
+                lane_no = 0
+            if not 1 <= lane_no <= 8:
+                raise ValueError(text(lang, '泳道号需为 1–8', 'Lane number must be 1–8'))
+            if not cfg.path:
+                raise RuntimeError(text(lang, '未找到 config/config.json，无法保存设置', 'config/config.json not found; cannot save settings'))
+            current = json.loads(Path(cfg.path).read_text(encoding='utf-8'))
+            pins = (current.get('autopilot') or {}).get('lane_pins') or {}
+            slot = str(lane_no - 1)
+            if pair_s == 'off' or not pair_s:
+                pins.pop(slot, None)
+                _write_config_values(cfg.path, 'autopilot', {'lane_pins': pins or None})
+                return {'message': text(lang, f'泳道{lane_no}已恢复自动错开渠道。', f'Lane {lane_no} is back to automatic staggering.')}
+            research, _, review = pair_s.partition(':')
+            try:
+                data = routing.catalog(cfg)
+            except ValueError as exc:
+                raise ValueError(text(lang, '路由预设不可用，无法固定泳道：', 'Routing presets unavailable; cannot pin lane: ') + str(exc)[:120])
+            try:
+                conn = desktop.connect_readonly(cfg)
+                try:
+                    preset = data['presets'].get(routing.active_preset(conn, cfg, data))
+                finally:
+                    conn.close()
+            except sqlite3.OperationalError as exc:
+                raise ValueError(text(lang, '账本暂不可读，无法固定泳道：', 'Ledger unreadable; cannot pin lane: ') + str(exc)[:120])
+            if preset is None:
+                raise ValueError(text(lang, '当前预设不存在，无法固定泳道', 'The active preset is missing; cannot pin the lane'))
+            valid = {r for r in (preset.get('routes') or {}).get('research') or []}
+            valid_v = {v for v in (preset.get('routes') or {}).get('review') or []}
+            if research not in valid or review not in valid_v:
+                raise ValueError(text(lang, '固定渠道必须在当前预设的研究/审查路由中', 'Pinned providers must be in the active preset routes'))
+            if not preset.get('solo') and routing.same_channel(data, research, review):
+                raise ValueError(text(lang, '研究与审查必须不同渠道', 'Research and review must be different channels'))
+            pins[slot] = {'research': research, 'review': review}
+            _write_config_values(cfg.path, 'autopilot', {'lane_pins': pins})
+            return {'message': text(lang, f'泳道{lane_no}已固定为 {research} → {review}；下一次该泳道建轮生效，渠道不可用时该泳道等待而不换对。',
+                                    f'Lane {lane_no} pinned to {research} → {review}; applies to its next cycle, and the lane waits instead of substituting when a provider is unavailable.')}
         if key == 'notifications':
             if raw not in ('on', 'off'):
                 raise ValueError(text(lang, '通知开关只接受 on/off', 'The notifications switch accepts on/off only'))

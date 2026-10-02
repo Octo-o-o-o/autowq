@@ -345,6 +345,7 @@ def settings_items(se, lang):
                 + [radio(text(lang, zh, en), 'config', f'concurrent_lanes={value}', se.get('concurrent_lanes') == value)
                    for value, (zh, en) in LANES]
                 + _current_note([(v, 0) for v, _ in LANES], se.get('concurrent_lanes'), text(lang, '条', 'lanes'), lang)),
+        submenu(text(lang, '泳道固定', 'Lane pinning'), lane_pin_items(se, lang)),
         submenu(text(lang, '每日轮数上限', 'Daily cycle limit'),
                 [radio(text(lang, zh, en), 'config', f'max_cycles_per_day={value}', se.get('max_cycles_per_day') == value)
                  for value, (zh, en) in DAILIES]
@@ -373,6 +374,28 @@ def model_items(se, lang):
         for provider in providers:
             name = provider.get('name') or ''
             rows.append(radio(provider.get('label') or name, 'provider-role', f'{role}:{name}', name == head))
+    return rows
+
+
+def lane_pin_items(se, lang):
+    """每条泳道可固定一组「研究→审查」渠道对；默认自动错开。"""
+    lanes_n = se.get('concurrent_lanes') or 1
+    options = se.get('lane_pair_options') or []
+    pins = se.get('lane_pins') or {}
+    if lanes_n <= 1 or not options:
+        return [info(text(lang, '并行泳道设为 2 条以上时可按泳道固定渠道对；选项来自当前路由预设。',
+                            'Pin a research→review pair per lane when parallel lanes > 1; options come from the active preset.'))]
+    rows = [info(text(lang, '固定后该泳道每轮都用这对渠道；渠道不可用时该泳道等待，不自动换对。',
+                        'A pinned lane always uses that pair; when a provider is unavailable the lane waits instead of substituting.'))]
+    for lane_no in range(lanes_n):
+        pinned = (pins.get(lane_no) or pins.get(str(lane_no)) or {})
+        items = [radio(text(lang, '自动错开', 'Auto-stagger'), 'config', f'lane_pin={lane_no + 1}:off', not pinned)]
+        for opt in options:
+            research, review = opt.get('research'), opt.get('review')
+            on = pinned.get('research') == research and pinned.get('review') == review
+            items.append(radio(opt.get('label') or f'{research} → {review}', 'config',
+                               f'lane_pin={lane_no + 1}:{research}:{review}', on))
+        rows.append(submenu(text(lang, f'泳道{lane_no + 1}', f'Lane {lane_no + 1}'), items))
     return rows
 
 
@@ -424,6 +447,8 @@ def menu_model(state):
     items += [info(text(lang, '下轮', 'Next: ') + str(m.get('title', text(lang, '未知', 'unknown')))) for m in st.get('next_models') or []]
     for item in st.get('lanes') or []:
         pair = ' → '.join(x for x in (item.get('research'), item.get('review')) if x)
+        if item.get('pinned') and pair:
+            pair += text(lang, ' · 固定', ' · pinned')
         label = item.get('state_label') or item.get('state') or ''
         if item.get('cycle_id'):
             label = text(lang, f"第{item.get('cycle_id')}轮 · ", f"cycle {item.get('cycle_id')} · ") + label

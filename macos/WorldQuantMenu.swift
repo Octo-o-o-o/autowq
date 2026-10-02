@@ -1328,6 +1328,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if currentLanes > 0 && !laneChoices.contains(currentLanes) {
             laneMenu.addItem(info(t("当前值 \(currentLanes) 条", "Current: \(currentLanes) lanes")))
         }
+        let pairOptions = response["lane_pair_options"] as? [[String: Any]] ?? []
+        let pins = response["lane_pins"] as? [String: [String: String]] ?? [:]
+        if currentLanes > 1 && !pairOptions.isEmpty {
+            laneMenu.addItem(.separator())
+            laneMenu.addItem(info(t("泳道固定：某条泳道每轮都用选定的研究→审查对；渠道不可用时该泳道等待，不自动换对。",
+                                    "Lane pinning: a pinned lane always uses that research→review pair; when a provider is unavailable the lane waits instead of substituting.")))
+            for laneNo in 0..<currentLanes {
+                let picker = NSMenu(title: t("泳道\(laneNo + 1)", "Lane \(laneNo + 1)"))
+                let pin = pins[String(laneNo)]
+                pickRow(t("自动错开", "Auto-stagger"), "config=lane_pin=\(laneNo + 1):off", on: pin == nil,
+                        tip: t("按预设路由与其它泳道自动错开。", "Picks automatically, staggered against the other lanes."),
+                        in: picker)
+                for opt in pairOptions {
+                    let research = opt["research"] as? String ?? ""
+                    let review = opt["review"] as? String ?? ""
+                    pickRow(opt["label"] as? String ?? "\(research) → \(review)",
+                            "config=lane_pin=\(laneNo + 1):\(research):\(review)",
+                            on: pin?["research"] == research && pin?["review"] == review,
+                            tip: t("下一次该泳道建轮生效。", "Applies to the lane's next cycle."),
+                            in: picker)
+                }
+                let row = NSMenuItem(title: t("泳道\(laneNo + 1)", "Lane \(laneNo + 1)"), action: nil, keyEquivalent: "")
+                row.submenu = picker
+                laneMenu.addItem(row)
+            }
+        }
         let dailies: [(Int, String, String)] = [(10, "10 轮", "10 cycles"), (20, "20 轮", "20 cycles"),
                                                  (40, "40 轮", "40 cycles"), (80, "80 轮", "80 cycles")]
         let currentDaily = response["max_cycles_per_day"] as? Int ?? 0
@@ -1546,7 +1572,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                             } else {
                                 line = self.t("泳道\(lane) · \(state)", "Lane \(lane) · \(state)")
                             }
-                            let pair = [item["research"] as? String, item["review"] as? String].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " → ")
+                            var pair = [item["research"] as? String, item["review"] as? String].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " → ")
+                            if item["pinned"] as? Bool == true && !pair.isEmpty { pair += self.t(" · 固定", " · pinned") }
                             if !pair.isEmpty { line += self.t("（\(pair)）", " (\(pair))") }
                             lines.append(line)
                         }

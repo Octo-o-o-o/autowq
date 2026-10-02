@@ -365,6 +365,67 @@ class LaneTests(unittest.TestCase):
         other = [r['cycle_id'] for r in rows if r['cycle_id'] != cid][0]
         self.assertEqual(routing.active_preset(self.c, self.cfg, data, other), 'steady')
 
+    # ---------- 泳道固定（lane_pins） ----------
+
+    def _plan(self, cid):
+        ev = self.c.execute("SELECT detail FROM research_events WHERE cycle_id=? AND kind='route_plan'",
+                            (cid,)).fetchone()
+        return json.loads(ev[0]) if ev else {'research_preferred': 'a', 'review_preferred': 'b'}
+
+    def _third_provider(self):
+        cat = routing.catalog(self.cfg)
+        cat['providers']['c'] = {'argv': ['/bin/sh'], 'timeout_s': 60}
+        cat['presets']['steady']['routes']['research'].append('c')
+        cat['presets']['steady']['routes']['review'].append('c')
+
+    def test_lane_pin_forces_pair(self):
+        self.cfg.data['autopilot']['concurrent_lanes'] = 3
+        self.cfg.data['autopilot']['lane_pins'] = {'2': {'research': 'b', 'review': 'a'}}
+        autopilot.tick(self.c, self.cfg)
+        self.c.commit()
+        rows = {r['lane']: r for r in self.cycles()}
+        self.assertEqual(set(rows), {0, 1, 2})
+        plan = self._plan(rows[2]['cycle_id'])
+        self.assertEqual((plan['research_preferred'], plan['review_preferred']), ('b', 'a'))
+
+    def test_lane_pin_skips_only_that_lane_when_unavailable(self):
+        self._third_provider()
+        self.cfg.data['autopilot']['concurrent_lanes'] = 2
+        self.cfg.data['autopilot']['lane_pins'] = {'1': {'research': 'a', 'review': 'b'}}
+        real = routing._unavailable
+        with patch('wq.routing._unavailable',
+                   side_effect=lambda conn, cfg, name: 'quota' if name == 'a' else real(conn, cfg, name)):
+            autopilot.tick(self.c, self.cfg)
+            self.c.commit()
+        rows = self.cycles()
+        # 固定泳道因渠道不可用而等待；自动泳道照常错开建轮。
+        self.assertEqual([r['lane'] for r in rows], [0])
+        self.assertIn('泳道2', store.get_flag(self.c, 'autopilot_message') or '')
+
+    def test_lane_pin_same_channel_rejected(self):
+        self.cfg.data['autopilot']['concurrent_lanes'] = 2
+        self.cfg.data['autopilot']['lane_pins'] = {'1': {'research': 'a', 'review': 'a'}}
+        autopilot.tick(self.c, self.cfg)
+        self.c.commit()
+        rows = self.cycles()
+        self.assertEqual([r['lane'] for r in rows], [0])
+        self.assertIn('固定渠道对', store.get_flag(self.c, 'autopilot_message') or '')
+
+    def test_lane_rows_marks_pinned_idle_lane(self):
+        from wq import desktop
+        self._third_provider()
+        self.cfg.data['autopilot']['concurrent_lanes'] = 3
+        self.cfg.data['autopilot']['lane_pins'] = {'2': {'research': 'c', 'review': 'b'}}
+        auto = autopilot.status(self.c, self.cfg)
+        rows = {r['lane']: r for r in desktop.lane_rows(self.c, self.cfg, auto)}
+        # 全部泳道空闲：泳道1/2 自动错开预测，泳道3 命中固定对。
+        self.assertFalse(rows[0].get('pinned'))
+        idle = rows[2]
+        self.assertTrue(idle['pinned'])
+        self.assertIsNone(idle['cycle_id'])
+        self.assertIn('c', idle['research'])
+        self.assertIn('b', idle['review'])
+
 
 if __name__ == '__main__':
     unittest.main()

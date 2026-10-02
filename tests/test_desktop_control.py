@@ -168,6 +168,22 @@ class SettingsControlTests(unittest.TestCase):
         self.assertTrue(all(p['reason'] == '' for p in result['providers']))
         self.assertTrue(result['notifications'])                       # 默认开启
 
+    def test_config_lane_pin_writes_validates_and_clears(self):
+        with patch.object(desktop, '_cfg', side_effect=self.fresh_cfg), \
+             patch('wq.routing.catalog', return_value=self.data), \
+             patch('wq.routing._unavailable', return_value=None):
+            result = desktop.control('config', 'lane_pin=2:b:a')
+            self.assertIn('泳道2', result['message'])
+            settings = desktop.control('settings')
+            self.assertEqual(settings['lane_pins'], {1: {'research': 'b', 'review': 'a'}})
+            self.assertEqual({(o['research'], o['review']) for o in settings['lane_pair_options']},
+                             {('a', 'b'), ('b', 'a')})
+            for bad in ('lane_pin=9:a:b', 'lane_pin=2:a:a', 'lane_pin=2:a:c', 'lane_pin=x:a:b'):
+                with self.assertRaises(ValueError):
+                    desktop.control('config', bad)
+            desktop.control('config', 'lane_pin=2:off')
+            self.assertEqual(desktop.control('settings')['lane_pins'], {})
+
     def fresh_cfg(self):
         # 生产中每次调用都是新进程重新读盘；测试用 side_effect 复现该语义。
         from wq.config import Config

@@ -152,10 +152,14 @@ def lane_rows(conn, cfg, auto=None, lang='zh'):
     state_names = {'researching': ('研究', 'researching'), 'reviewing': ('审查', 'reviewing'),
                    'simulating': ('模拟', 'simulating')}
     open_by_lane = {(r.get('lane') or 0): r for r in open_cycles}
+    try:
+        pins = autopilot.lane_pins(cfg)
+    except (ValueError, TypeError):
+        pins = {}
     rows = []
     for lane_no in sorted(open_by_lane):
         r = open_by_lane[lane_no]
-        rows.append({'lane': r.get('lane'), 'cycle_id': r.get('cycle_id'),
+        rows.append({'lane': r.get('lane'), 'cycle_id': r.get('cycle_id'), 'pinned': lane_no in pins,
                      'state': r.get('state') or '',
                      'state_label': text(lang, *state_names.get(r.get('state'), (r.get('state') or '', r.get('state') or ''))),
                      'research': _label(r.get('research_preferred')), 'review': _label(r.get('review_preferred')),
@@ -198,13 +202,14 @@ def lane_rows(conn, cfg, auto=None, lang='zh'):
         pair = None
         if preset is not None:
             try:
-                pair = autopilot._lane_pair(conn, cfg, data, preset, taken)
+                pair = autopilot._lane_pair(conn, cfg, data, preset, taken, lane=lane_no)
             except (ValueError, KeyError, TypeError):
                 pair = None
         if pair:
             taken['research'].add(pair[0])
             taken['review'].add(pair[1])
         rows.append({'lane': lane_no, 'cycle_id': None, 'state': 'idle', 'state_label': state_label,
+                     'pinned': lane_no in pins,
                      'research': _label(pair[0]) if pair else '', 'review': _label(pair[1]) if pair else '',
                      'research_task': None, 'review_task': None})
     rows.sort(key=lambda r: r.get('lane') or 0)

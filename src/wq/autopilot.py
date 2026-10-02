@@ -63,6 +63,29 @@ def lane_limit(cfg):
     return raw
 
 
+def lane_pins(cfg):
+    """每泳道固定「研究→审查」对：autopilot.lane_pins，{"<lane>": {"research": n, "review": n}}。
+
+    未固定的泳道仍按预设路由自动错开；固定泳道在建轮时必须命中该对，
+    渠道不可用或对不合规（同渠道/不在预设路由）时该泳道等待，不静默换对。"""
+    raw = cfg.get('autopilot', 'lane_pins', default=None) or {}
+    pins = {}
+    if not isinstance(raw, dict):
+        return pins
+    for key, pair in raw.items():
+        try:
+            lane = int(key)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(pair, dict) and 0 <= lane < 8:
+            pins[lane] = {'research': pair.get('research'), 'review': pair.get('review')}
+    return pins
+
+
+class LanePinBlocked(ValueError):
+    """固定泳道的渠道对当前不可用或不合规：跳过本泳道即可，不阻塞其它空闲泳道。"""
+
+
 def _lane_gate_at(conn, lane, cfg):
     """该泳道下一次允许创建新轮次的时刻。单泳道下 lane0 仍以全局 autopilot_next_at 为准
     （手动拨到过去=立即放行、拨到未来=顺延），与旧语义逐字节一致。"""
@@ -1507,11 +1530,20 @@ def _open_route_prefs(conn, rows):
     return taken
 
 
-def _lane_pair(conn, cfg, data, preset, taken):
-    """为新泳道选研究/审查首选渠道：优先错开其它泳道；非 solo 时两者必须不同渠道。"""
+def _lane_pair(conn, cfg, data, preset, taken, lane=None):
+    """为新泳道选研究/审查首选渠道：优先错开其它泳道；非 solo 时两者必须不同渠道。
+
+    lane 命中 lane_pins 时要求精确命中固定对：渠道不可用或不合规返回 None，
+    由调用方决定等待（建轮）还是只不显示预测（状态预览）。"""
     solo=preset.get('solo')
     avail_r=[n for n in (preset['routes'].get('research') or []) if not routing._unavailable(conn,cfg,n)]
     avail_v=[n for n in (preset['routes'].get('review') or []) if not routing._unavailable(conn,cfg,n)]
+    pin=lane_pins(cfg).get(lane) if lane is not None else None
+    if pin:
+        research,review=pin.get('research'),pin.get('review')
+        if research not in avail_r or review not in avail_v:return None
+        if not solo and routing.same_channel(data,research,review):return None
+        return research,review
     research=next((n for n in avail_r if n not in taken['research']),avail_r[0] if avail_r else None)
     if not research:return None
     def ok(v):return solo or not routing.same_channel(data,research,v)
@@ -1543,8 +1575,12 @@ def _create_cycle(conn,cfg,lane,p,data,taken,campaign_on):
             event(conn,cid,'preset_once',once if left<=0 else f'{once}（临时，剩余 {left} 轮）')
         # 渠道按本轮回绑后的预设（含临时覆盖）挑选；登记进 route_plan 即冻结本轮首选。
         preset=data['presets'][routing.active_preset(conn,cfg,data,cid)]
-        pair=_lane_pair(conn,cfg,data,preset,taken)
-        if not pair:raise ValueError('该泳道无可用的不同渠道对，暂不开轮')
+        pair=_lane_pair(conn,cfg,data,preset,taken,lane=lane)
+        if not pair:
+            pin=lane_pins(cfg).get(lane)
+            if pin:
+                raise LanePinBlocked(f"泳道{lane+1}固定渠道对暂不可用或不合规（{pin.get('research')}→{pin.get('review')}），该泳道等待")
+            raise ValueError('该泳道无可用的不同渠道对，暂不开轮')
         research_pref,review_pref=pair
         default_pair=((preset['routes'].get('research') or [None])[0],(preset['routes'].get('review') or [None])[0])
         if lane or (research_pref,review_pref)!=default_pair or cfg.get('autopilot','alternate_research_providers'):
@@ -1670,6 +1706,7 @@ def tick(conn,cfg,allow_new=True):
         data=routing.catalog(cfg)
         taken=_open_route_prefs(conn,rows)
         created=[]
+        blocked_notes=[]
         for lane in free:
             gate=_lane_gate_at(conn,lane,cfg)
             if gate and util.now()<util.parse_iso(gate):continue
@@ -1681,13 +1718,19 @@ def tick(conn,cfg,allow_new=True):
                 break
             try:
                 cid=_create_cycle(conn,cfg,lane,p,data,taken,campaign_on and campaign_free)
+            except LanePinBlocked as exc:
+                blocked_notes.append(str(exc)[:180])
+                continue
             except (ValueError,KeyError,TypeError,OSError) as exc:
                 if not created:message(conn,'需要处理自动研究错误：'+str(exc)[:180])
                 break
             created.append(cid)
             campaign_free=False
+        parts=[]
         if created:
-            message(conn,'、'.join(f'第{cid}轮' for cid in created)+'已自动创建；由本地队列并行执行')
+            parts.append('、'.join(f'第{cid}轮' for cid in created)+'已自动创建；由本地队列并行执行')
+        if parts or blocked_notes:
+            message(conn,'；'.join(parts+blocked_notes))
     except (ValueError,KeyError,TypeError,OSError) as exc:
         if conn.in_transaction:conn.rollback()
         message(conn,'需要处理自动研究错误：'+str(exc)[:180])
