@@ -255,6 +255,9 @@ def comparison(conn, experiment_id):
     closed=all(conn.execute('SELECT state FROM research_cycles WHERE cycle_id=?',(r['cycle_id'],)).fetchone()[0]=='closed' for r in assignments)
     reasons=[]
     contaminated=bool(assigned_cycles & campaign_cycles)
+    from . import research_meta
+    if research_meta.state(conn).get('financial_comparability')=='needs_review':
+        reasons.append('engineering_audit_failed_comparability_requires_review')
     if contaminated:reasons.append('campaign_measurements_require_separate_comparison; ordinary_promotion_remains_shadow')
     if family_sets['baseline'] & family_sets['learning']:reasons.append('shared_families_between_arms')
     if len(assignments)<contract['max_cycles'] or not closed:reasons.append('allocation_or_execution_incomplete')
@@ -265,7 +268,7 @@ def comparison(conn, experiment_id):
     if a['families'] and b['families'] and b['cost']['known_usd']/b['families']>a['cost']['known_usd']/a['families']:
         reasons.append('learning_cost_per_family_higher')
     superior=not reasons and b['interval_95'][0]>a['interval_95'][1]
-    worse=not contaminated and closed and len(assignments)>=contract['max_cycles'] and a['interval_95'][0]>b['interval_95'][1]
+    worse=research_meta.state(conn).get('financial_comparability')!='needs_review' and not contaminated and closed and len(assignments)>=contract['max_cycles'] and a['interval_95'][0]>b['interval_95'][1]
     return {'experiment_id':experiment_id,'arms':arms,'decision':'eligible' if superior else 'rollback' if worse else 'inconclusive',
             'global_resource_cost':model_cost(conn,all_cycles),'campaign_resource_cost':model_cost(conn,all_cycles & campaign_cycles),
             'reasons':reasons,'minimum_families':20,'auto_promotion':False,

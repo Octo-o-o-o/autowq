@@ -5,6 +5,7 @@
 """
 import datetime as dt
 import json
+import os
 import re
 import sqlite3
 from pathlib import Path
@@ -52,6 +53,35 @@ def provider_label(name, definition, lang='zh'):
     return f"{cli} · {definition.get('model') or text(lang, '模型未记录', 'model not recorded')}"
 
 
+def planned_provider(conn, cycle_id, role):
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='research_events'").fetchone():
+        return None
+    row = conn.execute("SELECT detail FROM research_events WHERE cycle_id=? AND kind='route_plan' ORDER BY event_id DESC LIMIT 1", (cycle_id,)).fetchone()
+    if not row or not row[0]:
+        return None
+    try:
+        plan = json.loads(row[0])
+    except (TypeError, json.JSONDecodeError):
+        return None
+    return plan.get('research_preferred' if role == 'research' else 'review_preferred')
+
+
+def cycle_role_model(conn, cfg, cycle, role, lang='zh', compact=False):
+    tid = cycle['research_task' if role == 'research' else 'review_task']
+    if tid:
+        return task_model(conn, tid, compact=compact, lang=lang)
+    planned = planned_provider(conn, cycle['cycle_id'], role)
+    if not planned:
+        return '—' if compact else text(lang, '尚未安排', 'Not scheduled')
+    try:
+        definition = routing.catalog(cfg)['providers'].get(planned) or {}
+    except (OSError, ValueError, KeyError, TypeError):
+        definition = {}
+    shown = (definition.get('model') if compact and definition.get('model') else None) or (
+        provider_label(planned, definition, lang) if definition else planned)
+    return shown + text(lang, '（待开始）', ' (not started)')
+
+
 def task_model(conn, tid, compact=False, lang='zh'):
     if not tid:
         return '—' if compact else text(lang, '无关联任务', 'No linked task')
@@ -73,17 +103,33 @@ def task_model(conn, tid, compact=False, lang='zh'):
 
 
 def next_models(conn, cfg, lang='zh'):
+    """预估下一轮要新建的路由。待生效的临时预设优先；进行中轮次已冻结的预设不代表下一轮。"""
     data = routing.catalog(cfg)
-    routes = data['presets'][routing.active_preset(conn, cfg, data)]['routes']
+    pending = store.get_flag(conn, 'preset_once') or ''
+    if pending in data['presets']:
+        name = pending
+    elif cfg.get('workflow', 'file'):
+        name = 'advanced'
+    else:
+        name = store.get_flag(conn, 'active_preset', data['default'])
+        if name not in data['presets']:
+            name = data['default']
+    routes = data['presets'][name]['routes']
     selected = {}
+    titles = []
     for role in ('research', 'review'):
         chain = routes[role]
-        eligible = [name for name in chain if name != selected.get('research') or role == 'research']
-        name = next((name for name in eligible if not routing._unavailable(conn, cfg, name)), None)
+        eligible = [item for item in chain if item != selected.get('research') or role == 'research']
+        name = next((item for item in eligible if not routing._unavailable(conn, cfg, item)), None)
         selected[role] = name
-    return [{'title': (text(lang, '研究', 'Research') if role == 'research' else text(lang, '审查', 'Review')) + '：' +
-             (provider_label(name, data['providers'][name], lang) if name else text(lang, '暂无可用渠道', 'no provider available'))}
-            for role, name in selected.items()]
+        label = text(lang, '研究', 'Research') if role == 'research' else text(lang, '审查', 'Review')
+        shown = provider_label(name, data['providers'][name], lang) if name else text(lang, '暂无可用渠道', 'no provider available')
+        preferred = next((item for item in eligible if item != name), None)
+        if name and preferred and preferred == eligible[0] and routing._unavailable(conn, cfg, preferred):
+            shown += text(lang, f"（{provider_label(preferred, data['providers'][preferred], lang)} 不可用：{routing._unavailable(conn, cfg, preferred)}）",
+                          f" ({provider_label(preferred, data['providers'][preferred], lang)} unavailable: {routing._unavailable(conn, cfg, preferred)})")
+        titles.append({'title': label + '：' + shown})
+    return titles
 
 
 def cycle_directive(conn, cycle, lang='zh'):
@@ -192,10 +238,38 @@ def cycle_badge(conn, cycle, lang='zh'):
     return None, None
 
 
+def history_token(conn):
+    """轮次或任务一变，菜单就知道历史需要重画。"""
+    cycle = conn.execute('SELECT cycle_id, state, updated_at FROM research_cycles ORDER BY cycle_id DESC LIMIT 1').fetchone()
+    task = conn.execute('SELECT MAX(updated_at) FROM tasks').fetchone()
+    if not cycle:
+        return '0'
+    return f"{cycle['cycle_id']}|{cycle['state']}|{cycle['updated_at']}|{task[0] or ''}"
+
+
 def history(conn, cfg, lang='zh'):
     tasks = {row['task_id']: row for row in store.list_tasks(conn)}
+    by_purpose = {}
+    for row in tasks.values():
+        purpose = json.loads(row['payload_json'] or '{}').get('purpose')
+        if purpose:
+            by_purpose.setdefault(purpose, []).append(row)
+    task_view._TASKS_BY_PURPOSE[id(conn)] = by_purpose
+    try:
+        return _history(conn, cfg, lang, tasks)
+    finally:
+        task_view._TASKS_BY_PURPOSE.pop(id(conn), None)
+
+
+def _history(conn, cfg, lang, tasks):
     groups = {cycle['cycle_id']: members for cycle, members in task_view.task_groups(conn, list(tasks.values())) if cycle}
     has_fallbacks = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='research_fallbacks'").fetchone()
+    starts = {row[0]: row[1] for row in conn.execute(
+        "SELECT task_id, MIN(created_at) FROM attempts WHERE event='provider_start' GROUP BY task_id")}
+    fallback_by_cycle = {}
+    if has_fallbacks:
+        for row in conn.execute('SELECT * FROM research_fallbacks'):
+            fallback_by_cycle[row['cycle_id']] = row
     entries = []
     for cycle in conn.execute('SELECT * FROM research_cycles ORDER BY cycle_id DESC'):
         members = groups.get(cycle['cycle_id'], [])
@@ -210,7 +284,7 @@ def history(conn, cfg, lang='zh'):
                 short += text(lang, ' + 未知', ' + unknown')
         else:
             short = text(lang, '尚未调用', 'No calls')
-        start = conn.execute("SELECT MIN(created_at) FROM attempts WHERE task_id=? AND event='provider_start'", (cycle['research_task'],)).fetchone()[0]
+        start = starts.get(cycle['research_task'])
         badge, badge_text = cycle_badge(conn, cycle, lang)
         raw_outcome = cycle['outcome'] or ''
         if raw_outcome.startswith('任务未完成'):
@@ -221,7 +295,7 @@ def history(conn, cfg, lang='zh'):
         outcome = translate(raw_outcome, lang) or text(lang, '进行中', 'In progress')
         title = (text(lang, f"第 {cycle['cycle_id']} 轮", f"Cycle {cycle['cycle_id']}") + ' · ' + cycle_directive(conn, cycle, lang)
                  + (f" · {badge_text}" if badge_text else ''))
-        fallback = conn.execute('SELECT * FROM research_fallbacks WHERE cycle_id=?', (cycle['cycle_id'],)).fetchone() if has_fallbacks else None
+        fallback = fallback_by_cycle.get(cycle['cycle_id'])
         retry = tasks.get(fallback['fallback_task']) if fallback else None
         review_lines, review_detail = review_details(conn, cycle, force=bool(fallback and fallback['stage'] == 'review' and retry and retry['status'] == 'succeeded'), lang=lang)
         if fallback:
@@ -242,15 +316,15 @@ def history(conn, cfg, lang='zh'):
         label = lambda zh, en: text(lang, zh, en)
         entries.append({'title': title, 'badge': badge, 'lines': [
                 time_line,
-                label('研究 ', 'Research ') + task_model(conn, cycle['research_task'], compact=True, lang=lang) +
-                ' · ' + label('审查 ', 'Review ') + task_model(conn, cycle['review_task'], compact=True, lang=lang),
+                label('研究 ', 'Research ') + cycle_role_model(conn, cfg, cycle, 'research', lang, compact=True) +
+                ' · ' + label('审查 ', 'Review ') + cycle_role_model(conn, cfg, cycle, 'review', lang, compact=True),
                 short,
                 label('结果 ', 'Outcome ') + outcome, *review_lines],
             'detail': [label('创建：', 'Created: ') + beijing(cycle['created_at'], lang=lang),
                        label('开始：', 'Started: ') + beijing(start, text(lang, '无模型启动记录', 'No model start recorded'), lang=lang),
                        label('完成：', 'Closed: ') + (beijing(cycle['updated_at'], lang=lang) if cycle['state'] == 'closed' else text(lang, '尚未完成', 'Not closed yet')),
-                       label('研究：', 'Research: ') + task_model(conn, cycle['research_task'], lang=lang),
-                       label('审查：', 'Review: ') + task_model(conn, cycle['review_task'], lang=lang),
+                       label('研究：', 'Research: ') + cycle_role_model(conn, cfg, cycle, 'research', lang),
+                       label('审查：', 'Review: ') + cycle_role_model(conn, cfg, cycle, 'review', lang),
                        *cost.split('；' if lang == 'zh' else '; '),
                        label('结果：', 'Outcome: ') + outcome, *review_detail]})
     return {'entries': entries, 'count': len(entries),
@@ -297,6 +371,13 @@ NOTIFY_SOURCES = (
 def pending_notifications(conn, lang='zh'):
     """消费自上次检查以来的新事件并推进水位线；返回待通知列表（需写连接）。"""
     items = []
+    pending=store.get_flag(conn,'handoff_batch_pending')
+    if pending:
+        batch=json.loads(pending)
+        if store.get_flag(conn,'desktop_handoff_notified')!=batch['id']:
+            items.append({'id':'research-handoff:'+batch['id'],'kind':'research','title':text(lang,'研究取证包已整理','Research evidence requests ready'),
+                'body':text(lang,'请查看本地 research-inbox；元数据核验后仍需语义证据。','Review the local research-inbox; semantic evidence is still required.')+' '+batch['path']})
+            store.set_flag(conn,'desktop_handoff_notified',batch['id'])
     builders = _notify_builders(lang)
     for (key, query), build in zip(NOTIFY_SOURCES, builders):
         mark = store.get_flag(conn, key)
@@ -394,6 +475,43 @@ def standby(conn, lang='zh'):
     return {'entries': entries, 'count': len(entries)}
 
 
+def research_token(conn, cfg):
+    """研究进展只在回测资料、组合计划或策略文件变化时重算。"""
+    feedback_row = conn.execute('SELECT COUNT(*), MAX(updated_at) FROM research_feedback').fetchone() if conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='research_feedback'").fetchone() else (0, '')
+    plans = conn.execute('SELECT COUNT(*), MAX(created_at) FROM combination_plans').fetchone() if conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='combination_plans'").fetchone() else (0, '')
+    closed = conn.execute("SELECT COUNT(*) FROM research_cycles WHERE state='closed'").fetchone()[0]
+    policy_file = cfg.get('autopilot', 'policy_file', default='')
+    try:
+        policy_mtime = Path(cfg.resolve(policy_file)).stat().st_mtime if policy_file else 0
+    except OSError:
+        policy_mtime = 0
+    return f"{feedback_row[0]}|{feedback_row[1]}|{plans[0]}|{plans[1]}|{closed}|{policy_mtime}"
+
+
+def _combination_summary(conn, cfg, policy, cap):
+    from . import feedback
+    token = research_token(conn, cfg) + '|' + str(cap)
+    cache = Path(cfg.db_path).parent / 'cache' / 'combination-summary.json'
+    try:
+        cached = json.loads(cache.read_text())
+        if cached.get('token') == token:
+            return cached['summary']
+    except (OSError, ValueError, TypeError):
+        pass
+    full = feedback.combination_diagnostics(conn, cap, current_policy=policy)
+    summary = {key: full[key] for key in ('registered', 'cap', 'counts', 'first_reason_counts')}
+    try:
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        temporary = cache.with_suffix('.json.tmp')
+        temporary.write_text(json.dumps({'token': token, 'summary': summary}, ensure_ascii=False))
+        os.replace(temporary, cache)
+    except OSError:
+        pass
+    return summary
+
+
 def research(conn, cfg, lang='zh'):
     """Read a consistent ledger snapshot without creating tables or changing research state."""
     from . import autopilot, research_campaign, research_learning
@@ -414,6 +532,17 @@ def research(conn, cfg, lang='zh'):
                    'Each authorization is separate; extending submission does not extend research or models.')])
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     learning = [text(lang,'模式：','Mode: ') + ('enabled' if cfg.get('research_learning','enabled',default=False) else 'disabled')]
+    from . import research_framework
+    health=research_framework.progress(conn,cfg)
+    actual=health['learning_state']
+    learning += [text(lang,'实际学习状态：','Actual learning state: ')+actual['mode'],
+                 text(lang,'状态原因：','State reason: ')+actual['reason']]
+    if health['experiment']:
+        experiment_health=health['experiment']
+        learning += [text(lang,'实验停止类型：','Experiment stop type: ')+str(experiment_health['stop_type'] or 'none'),
+                     text(lang,'冻结基线变化：','Frozen baseline changes: ')+', '.join(experiment_health['baseline_changes']),
+                     text(lang,'同一研究预算剩余：','Remaining lineage budget: ')+json.dumps(experiment_health['remaining'],ensure_ascii=False),
+                     text(lang,'后续动作：','Next action: ')+experiment_health['next_action']]
     if 'learning_experiments' in tables:
         exp = conn.execute('SELECT * FROM learning_experiments ORDER BY created_at DESC LIMIT 1').fetchone()
         if exp:
@@ -429,6 +558,22 @@ def research(conn, cfg, lang='zh'):
                              text(lang,'未关联调用、人工时间和缺失成本不计为零。','Unlinked calls, human time and missing costs are not zero.')]
     learning += [text(lang,'优越性未证实；后续市场日期与真实回执仍需持续积累。','Superiority is unproven; new market dates and real receipts are still needed.')]
     add('自学习与成本', 'Learning and costs', learning)
+    if cfg.get('research_dual_loop','enabled',default=False):
+        meta=health['meta_mechanism'];root=cfg.get('research_dual_loop','root_id')
+        add('研究机制自动改进','Research mechanism improvement',[
+            text(lang,'工程策略状态：','Engineering policy: ')+str(meta.get('status'))+' / '+str(meta.get('mode')),
+            text(lang,'有效影子配对：','Valid shadow pairs: ')+str(len(meta.get('pairs',[])))+' / 8',
+            text(lang,'局部耗时中位改善：','Median local runtime gain: ')+str(meta.get('median_gain','not_evaluated')),
+            text(lang,'资料采集尝试：','Evidence collection attempts: ')+store.get_flag(conn,'evidence_reads:'+root,'0')+' / 24',
+            text(lang,'模型启动预约：','Model start reservations: ')+store.get_flag(conn,'dual_model_reservations:'+root,'0')+' / 64',
+            text(lang,'材料核验不等于语义资格；工程晋级不等于金融学习晋级。原权限、期限和预算仍有效。',
+                 'Material identity is separate from semantic eligibility; engineering promotion is not financial promotion. Original authority and quotas remain.')])
+
+    add('近期研究质量','Recent research quality',[
+        text(lang,'最近已结束轮次：','Recent closed cycles: ')+str(health['recent_closed']),
+        text(lang,'基础回测状态：','Base simulation status: ')+json.dumps(health['base_status_counts'],ensure_ascii=False),
+        text(lang,'仅统计最近20个结束轮次的真实基础回测；未运行、等待、缺失与失败分别计数。平台通过不等于可提交或收益改善。',
+                   'Real base simulations in the last 20 closed cycles; not run, pending, missing and failure stay separate. Platform passes do not establish submission readiness or performance improvement.')])
     if not p.get('campaign'): p = {**p, 'campaign': research_campaign.template(p)}
     report = research_campaign.report(conn,p)
     status = report.get('stop_reason') or text(lang,'有可执行机会，仍需原审查与额度检查','Executable opportunity; original review and quota checks remain')
@@ -450,10 +595,10 @@ def research(conn, cfg, lang='zh'):
                 text(lang,'后续动作：','Next action: ')+h['next_action']]
             details += [text(lang,'缺项：','Missing: ')+r['code']+(' · '+r['subject'] if r.get('subject') else '') for r in h['data_gaps']]
             add(h['hypothesis_id']+' · 配对评估',h['hypothesis_id']+' · Paired assessment',details)
-    from . import feedback,workflow
+    from . import workflow
     advanced=workflow.load(cfg)
     cap=advanced['combinations']['max_plans'] if advanced else cfg.get('research_feedback','max_combination_plans',default=2)
-    combinations=feedback.combination_diagnostics(conn,cap,current_policy=p)
+    combinations=_combination_summary(conn, cfg, p, cap)
     from . import research_framework
     framework=research_framework.report(conn)
     selection=framework['last_selection'] or {}

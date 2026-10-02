@@ -43,10 +43,10 @@ def tick(conn,cfg,force=False):
     last=store.get_flag(conn,'research_learning_maintenance_at')
     if not force and last and (util.now()-util.parse_iso(last)).total_seconds()<21600:
         return {'status':'not_due'}
-    if conn.execute("SELECT 1 FROM tasks WHERE status IN ('claimed','running','unknown') LIMIT 1").fetchone():
+    # 多泳道下轮次常态开放，维护不能再等「周期边界」；它只做本地台账核对与
+    # 有上限的回填任务登记。UNKNOWN 冻结一切，在途模型调用由渠道串行槽约束。
+    if conn.execute("SELECT 1 FROM tasks WHERE status='unknown' LIMIT 1").fetchone():
         return {'status':'waiting_for_inflight_or_unknown'}
-    if conn.execute("SELECT 1 FROM research_cycles WHERE state!='closed' LIMIT 1").fetchone():
-        return {'status':'waiting_for_cycle_boundary'}
     from .research_measurement import policy_coverage
     result={'status':'completed','sync':learning.sync(conn),'new_rules':learning.derive_rules(conn),
             'coverage':metrics.coverage(conn),'measurement':policy_coverage(cfg,autopilot.policy(cfg)),'stage':stage_advice(conn),'refresh_tasks':[],

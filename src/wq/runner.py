@@ -1,14 +1,30 @@
-"""run-once：单并发调度。领取一个到期任务，分派，落账，返回真实退出码。"""
+"""run-once 调度：协调与平台任务串行，模型调用按配置并行；单 runner 锁。
+
+- 协调段：autopilot/history/framework 等状态机只在主线程 tick 中推进；
+  轮次的创建、推进、关闭全部串行落账，多泳道只是让它们的模型调用同时在外执行。
+- 串行段：非 agent_call 任务逐个领取分派。模拟/提交/反馈/对账保持
+  sim_concurrency=1、单传输槽、24 小时提交限额与 UNKNOWN 冻结语义不变。
+- 并行段：agent_call 任务由 worker 线程分派，每个 worker 用独立 SQLite 连接
+  （WAL + busy_timeout）。同一 provider 仍由 flock 与活调用去重串行；
+  渠道忙时任务 defer 稍后领取，不消耗重试次数，也不阻塞其它渠道。
+"""
 from __future__ import annotations
 
 import json
 import os
+import queue
+import threading
+import time
 import datetime as dt
 
 from . import store, util
 from .errors import AdapterError, BLOCKED, ERR, NOT_IMPLEMENTED, OK, PAUSED, WqExit
 from .adapters.brain import build_adapter
 from .wrappers import agent as agent_runner
+
+PROVIDER_BUSY_S = 90          # 同渠道已有在途调用时，任务多久后重新到期
+SUPERVISOR_POLL_S = 15        # supervisor 无完成事件时的协调/领取节奏
+SERIAL_BATCH = 16             # 每轮协调间隙最多处理的串行任务数
 
 
 def _sims_this_week(conn) -> int:
@@ -29,7 +45,7 @@ def dispatch_task(conn, cfg, task: dict) -> tuple[str, dict, str | None]:
     payload = json.loads(task["payload_json"])
     adapter = build_adapter(cfg)
     try:
-        if kind in ('research_evidence','research_reassess'):
+        if kind in ('research_evidence','research_evidence_verify','research_reassess'):
             from . import research_framework
             return research_framework.dispatch(conn,cfg,task,payload)
         if kind == "brain_feedback":
@@ -64,7 +80,7 @@ def dispatch_task(conn, cfg, task: dict) -> tuple[str, dict, str | None]:
             if payload.get("routing"):
                 from .routing import dispatch_routed
                 return dispatch_routed(conn, cfg, task, payload)
-            return _dispatch_agent(conn, cfg, payload)
+            return _dispatch_agent(conn, cfg, payload, task)
         return "failed", {"reason": f"未知任务类型 {kind}"}, f"unknown kind {kind}"
     except AdapterError as e:
         if e.kind == AdapterError.AUTH:
@@ -91,7 +107,16 @@ def dispatch_task(conn, cfg, task: dict) -> tuple[str, dict, str | None]:
         return "failed", {"error": str(e)}, str(e)
 
 
-def _dispatch_agent(conn, cfg, payload: dict) -> tuple[str, dict, str | None]:
+def _defer_task(conn, task, seconds, reason):
+    """本地资源忙（同渠道已有在途调用等）：不消耗尝试次数，稍后自动重新领取。"""
+    nb = (util.now() + dt.timedelta(seconds=seconds)).isoformat(timespec='milliseconds')
+    conn.execute("UPDATE tasks SET status='queued',not_before=?,last_error=?,attempts=MAX(attempts-1,0),updated_at=? WHERE task_id=?",
+                 (nb, reason, util.now_iso(), task['task_id']))
+    store.add_attempt(conn, task['task_id'], 'defer', 'scheduled', {'not_before': nb, 'reason': reason})
+    return 'retry_scheduled', {'not_before': nb}, reason
+
+
+def _dispatch_agent(conn, cfg, payload: dict, task=None) -> tuple[str, dict, str | None]:
     try:
         spec = agent_runner.spec_for(cfg, payload["agent"], payload["prompt_file"],
                                      payload.get("artifacts"))
@@ -103,6 +128,9 @@ def _dispatch_agent(conn, cfg, payload: dict) -> tuple[str, dict, str | None]:
                                  incident_id=payload.get("incident_id"),
                                  allow=bool(payload.get("allow")))
     detail = {"call_id": out.call_id, "call_status": out.status, "detail": out.detail}
+    if task is not None and out.status in ("blocked_live_dup", "blocked_locked"):
+        return _defer_task(conn, task, PROVIDER_BUSY_S,
+                           f"{spec.name} 已有在途调用；稍后自动重新领取，不消耗重试次数")
     if out.status == "succeeded":
         if payload.get("require_completed"):
             states = {name: obj.get("status") if isinstance(obj, dict) else None
@@ -116,6 +144,115 @@ def _dispatch_agent(conn, cfg, payload: dict) -> tuple[str, dict, str | None]:
     if out.status == "timeout":
         return "failed", detail, out.detail   # 本地进程超时是确定失败，不是远端未知
     return "failed", detail, out.detail
+
+
+def _settle(conn, cfg, task, outcome, detail, error) -> tuple[int, list[str]]:
+    """把分派结果落成任务终态或重排；返回 (退出码, 日志行)。串行与并行路径共用。"""
+    tid = task["task_id"]
+    lines: list[str] = []
+    if outcome == "retry_scheduled":
+        lines.append(f"task {tid} 等待重试/备用渠道：{error}")
+        code = OK
+    elif outcome == "rate_limited":
+        ra = float((detail or {}).get("retry_after") or 0)
+        max_wait = float(cfg.get("limits", "rate_limit_max_wait_s", default=900))
+        if ra > max_wait:
+            store.finish_task(conn, tid, store.TASK_FAILED, detail,
+                              f"rate-limit 等待 {ra}s 超过上限 {max_wait}s")
+            lines.append(f"task {tid} failed: retry-after 超上限")
+            code = BLOCKED
+        else:
+            nb = (util.now() + dt.timedelta(seconds=ra)).isoformat(timespec="milliseconds")
+            store.requeue_task(conn, tid, nb, error or "rate_limited")
+            lines.append(f"task {tid} rate-limited → {nb} 后重试（Retry-After 已遵守）")
+            code = OK
+    elif outcome == "unknown":
+        store.mark_task_unknown(conn, tid, detail)
+        lines.append(f"task {tid} UNKNOWN：远端可能已接受，对账前禁止重发"
+                     "（wq reconcile / --resolve）")
+        code = OK
+    elif outcome == "not_implemented":
+        store.finish_task(conn, tid, store.TASK_BLOCKED, detail, error)
+        lines.append(f"task {tid} NOT_IMPLEMENTED: {error}")
+        code = NOT_IMPLEMENTED
+    elif outcome == "blocked":
+        store.finish_task(conn, tid, store.TASK_BLOCKED, detail, error)
+        lines.append(f"task {tid} BLOCKED: {error}")
+        code = BLOCKED
+    elif outcome == "succeeded":
+        store.finish_task(conn, tid, store.TASK_SUCCEEDED, detail)
+        lines.append(f"task {tid} succeeded: {json.dumps(detail, ensure_ascii=False)[:400]}")
+        code = OK
+    else:
+        store.finish_task(conn, tid, store.TASK_FAILED, detail, error)
+        lines.append(f"task {tid} failed: {error}")
+        code = ERR
+    return code, lines
+
+
+def _agent_worker(cfg, task, results):
+    """模型调用工作线程：独立 SQLite 连接完成分派与落账，结果回传 supervisor。"""
+    from . import db as _db
+    conn = _db.connect(cfg.db_path)
+    tid = task["task_id"]
+    try:
+        store.set_task_running(conn, tid)
+        outcome, detail, error = dispatch_task(conn, cfg, task)
+        code, lines = _settle(conn, cfg, task, outcome, detail, error)
+        conn.commit()
+        results.put((tid, code, lines))
+    except Exception as exc:
+        try:
+            conn.rollback()
+            store.finish_task(conn, tid, store.TASK_FAILED,
+                              {"error": str(exc)[:300]}, str(exc)[:300])
+            conn.commit()
+        except Exception:
+            pass
+        results.put((tid, ERR, [f"task {tid} worker error: {exc}"]))
+    finally:
+        conn.close()
+
+
+def agent_pool_size(cfg) -> int:
+    """模型调用并行上限：默认跟随研究泳道数；limits.max_agent_parallel 可显式覆盖（1..8）。"""
+    raw = cfg.get('limits', 'max_agent_parallel')
+    if raw is not None:
+        if type(raw) is not int or not 1 <= raw <= 8:
+            raise ValueError('limits.max_agent_parallel 须为 1..8 的整数')
+        return raw
+    from . import autopilot
+    return autopilot.lane_limit(cfg)
+
+
+def _coordinate(conn, cfg):
+    """状态机推进只在 supervisor 主线程串行执行。返回不产生副作用之外的标志。"""
+    from . import autopilot, history_research, research_maintenance, research_framework
+    allow_research = True
+    allow_new = True
+    try:
+        if research_framework.enabled(cfg):
+            work = research_framework.tick(conn, cfg)
+            allow_research = work['allow_research']
+            allow_new = work.get('allow_new_quant_cycle', True)
+        else:
+            research_maintenance.tick(conn, cfg)
+        conn.commit()
+    except (ValueError, OSError, KeyError, TypeError) as exc:
+        conn.rollback()
+        if research_framework.enabled(cfg):
+            allow_research = False
+        store.set_flag(conn, 'research_learning_maintenance_error', str(exc)[:200])
+        conn.commit()
+    if allow_research:
+        history_research.tick(conn, cfg)
+        autopilot.tick(conn, cfg, allow_new=allow_new)
+    else:
+        history_research.progress(conn, cfg)
+        # Waiting suppresses new calls, but never abandons already frozen lifecycle.
+        if conn.execute("SELECT 1 FROM research_cycles WHERE state!='closed'").fetchone():
+            autopilot.tick(conn, cfg, allow_new=False)
+    conn.commit()
 
 
 def run_once(conn, cfg, lease_s: int = 300) -> tuple[int, list[str]]:
@@ -151,71 +288,106 @@ def _run_once(conn, cfg, lease_s: int) -> tuple[int, list[str]]:
         lines.append('auth pause automatically recovered from macOS Keychain; resumed safe reads: '
                      + (', '.join(recovered) if recovered else 'none'))
 
-    from . import history_research
     autopilot.setup(conn)
-    from . import research_maintenance,research_framework
-    allow_research=True
-    try:
-        if research_framework.enabled(cfg):
-            work=research_framework.tick(conn,cfg)
-            allow_research=work['allow_research']
-        else:research_maintenance.tick(conn, cfg)
-        conn.commit()
-    except (ValueError, OSError, KeyError, TypeError) as exc:
-        conn.rollback()
-        if research_framework.enabled(cfg):allow_research=False
-        store.set_flag(conn, 'research_learning_maintenance_error', str(exc)[:200])
-        conn.commit()
-    if allow_research:
-        history_research.tick(conn, cfg)
-        autopilot.tick(conn, cfg)
-    else:history_research.progress(conn,cfg)
+    _coordinate(conn, cfg)
 
+    pool = agent_pool_size(cfg)
+    if pool <= 1:
+        return _serial_once(conn, cfg, lease_s, lines)
+    return _supervise(conn, cfg, lease_s, pool, lines)
+
+
+def _serial_once(conn, cfg, lease_s, lines) -> tuple[int, list[str]]:
+    """默认路径：一次领取一个到期任务，分派落账后返回（与原语义一致）。"""
     task = store.claim_task(conn, owner=f"wq-{os.getpid()}", lease_s=lease_s)
     conn.commit()
     if task is None:
         lines.append("idle: 无到期任务")
         return OK, lines
-
     store.set_task_running(conn, task["task_id"])
     outcome, detail, error = dispatch_task(conn, cfg, task)
-
-    if outcome == "retry_scheduled":
-        lines.append(f"task {task['task_id']} 等待重试/备用渠道：{error}")
-        code = OK
-    elif outcome == "rate_limited":
-        ra = float((detail or {}).get("retry_after") or 0)
-        max_wait = float(cfg.get("limits", "rate_limit_max_wait_s", default=900))
-        if ra > max_wait:
-            store.finish_task(conn, task["task_id"], store.TASK_FAILED,
-                              detail, f"rate-limit 等待 {ra}s 超过上限 {max_wait}s")
-            lines.append(f"task {task['task_id']} failed: retry-after 超上限")
-            code = BLOCKED
-        else:
-            nb = (util.now() + dt.timedelta(seconds=ra)).isoformat(timespec="milliseconds")
-            store.requeue_task(conn, task["task_id"], nb, error or "rate_limited")
-            lines.append(f"task {task['task_id']} rate-limited → {nb} 后重试（Retry-After 已遵守）")
-            code = OK
-    elif outcome == "unknown":
-        store.mark_task_unknown(conn, task["task_id"], detail)
-        lines.append(f"task {task['task_id']} UNKNOWN：远端可能已接受，对账前禁止重发"
-                     "（wq reconcile / --resolve）")
-        code = OK
-    elif outcome == "not_implemented":
-        store.finish_task(conn, task["task_id"], store.TASK_BLOCKED, detail, error)
-        lines.append(f"task {task['task_id']} NOT_IMPLEMENTED: {error}")
-        code = NOT_IMPLEMENTED
-    elif outcome == "blocked":
-        store.finish_task(conn, task["task_id"], store.TASK_BLOCKED, detail, error)
-        lines.append(f"task {task['task_id']} BLOCKED: {error}")
-        code = BLOCKED
-    elif outcome == "succeeded":
-        store.finish_task(conn, task["task_id"], store.TASK_SUCCEEDED, detail)
-        lines.append(f"task {task['task_id']} succeeded: {json.dumps(detail, ensure_ascii=False)[:400]}")
-        code = OK
-    else:
-        store.finish_task(conn, task["task_id"], store.TASK_FAILED, detail, error)
-        lines.append(f"task {task['task_id']} failed: {error}")
-        code = ERR
+    code, task_lines = _settle(conn, cfg, task, outcome, detail, error)
+    lines.extend(task_lines)
     conn.commit()
+    return code, lines
+
+
+def _supervise(conn, cfg, lease_s, pool, lines) -> tuple[int, list[str]]:
+    """并行模式：agent_call 进 worker 池，平台/程序任务串行，状态机周期性推进。
+
+    supervisor 持有 runner 锁直到没有可领取任务且 worker 全部落地；
+    到达 supervisor_max_s 后停止领取新任务，等在途调用自行收尾。"""
+    results: queue.Queue = queue.Queue()
+    workers: set = set()
+    owner = f"wq-{os.getpid()}"
+    raw_cap = cfg.get('limits', 'supervisor_max_s', default=3000)
+    cap = raw_cap if type(raw_cap) in (int, float) and 300 <= raw_cap <= 14400 else 3000
+    deadline = time.monotonic() + float(cap)
+    agent_lease = max(lease_s, 4200)
+    code = OK
+    draining = False
+    while True:
+        progressed = False
+        while True:
+            try:
+                tid, wcode, wlines = results.get_nowait()
+            except queue.Empty:
+                break
+            workers.discard(tid)
+            lines.extend(wlines)
+            progressed = True
+            if code == OK and wcode != OK:
+                code = wcode
+        paused = store.is_paused(conn)
+        if not draining and not paused:
+            for _ in range(SERIAL_BATCH):
+                task = store.claim_task(conn, owner=owner + '-s', lease_s=lease_s,
+                                        exclude={'agent_call'})
+                conn.commit()
+                if task is None:
+                    break
+                progressed = True
+                store.set_task_running(conn, task["task_id"])
+                try:
+                    outcome, detail, error = dispatch_task(conn, cfg, task)
+                except Exception as exc:
+                    outcome, detail, error = "failed", {"error": str(exc)[:300]}, str(exc)[:300]
+                tcode, task_lines = _settle(conn, cfg, task, outcome, detail, error)
+                conn.commit()
+                lines.extend(task_lines)
+                if code == OK and tcode != OK:
+                    code = tcode
+            _coordinate(conn, cfg)
+            if time.monotonic() < deadline:
+                while len(workers) < pool:
+                    task = store.claim_task(conn, owner=owner + '-w', lease_s=agent_lease,
+                                            kinds={'agent_call'})
+                    conn.commit()
+                    if task is None:
+                        break
+                    workers.add(task["task_id"])
+                    progressed = True
+                    lines.append(f"task {task['task_id']} 并行分派（{len(workers)}/{pool}）")
+                    threading.Thread(target=_agent_worker, args=(cfg, task, results),
+                                     daemon=True, name='wq-agent-' + task['task_id'][-6:]).start()
+            else:
+                draining = True
+                lines.append('supervisor: 到达 supervisor_max_s，停止领取新任务，等待在途调用收尾')
+        if not workers:
+            if draining or paused or not progressed:
+                break
+            continue
+        try:
+            tid, wcode, wlines = results.get(timeout=SUPERVISOR_POLL_S)
+            workers.discard(tid)
+            lines.extend(wlines)
+            if code == OK and wcode != OK:
+                code = wcode
+        except queue.Empty:
+            pass
+    if store.is_paused(conn) and code == OK:
+        code = PAUSED
+        lines.append(f"paused: {store.get_flag(conn, 'pause_reason', '')}；恢复用 `wq resume`")
+    if not lines or 'idle' not in lines[-1] and code == OK and not progressed and not workers:
+        lines.append("idle: 无可领取任务")
     return code, lines

@@ -96,8 +96,10 @@ def add_attempt(conn, task_id: str, event: str, outcome: str | None, detail) -> 
     )
 
 
-def claim_task(conn, owner: str, lease_s: int = 300):
-    """原子领取一个到期任务；双触发只有一个成功。返回 task dict 或 None。"""
+def claim_task(conn, owner: str, lease_s: int = 300,
+               kinds: set | None = None, exclude: set | None = None):
+    """原子领取一个到期任务；双触发只有一个成功。返回 task dict 或 None。
+    kinds/exclude 按任务类型分流：并行执行器按模型调用领取，串行段排除它们。"""
     now = util.now()
     conn.execute("BEGIN IMMEDIATE")
     try:
@@ -109,6 +111,10 @@ def claim_task(conn, owner: str, lease_s: int = 300):
             (now.isoformat(timespec="microseconds"),)).fetchall()
         row = None
         for candidate in rows:
+            if kinds is not None and candidate["kind"] not in kinds:
+                continue
+            if exclude is not None and candidate["kind"] in exclude:
+                continue
             if candidate["attempts"] >= candidate["max_attempts"]:
                 finish_task(conn, candidate["task_id"], TASK_BLOCKED,
                             error="task attempt limit reached")

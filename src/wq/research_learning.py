@@ -5,9 +5,14 @@ import hashlib
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from . import util, research_dsl
+from . import util, store, research_dsl
 
 VERSION = 'learning-v1'
+SIMULATION_COMPLETED = frozenset(('passed','failed','quality_failed','unchecked'))
+
+class RequestBudgetExhausted(ValueError):
+    pass
+
 DDL = '''CREATE TABLE IF NOT EXISTS learning_trials(
  trial_id TEXT PRIMARY KEY, cycle_id INTEGER, task_id TEXT,
  execution_id TEXT NOT NULL, structure_id TEXT, family_id TEXT,
@@ -333,7 +338,7 @@ def _sync_task(conn, task_id, parent_id, parent, label, cycle_id):
             obs = conn.execute('SELECT * FROM learning_observations WHERE alpha_id=? ORDER BY rowid DESC LIMIT 1', (run['alpha_id'],)).fetchone()
     observed = json.loads(obs['document_json']) if obs else {}
     report = observed.get('report', {})
-    execution = 'unknown' if task['status']=='unknown' else ('complete' if sim and sim['status'] in ('passed','failed','quality_failed','unchecked') else 'failed' if task['status'] in ('failed','blocked','aborted') else 'pending')
+    execution = 'unknown' if task['status']=='unknown' else ('complete' if sim and sim['status'] in SIMULATION_COMPLETED else 'failed' if task['status'] in ('failed','blocked','aborted') else 'pending')
     complete = report.get('collection_status')=='complete' and not report.get('validation_gaps')
     quality = 'unassessed'
     if execution=='complete':
@@ -392,7 +397,7 @@ def rules(conn, at=None):
     return result
 
 
-def model_context(conn, bindings, settings, candidate=None, limit=12):
+def model_context(conn, bindings, settings, candidate=None, limit=12, operational=False):
     """Only abstract validated ASTs and categorical outcomes leave local storage."""
     from . import research_strategy, research_knowledge
     selected = research_strategy.retrieval(conn, bindings, settings, candidate, limit)
@@ -401,13 +406,19 @@ def model_context(conn, bindings, settings, candidate=None, limit=12):
               'execution': (t['outcome'] or {}).get('execution', 'not_run'),
               'parent_id': t['document'].get('parent_id')} for t in selected]
     return {'version': VERSION, 'facts': facts, 'paired_findings':research_knowledge.context(conn,bindings,settings), 'rules_mode': 'evidence_bound_experimental',
-            'search': research_strategy.search_packet(conn, bindings, settings),
+            'search': research_strategy.measurement_opportunities(bindings) if operational else research_strategy.search_packet(conn, bindings, settings),
             'interpretation': 'Categorical historical evidence, not causal or out-of-sample proof.'}
 
 
-def select_plans(conn, cycle_id, proposal, bindings, settings, use_rules=False):
+def select_plans(conn, cycle_id, proposal, bindings, settings, use_rules=False, preflight=None, frozen_rules=None):
     """Choose one validated candidate. No additional model/Brain calls or retries."""
     setup(conn)
+    previous=conn.execute('SELECT document_json FROM learning_selections WHERE cycle_id=?',(cycle_id,)).fetchone()
+    if previous:
+        frozen=json.loads(previous[0])
+        if frozen.get('plans') is not None:
+            if frozen['plans']!=proposal.get('plans'):raise ValueError('Plan collection already frozen')
+            return frozen['plans'][frozen['selected_index']]['candidate'] if frozen['selected_index'] is not None else None
     plans=proposal.get('plans')
     if not isinstance(plans,list) or not 1<=len(plans)<=3 or 'candidate' in proposal:
         raise ValueError('Provide 1..3 plans OR one candidate')
@@ -424,7 +435,8 @@ def select_plans(conn, cycle_id, proposal, bindings, settings, use_rules=False):
         seen.add(trial['execution_id']);past_roles=trial['document'].get('roles',[])
         usage.update(past_roles);concept_usage.update(set(concept(r) for r in past_roles))
     from . import research_strategy
-    rows=[];valid=[];shadow=[]
+    rows=[];valid=[];shadow=[];batch_exact=set();batch_mechanisms=set()
+    ordinal=conn.execute("SELECT COUNT(*) FROM learning_selections WHERE document_json LIKE '%\"rules_requested\": true%'").fetchone()[0]+1
     for i,plan in enumerate(plans):
         if not isinstance(plan,dict) or set(plan)!={'candidate','measurement','prediction','falsifier'}:
             raise ValueError('Plan requires candidate/measurement/prediction/falsifier')
@@ -433,14 +445,21 @@ def select_plans(conn, cycle_id, proposal, bindings, settings, use_rules=False):
         try:
             candidate=plan['candidate'];research_dsl.validate_candidate(candidate,bindings)
             ids=identities(candidate['ast'],bindings,settings)
-            reason='exact_duplicate' if ids['execution_id'] in exact else None
+            reason='exact_duplicate' if ids['execution_id'] in exact else preflight(candidate) if preflight else None
+            shape=util.sha256_json(research_strategy.mechanism(candidate['ast']))
+            if reason is None:
+                if ids['execution_id'] in batch_exact:reason='batch_exact_duplicate'
+                elif shape in batch_mechanisms:reason='batch_same_mechanism_variant'
+                else:batch_exact.add(ids['execution_id']);batch_mechanisms.add(shape)
             roles=research_dsl.roles_used(candidate['ast'])
             concepts=set(concept(r) for r in roles)
             role_score=sum(1/(1+usage[r]) for r in roles)/len(roles)
             concept_score=sum(1/(1+concept_usage[c]) for c in concepts)/len(concepts)
-            advice=research_strategy.rule_advice(conn,candidate['ast'],bindings,settings,history)
-            # Every fourth cycle retains pure coverage selection as an exploration slot.
-            score=((advice['score'] if use_rules and cycle_id % 4 else 0),concept_score,role_score)
+            advice=research_strategy.rule_advice(conn,candidate['ast'],bindings,settings,history,frozen_rules)
+            # The choice ordinal belongs to learning decisions, not global alternating cycles.
+            ordinal=conn.execute("SELECT COUNT(*) FROM learning_selections WHERE document_json LIKE '%\"rules_requested\": true%'").fetchone()[0]+1
+            exploit=use_rules and (ordinal%4 if preflight else cycle_id%4)
+            score=((advice['score'] if exploit else 0),concept_score,role_score)
             row={'index':i,'candidate_hash':util.sha256_json(candidate),'execution_id':ids['execution_id'],
                  'reason':reason,'coverage_score':[concept_score,role_score],'rule_advice':advice,
                  'measurement':measurement_checks(candidate['ast'],bindings,settings),
@@ -454,9 +473,14 @@ def select_plans(conn, cycle_id, proposal, bindings, settings, use_rules=False):
     chosen=max(valid,key=lambda x:(x[0],x[1])) if valid else None
     result={'version':VERSION,'candidates':rows,'selected_index':-chosen[1] if chosen else None,
             'strategy':'deterministic_concept_then_role_coverage','selection_probability':None,
-            'budget':'one_existing_research_call_one_selected_candidate','rules_applied':bool(use_rules and cycle_id % 4),
+            'budget':'one_existing_research_call_one_selected_candidate','rules_applied':bool(use_rules and (ordinal%4 if preflight else cycle_id%4)),
+            'rules_requested':use_rules,'plans':plans,'eligible_count':len(valid),
+            'choice_opportunity':len(valid)>1,'rule_match_count':sum(len(r.get('rule_advice',{}).get('matched_rules',[])) for r in rows),
+            'nonzero_rule_scores':sum(r.get('rule_advice',{}).get('score',0)!=0 for r in rows),
             'shadow_selected_index':-max(shadow)[1] if shadow else None,
+            'baseline_selected_index':-max(valid,key=lambda x:(x[0][1:],x[1]))[1] if valid else None,
             'selected_parent_id':rows[-chosen[1]].get('rule_advice',{}).get('parent_id') if chosen else None}
+    result['selection_changed_by_rules']=result['selected_index']!=result['baseline_selected_index']
     old=conn.execute('SELECT document_json FROM learning_selections WHERE cycle_id=?',(cycle_id,)).fetchone()
     if old and json.loads(old[0])!=result:raise ValueError('Selection already frozen')
     conn.execute('INSERT OR IGNORE INTO learning_selections VALUES(?,?,?)',(cycle_id,json.dumps(result),util.now_iso()))
@@ -518,7 +542,9 @@ def assign(conn, cycle_id, experiment_id, baseline):
 def check_request_budget(conn, cycle_id, cfg=None):
     setup(conn)
     assignment=conn.execute('SELECT * FROM learning_assignments WHERE cycle_id=?',(cycle_id,)).fetchone()
-    if not assignment:return
+    if not assignment:
+        if store.get_flag(conn,'dual_cycle:'+str(cycle_id)):raise ValueError('Dual-loop request has no experiment assignment')
+        return
     if conn.execute('SELECT 1 FROM learning_experiment_stops WHERE experiment_id=?',(assignment['experiment_id'],)).fetchone():raise ValueError('Experiment stopped before dispatch')
     experiment=json.loads(conn.execute('SELECT document_json FROM learning_experiments WHERE experiment_id=?',(assignment['experiment_id'],)).fetchone()[0])
     from .research_lifecycle import lineage,stop_kind
@@ -528,7 +554,7 @@ def check_request_budget(conn, cycle_id, cfg=None):
     cycles=arm_cycles(conn,assignment['experiment_id'],assignment['arm'])
     reserved=sum(json.loads(r[0]).get('research_cycle_id') in cycles for r in conn.execute("SELECT payload_json FROM tasks WHERE kind='brain_simulation'"))
     if reserved>=experiment['max_requests_per_arm']:
-        raise ValueError('Frozen experiment request budget exhausted; queued/failed/unknown reservations count')
+        raise RequestBudgetExhausted('Frozen experiment request budget exhausted; queued/failed/unknown reservations count')
 
 
 def stop_experiment(conn,experiment_id,reason,stop_type='owner_stop'):
@@ -582,7 +608,9 @@ def validate_dispatch(conn,cfg,task_id,payload):
     if cycle is None:return
     setup(conn)
     assignment=conn.execute('SELECT * FROM learning_assignments WHERE cycle_id=?',(cycle,)).fetchone()
-    if not assignment:return
+    if not assignment:
+        if store.get_flag(conn,'dual_cycle:'+str(cycle)):raise ValueError('Dual-loop request has no experiment assignment')
+        return
     if conn.execute('SELECT 1 FROM learning_experiment_stops WHERE experiment_id=?',(assignment['experiment_id'],)).fetchone():raise ValueError('Experiment stopped before dispatch')
     experiment=json.loads(conn.execute('SELECT document_json FROM learning_experiments WHERE experiment_id=?',(assignment['experiment_id'],)).fetchone()[0])
     from .research_lifecycle import lineage,stop_kind

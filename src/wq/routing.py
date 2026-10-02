@@ -87,26 +87,57 @@ def same_channel(data, a, b):
     return ida is not None and ida == idb
 
 
-def cycle_preset(conn):
-    """当前活动研究轮次若带"仅一轮"预设覆盖，返回其名字；否则 None。"""
-    try:
-        row = conn.execute("SELECT cycle_id FROM research_cycles WHERE state!='closed' LIMIT 1").fetchone()
-    except Exception:
-        return None
-    if not row:
-        return None
-    return store.get_flag(conn, f'cycle_preset_{row[0]}') or None
+def cycle_preset(conn, cid=None):
+    """指定（默认当前活动）研究轮次若带"仅一轮"预设覆盖，返回其名字；否则 None。"""
+    if cid is None:
+        try:
+            row = conn.execute("SELECT cycle_id FROM research_cycles WHERE state!='closed' LIMIT 1").fetchone()
+        except Exception:
+            return None
+        if not row:
+            return None
+        cid = row[0]
+    return store.get_flag(conn, f'cycle_preset_{cid}') or None
 
 
-def active_preset(conn, cfg, data=None):
+def active_preset(conn, cfg, data=None, cid=None):
+    """解析预设：cid 给了轮次时先按该轮回绑的临时预设，其次全局选择。"""
     data = data or catalog(cfg)
     if cfg.get('workflow', 'file'):
         name = 'advanced'
     else:
-        name = cycle_preset(conn) or store.get_flag(conn, 'active_preset', data['default'])
+        name = cycle_preset(conn, cid) or store.get_flag(conn, 'active_preset', data['default'])
     if name not in data['presets']:
         raise ValueError(f'当前预设 {name} 已不存在；先选择有效预设')
     return name
+
+
+def route_heads(preset):
+    """研究、工程、审查各自的首选渠道。备用渠道不在这里。"""
+    heads = []
+    for role in ('research', 'engineering', 'review'):
+        chain = (preset.get('routes') or {}).get(role) or []
+        if chain and chain[0] not in heads:
+            heads.append(chain[0])
+    return heads
+
+
+def closed_route_heads(conn, name, data):
+    """预设首选渠道里，用户在渠道菜单关掉的那些。"""
+    preset = data['presets'].get(name) or {}
+    return [provider for provider in route_heads(preset) if store.get_flag(conn, f'provider_disabled:{provider}') == '1']
+
+
+def presets_headed_by(conn, cfg, provider, data=None):
+    """永久预设和待生效临时预设里，把这个渠道当作首选的预设名。"""
+    data = data or catalog(cfg)
+    names = []
+    permanent = store.get_flag(conn, 'active_preset', data['default'])
+    pending = store.get_flag(conn, 'preset_once') or ''
+    for name in (permanent, pending):
+        if name and name in data['presets'] and name not in names and provider in route_heads(data['presets'][name]):
+            names.append(name)
+    return names
 
 
 def choose_preset(conn, cfg, name, once=False, cycles=1):
@@ -117,6 +148,9 @@ def choose_preset(conn, cfg, name, once=False, cycles=1):
     data = catalog(cfg)
     if name not in data['presets']:
         raise ValueError(f'未知预设 {name}')
+    closed = closed_route_heads(conn, name, data)
+    if closed:
+        raise ValueError('预设所用渠道未打开：' + '、'.join(closed) + '。请先在渠道里打开后再设置')
     if once:
         if not isinstance(cycles, int) or isinstance(cycles, bool) or not 1 <= cycles <= MAX_ONCE_CYCLES:
             raise ValueError(f'临时轮数需为 1..{MAX_ONCE_CYCLES} 的整数')
@@ -187,12 +221,12 @@ def _snapshot(conn, cfg, tid, payload):
     if row:
         return dict(row)
     data = catalog(cfg)
-    name = active_preset(conn, cfg, data)
+    name = active_preset(conn, cfg, data, payload.get('autopilot_cycle'))
     preset = data['presets'][name]
     routes = preset['routes'][payload['role']]
     order = payload.get('provider_order')
     if isinstance(order, list) and order:
-        # 任务级优先顺序（如单双轮互换研究/审查渠道）：只能重排预设已含的渠道，不能引入预设外渠道。
+        # 调用方已把预设首选放在前面，保底顺序只排其余渠道。只能重排预设已含的渠道。
         routes = [n for n in order if n in routes] + [n for n in routes if n not in order]
     excluded = payload.get('excluded_providers', [])
     # 审查排除提案渠道时连同其别名（同一服务地址/同一 CLI）一起排除。
@@ -218,6 +252,18 @@ def _backoff(conn, tid, seconds, reason):
                  (when, reason, util.now_iso(), tid))
     store.add_attempt(conn, tid, 'provider_retry', 'scheduled', {'not_before': when, 'reason': reason})
     return 'retry_scheduled', {'not_before': when}, reason
+
+
+PROVIDER_BUSY_S = 90   # 同渠道已有在途调用时，任务多久后重新到期
+
+
+def _provider_busy(conn, tid, provider, seconds=PROVIDER_BUSY_S):
+    """渠道串行槽被占：稍后自动重新领取；不算 provider 故障，不耗尝试次数、不推进链位置。"""
+    when = (util.now() + dt.timedelta(seconds=seconds)).isoformat(timespec='microseconds')
+    conn.execute("UPDATE tasks SET status='queued',not_before=?,last_error=?,attempts=MAX(attempts-1,0),updated_at=? WHERE task_id=?",
+                 (when, f'{provider} 已有在途调用；稍后自动重新领取，不消耗重试次数', util.now_iso(), tid))
+    store.add_attempt(conn, tid, 'provider_busy', 'deferred', {'provider': provider, 'not_before': when})
+    return 'retry_scheduled', {'not_before': when, 'provider_busy': provider}, f'{provider} 在途调用占用；{seconds}s 后自动重新领取'
 
 
 def _unavailable(conn, cfg, provider):
@@ -396,6 +442,16 @@ def dispatch_routed(conn, cfg, task, payload):
     for deadline in [snap.get('authorized_until'), cfg.get('routing', 'authorized_until')]:
         if deadline and util.now() >= util.parse_iso(deadline):
             return 'blocked', {}, '本轮路由授权已到期，不通过备用供应商绕过'
+    if store.get_flag(conn,'plans_seen:'+tid):
+        job=Path(payload['job_dir'])
+        if (job/'result.json').is_file():
+            try:
+                result=util.read_json(str(job/'result.json'));retained=util.read_json(str(job/'parsed-plans.json'))
+                identity=isinstance(result,dict) and result==retained and result.get('status')=='completed' and isinstance(result.get('summary'),str) and isinstance(result.get('findings'),list) and util.sha256_json(result.get('plans'))==store.get_flag(conn,'plans_seen:'+tid)
+            except (OSError,ValueError,TypeError):identity=False
+            if identity and manifest(job/'packet')==payload['input_hashes']:return 'succeeded',{'artifact':str(job/'result.json')},None
+            return 'blocked',{},'Frozen parsed plan artifact or input identity changed'
+        return 'blocked',{},'Parsed plan collection frozen; no regeneration'
     if row['phase'] == 'running':
         # 崩溃可能发生在 spawn 与落账之间：保守停止，不能重启第二份。
         return 'unknown', {}, '上次 routed 调用没有完成记账；需核对进程和产物，禁止自动重发'
@@ -426,6 +482,11 @@ def dispatch_routed(conn, cfg, task, payload):
         return 'blocked', {}, '预设中的渠道均不可用或预算已耗尽；不会自动充值'
     provider = chain[index]
     definition = snap['providers'][provider]
+    # 渠道串行槽：同 provider 已有存活调用时本次领取让位，不占尝试次数、不推进链，
+    # 也不复制输入副本（副本目录会在重领时按同名规则重建）。flock 竞态由下方
+    # blocked_locked/blocked_live_dup 路径兜底。
+    if any(r['pid'] is not None and store.pid_alive(r['pid']) for r in store.live_agent_calls(conn, provider)):
+        return _provider_busy(conn, tid, provider)
     quota_hits = int(store.get_flag(conn, f'quota_hits:{tid}') or 0)
     # 额度暂停后重试序号归零；目录名带上暂停次数，保留暂停前那次调用的证据目录。
     work = job / (f'{index:02d}-{provider}-attempt-{retry + 1}' + (f'-q{quota_hits}' if quota_hits else ''))
@@ -460,6 +521,9 @@ def dispatch_routed(conn, cfg, task, payload):
     spec = agent.AgentSpec(provider, argv, str(work), definition.get('timeout_s', 900), ['result.json'],
                            terminal_protocol=definition.get('terminal_protocol'),
                            pipe_logs=True)
+    from . import research_meta
+    try:research_meta.reserve_model(conn,cfg,tid,provider)
+    except ValueError as exc:return 'blocked',{},str(exc)
     _save(conn, tid, phase='running', attempt_dir=str(work))
     store.add_attempt(conn, tid, 'provider_start', 'running', {'provider': provider, 'retry': retry,
                                                             'preset': snap['preset'], 'workdir': str(work)})
@@ -469,9 +533,13 @@ def dispatch_routed(conn, cfg, task, payload):
     detail = {'provider': provider, 'preset': snap['preset'], 'retry': retry, 'call_id': out.call_id,
               'call_status': out.status, 'workdir': str(work)}
     store.add_attempt(conn, tid, 'provider_result', out.status, detail)
+    result = out.artifacts.get('result.json')
+    parsed_plans=isinstance(result,dict) and isinstance(result.get('plans'),list) and research_meta.enabled(cfg)
+    if parsed_plans:
+        store.set_flag(conn,'plans_seen:'+tid,util.sha256_json(result['plans']))
+        util.write_json(str(job/'parsed-plans.json'),result)
     if out.status == 'aborted' or store.is_paused(conn):
         return 'blocked', detail, '用户暂停；不会重试或切换供应商'
-    result = out.artifacts.get('result.json')
     if out.status == 'succeeded' and isinstance(result, dict):
         if result.get('status') == 'blocked':
             return 'blocked', detail, '任务缺少输入或证据：' + str(result.get('summary', ''))[:400]
@@ -482,8 +550,16 @@ def dispatch_routed(conn, cfg, task, payload):
             util.write_json(str(job / 'result.json'), result)
             _save(conn, tid, phase='complete')
             return 'succeeded', detail | {'artifact': str(job / 'result.json')}, None
+        if parsed_plans:
+            _save(conn,tid,phase='blocked');return 'blocked',detail,'Parsed plans retained; invalid envelope cannot regenerate'
         detail['call_status'] = 'artifact_invalid'
         store.add_attempt(conn, tid, 'artifact_validation', 'failed', detail)
+    elif out.status in ('blocked_live_dup', 'blocked_locked'):
+        # 竞态兜底：登记活调用到我们拿到锁之间，同渠道槽位被其它并行任务抢先。
+        # 本次尚未真正启动调用——撤掉未运行的输入副本，phase 退回 ready，稍后重领。
+        shutil.rmtree(work, ignore_errors=True)
+        _save(conn, tid, phase='ready', attempt_dir=None)
+        return _provider_busy(conn, tid, provider)
     elif out.status.startswith('blocked'):
         # 本地配置/路径/锁不是 provider 故障，不用重试去绕过它。
         return 'blocked', detail, out.detail

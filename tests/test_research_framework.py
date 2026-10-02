@@ -58,6 +58,35 @@ class FrameworkTests(unittest.TestCase):
         self.assertFalse(p['campaign']['enabled'])
         self.assertEqual(list(p['campaign']['execution_profiles']),['base'])
 
+    def test_research_job_lists_profiles_stored_on_the_cycle(self):
+        def prompt_for(policy=None, persist=True):
+            cid=900000
+            if persist:
+                self.c.execute("INSERT INTO research_cycles(state,policy_json,policy_hash,created_at,updated_at) VALUES('researching',?,?,?,?)",
+                    (json.dumps(policy),util.sha256_json(policy),util.now_iso(),util.now_iso()))
+                cid=self.c.execute('SELECT last_insert_rowid()').fetchone()[0]
+            tid=autopilot.make_job(self.c,self.cfg,cid,'research','Fixture research contract')
+            self.c.execute("UPDATE research_cycles SET state='closed' WHERE state!='closed'")
+            return (Path(json.loads(autopilot.task(self.c,tid)['payload_json'])['job_dir'])/'packet'/'request.md').read_text()
+        listed=prompt_for(self.p)
+        self.assertIn('Fixture research contract',listed)
+        self.assertIn('允许的 profile ID：'+json.dumps(list(self.p['campaign']['execution_profiles'])),listed)
+        self.assertIn('required_assertions 至少包含：'+json.dumps(list(research_contracts.COMMON)),listed)
+        self.assertIn('仅列四项会被拒绝',listed)
+        self.assertIn('允许的 profile ID：[]',prompt_for({'settings':{},'bindings':{}}))
+        self.assertIn('允许的 profile ID：[]',prompt_for(persist=False))
+
+    def test_progress_keeps_missing_and_not_run_separate_without_writes(self):
+        for cid,tid in ((801,None),(802,'missing-task')):
+            self.c.execute("INSERT INTO research_cycles(cycle_id,state,policy_json,policy_hash,simulation_task,created_at,updated_at) VALUES(?,'closed','{}','fixture',?,?,?)",
+                           (cid,tid,util.now_iso(),util.now_iso()))
+        before=self.c.total_changes
+        health=framework.progress(self.c,self.cfg)
+        self.assertEqual(health['base_status_counts'],{'missing_result':1,'not_run':1})
+        self.assertEqual(health['recent_closed'],2)
+        self.assertEqual(self.c.total_changes,before)
+        self.assertIsNone(health['experiment'])
+
     def test_gap_collection_uses_task_ledger_and_does_not_claim_semantics(self):
         gap,source,material,data=self.gap_source()
         with patch('wq.brain_client.BrainClient.request',side_effect=AssertionError('No network')):

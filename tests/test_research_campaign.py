@@ -54,7 +54,8 @@ class CampaignTests(unittest.TestCase):
         self.assertIn('expired',result['stop_reason'])
         with patch('wq.autopilot.policy',return_value=self.p):
             menu=desktop.research(self.db,self.cfg)
-        self.assertEqual(len(menu['entries']),20)
+        self.assertEqual(len(menu['entries']),21)
+        self.assertTrue(any(entry['title']=='近期研究质量' for entry in menu['entries']))
         self.assertIn('持续研究框架',[entry['title'] for entry in menu['entries']])
         self.assertEqual(before,self.db.total_changes)
 

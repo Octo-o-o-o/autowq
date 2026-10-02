@@ -186,6 +186,7 @@ TEMP_CYCLE_CHOICES = (1, 3, 5, 10)
 INTERVALS = [(300, ('5 分钟', '5 min')), (900, ('15 分钟', '15 min')), (1800, ('30 分钟', '30 min')),
              (3600, ('1 小时', '1 hour')), (7200, ('2 小时', '2 hours')), (21600, ('6 小时', '6 hours'))]
 DAILIES = [(10, ('10 轮', '10 cycles')), (20, ('20 轮', '20 cycles')), (40, ('40 轮', '40 cycles')), (80, ('80 轮', '80 cycles'))]
+LANES = [(1, ('1 条（串行）', '1 (serial)')), (2, ('2 条', '2 lanes')), (3, ('3 条', '3 lanes')), (4, ('4 条', '4 lanes'))]
 TOTALS = [(50, ('50 轮', '50 cycles')), (100, ('100 轮', '100 cycles')), (150, ('150 轮', '150 cycles')), (300, ('300 轮', '300 cycles'))]
 LANGUAGES = [('auto', ('跟随系统（自动）', 'Follow system (auto)')),
              ('zh', ('中文', '中文')), ('en', ('English', 'English'))]
@@ -336,6 +337,14 @@ def settings_items(se, lang):
                 [radio(text(lang, zh, en), 'config', f'interval_s={value}', se.get('interval_s') == value)
                  for value, (zh, en) in INTERVALS]
                 + _current_note([(v, 0) for v, _ in INTERVALS], se.get('interval_s'), text(lang, '秒', 's'), lang)),
+        submenu(text(lang, '并行泳道', 'Parallel lanes'),
+                [info(text(lang, '每条泳道是一轮完整的研究→审查→模拟；研究与审查必须不同渠道，'
+                               '同一渠道同一时刻只有一个调用，模拟与提交仍串行。对在途轮次不打断，下一轮起生效。',
+                               'Each lane is a full research→review→simulate cycle; research and review must use different channels, '
+                               'one call per channel at a time, and simulation/submission stay serial. Applies to the next cycles.'))]
+                + [radio(text(lang, zh, en), 'config', f'concurrent_lanes={value}', se.get('concurrent_lanes') == value)
+                   for value, (zh, en) in LANES]
+                + _current_note([(v, 0) for v, _ in LANES], se.get('concurrent_lanes'), text(lang, '条', 'lanes'), lang)),
         submenu(text(lang, '每日轮数上限', 'Daily cycle limit'),
                 [radio(text(lang, zh, en), 'config', f'max_cycles_per_day={value}', se.get('max_cycles_per_day') == value)
                  for value, (zh, en) in DAILIES]
@@ -368,12 +377,18 @@ def model_items(se, lang):
 
 
 def run_actions(st, lang):
-    """开始/停止互斥；有进行中的轮次时用取消替换立刻运行。"""
+    """开始/停止互斥；有进行中的轮次时用取消替换立刻运行；多泳道时按轮次取消。"""
     paused = bool(st.get('paused'))
     enabled = bool(st.get('enabled'))
     cycle_open = bool(st.get('cycle_open'))
+    lanes = st.get('lanes') or []
     rows = []
-    if cycle_open:
+    if len(lanes) > 1:
+        rows.append(submenu(text(lang, '取消轮次…', 'Cancel cycle…'),
+                            [action(text(lang, f"泳道{(item.get('lane') or 0)+1} · 第{item.get('cycle_id')}轮 · {item.get('state_label') or item.get('state')}",
+                                          f"Lane {(item.get('lane') or 0)+1} · cycle {item.get('cycle_id')} · {item.get('state_label') or item.get('state')}"),
+                                    'cancel-cycle', str(item.get('cycle_id'))) for item in lanes]))
+    elif cycle_open:
         rows.append(action(text(lang, '取消当前轮次', 'Cancel current cycle'), 'cancel-cycle'))
     elif not paused:
         rows.append(action(text(lang, '立刻运行下一轮', 'Run next cycle now'), 'run-next'))
@@ -407,6 +422,12 @@ def menu_model(state):
         info(text(lang, '下一轮：', 'Next cycle: ') + (st.get('next_at') or text(lang, '待当前任务完成／调度检查', 'awaiting current task / scheduler check'))),
     ]
     items += [info(text(lang, '下轮', 'Next: ') + str(m.get('title', text(lang, '未知', 'unknown')))) for m in st.get('next_models') or []]
+    for item in st.get('lanes') or []:
+        pair = ' → '.join(x for x in (item.get('research'), item.get('review')) if x)
+        items.append(info(text(lang, f"泳道{(item.get('lane') or 0)+1} · 第{item.get('cycle_id')}轮 · {item.get('state_label') or item.get('state')}"
+                                     + (f"（{pair}）" if pair else ''),
+                               f"Lane {(item.get('lane') or 0)+1} · cycle {item.get('cycle_id')} · {item.get('state_label') or item.get('state')}"
+                                     + (f" ({pair})" if pair else ''))))
     items += [
         sep(),
         submenu(text(lang, f"轮次历史（{hist.get('count', '…')}）", f"Cycle history ({hist.get('count', '…')})"),

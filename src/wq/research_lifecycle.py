@@ -29,6 +29,42 @@ def arm_cycles(conn, experiment_id, arm):
     return {r['cycle_id'] for r in conn.execute('SELECT * FROM learning_assignments') if r['experiment_id'] in ids and r['arm']==arm}
 
 
+def experiment_cycle_budget(conn):
+    """当前实验血缘的轮数：已用、上限、还剩。没有实验时返回 None。"""
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='learning_experiments'").fetchone():
+        return None
+    row = conn.execute('SELECT experiment_id FROM learning_experiments ORDER BY created_at DESC, rowid DESC LIMIT 1').fetchone()
+    if not row:
+        return None
+    left = remaining(conn, row[0])
+    limit = document(conn, left['root_experiment'])['max_cycles']
+    return {'experiment_id': row[0], 'root': left['root_experiment'],
+            'used': left['used_cycles'], 'limit': limit, 'remaining': left['cycles']}
+
+
+def set_experiment_cycle_limit(conn, limit):
+    """把实验总轮数改成用户选定的上限。不改基线哈希，请求上限至少跟到这个轮数，避免另一道隐藏封顶。"""
+    if type(limit) is not int or isinstance(limit, bool) or not 2 <= limit <= 100000:
+        raise ValueError('实验轮数上限需在 2–100000 之间')
+    budget = experiment_cycle_budget(conn)
+    if not budget:
+        raise ValueError('当前没有进行中的实验')
+    if limit < budget['used']:
+        raise ValueError(f"实验已经用了 {budget['used']} 轮，上限不能低于已用轮数")
+    _write_cycle_limit(conn, budget['root'], limit, limit)
+    assigned = conn.execute('SELECT COUNT(*) FROM learning_assignments WHERE experiment_id=?', (budget['experiment_id'],)).fetchone()[0]
+    if budget['experiment_id'] != budget['root']:
+        _write_cycle_limit(conn, budget['experiment_id'], limit - (budget['used'] - assigned), limit)
+    return experiment_cycle_budget(conn)
+
+
+def _write_cycle_limit(conn, experiment_id, max_cycles, request_floor):
+    doc = document(conn, experiment_id)
+    doc['max_cycles'] = max_cycles
+    doc['max_requests_per_arm'] = max(int(doc.get('max_requests_per_arm') or 0), request_floor)
+    conn.execute('UPDATE learning_experiments SET document_json=? WHERE experiment_id=?', (json.dumps(doc), experiment_id))
+
+
 def remaining(conn, experiment_id):
     root,ids=lineage(conn,experiment_id);contract=document(conn,root)
     cycles=sum(r[0] in ids for r in conn.execute('SELECT experiment_id FROM learning_assignments'))

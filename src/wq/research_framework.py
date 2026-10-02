@@ -82,6 +82,8 @@ def sync_gaps(conn,p):
             profile=campaign['execution_profiles'].get(step['profile']) or next(iter(campaign['execution_profiles'].values()))
             if not h.get('steps'):profile={**profile,'settings':h.get('settings',profile['settings'])}
             roles=sorted(set(r for rs in step.get('roles_by_arm',{}).values() for r in rs))
+            if not h.get('steps'):
+                roles=[r for r in h.get('required_roles',[]) if r in profile['bindings']]
             contract=step.get('data_contract') or {}
             status=events.eligibility(p,h,step) if h.get('steps') else {'ready':False,'reasons':[]}
             requirements=research_contracts.requirements(h['id'],h.get('required_assertions'))
@@ -96,16 +98,18 @@ def sync_gaps(conn,p):
                 capability_reason=lambda r:r['code'] in capability_codes
                 predicate_reasons=[r for r in reasons if (capability_reason(r) if predicate=='collector_capability' else not capability_reason(r) and r.get('subject') in (None,predicate))]
                 assertions={a['predicate']:a for a in contract.get('assertions',[])}
-                valid=(predicate in assertions and not predicate_reasons) if predicate!='collector_capability' else status.get('collector_capability',{}).get('ready',False)
+                valid=(bool(h.get('steps')) and predicate in assertions and not predicate_reasons) if predicate!='collector_capability' else status.get('collector_capability',{}).get('ready',False)
                 source_hash=util.sha256_json(source) if source else None
                 state='validated' if valid else 'unsupported' if h['id']=='H-V2' else 'owner_required'
                 source_identity=None
+                if old and old.get('receipt_kind')=='delegated_inbox_envelope' and not valid:
+                    state=old['state'] if old['state'] in ('collected','waiting_handoff') else state
                 if source and not valid:
                     if util.now()>=util.parse_iso(source['valid_until']):state='expired'
                     else:
                         source_identity=file_identity(source['source']['path']) if source['adapter']=='local_material_v1' else source_hash
                         matching=old and old.get('source_hash')==source_hash and old.get('source_identity')==source_identity
-                        state=old['state'] if matching and old['state'] in ('collected','rejected','waiting_retry','exhausted') else 'fetchable'
+                        state=old['state'] if matching and old['state'] in ('collected','waiting_handoff','rejected','waiting_retry','exhausted') else 'fetchable'
                 basis={'contract':contract,'reasons':predicate_reasons,'collector':profile.get('observation_collectors'),
                        'source_hash':source_hash,'source_identity':source_identity}
                 doc={**subject,'gap_id':gid,'state':state,'input_hash':util.sha256_json(basis),
@@ -115,7 +119,7 @@ def sync_gaps(conn,p):
                      'reason':predicate_reasons or ([] if valid else [{'code':'OWNER_SEMANTIC_OR_ADAPTER_CONTRACT_REQUIRED'}]),
                      'owner_required':not valid,'next_trigger':'source_or_contract_revision' if state in ('owner_required','rejected','exhausted','unsupported') else 'evidence_or_time_change'}
                 if old and old.get('source_hash')==source_hash and old.get('source_identity')==source_identity:
-                    for key in ('task_id','receipt','attempts','next_attempt_at','last_error'):
+                    for key in ('task_id','receipt','attempts','next_attempt_at','last_error','verification','receipt_kind'):
                         if key in old:doc[key]=old[key]
                 if state=='collected':doc['next_trigger']='semantic_contract_verification'
                 result.append(record_gap(conn,doc,previous))
@@ -165,6 +169,8 @@ def evidence_candidates(conn,cfg):
     for gap in latest(conn,'research_gap','gap_id').values():
         source=sources.get(gap['gap_id'])
         if gap['state'] not in ('fetchable','waiting_retry') or not source:continue
+        if util.now()>=util.parse_iso(source['valid_until']):
+            record_gap(conn,{**gap,'state':'expired','next_trigger':'authority_or_source_change'});continue
         if source['adapter']!='local_material_v1':
             until=cfg.get('brain_api','authorized_until')
             if not cfg.get('brain_api','enabled') or not until or util.now()>=util.parse_iso(until):continue
@@ -203,7 +209,7 @@ def choose(conn,candidates):
             if selection['kind']==candidate['kind'] or not any(x['kind']==candidate['kind'] for x in selection.get('options',[])):break
             skipped+=1
         if skipped>=4:return candidate
-    priorities={'reassess':0,'evidence':1,'maintenance':2,'research':3}
+    priorities={'verify':0,'reassess':1,'evidence':2,'maintenance':3,'research':4}
     def score(x):
         age=(util.now()-util.parse_iso(x['first_seen'])).total_seconds()
         return (0 if age>=86400 else 1,priorities[x['kind']],x['first_seen'],x['id'])
@@ -223,24 +229,33 @@ def _tick(conn,cfg):
     setup(conn)
     if not enabled(cfg):return {'state':'disabled','allow_research':True}
     if store.is_paused(conn):return {'state':'paused','allow_research':False}
-    if conn.execute("SELECT 1 FROM tasks WHERE status IN ('claimed','running','unknown')").fetchone():return {'state':'waiting_inflight','allow_research':True}
-    if conn.execute("SELECT 1 FROM research_cycles WHERE state!='closed'").fetchone():return {'state':'advancing_cycle','allow_research':True}
-    p=autopilot.policy(cfg);sync_gaps(conn,p)
-    if conn.execute("SELECT 1 FROM tasks WHERE status='queued' AND not_before<=?",(util.now_iso(),)).fetchone():
+    # UNKNOWN 冻结一切；泳道轮次的模型调用常态在途，不再挡住框架的证据/重评工作。
+    if conn.execute("SELECT 1 FROM tasks WHERE status='unknown'").fetchone():return {'state':'waiting_inflight','allow_research':True}
+    p=autopilot.policy(cfg)
+    from . import research_meta,research_evidence
+    research_meta.sync_gaps(conn,cfg,p,sync_gaps)
+    if research_meta.enabled(cfg):
+        research_evidence.prepare(conn,cfg,p);research_evidence.incoming(conn,cfg)
+    # 框架自己派发的在途/待派发工作仍挡新选择；各泳道的模型任务不在此列。
+    if conn.execute("SELECT 1 FROM tasks WHERE status='queued' AND kind!='agent_call' AND not_before<=?",(util.now_iso(),)).fetchone():
         return {'state':'waiting_queue','allow_research':False}
-    candidates=reassessment_candidates(conn)+evidence_candidates(conn,cfg)
+    candidates=reassessment_candidates(conn)
+    if not research_meta.enabled(cfg) or research_evidence.daily_capacity(conn):
+        candidates+=research_evidence.receipt_candidates(conn,cfg) if research_meta.enabled(cfg) else []
+        candidates+=evidence_candidates(conn,cfg)
     last=store.get_flag(conn,'research_learning_maintenance_at')
     if cfg.get('research_learning','maintenance_enabled',default=False) and (not last or (util.now()-util.parse_iso(last)).total_seconds()>=21600):
         candidates.append({'id':'maintenance:'+(last or 'initial'),'kind':'maintenance','first_seen':last or util.now_iso(),
                            'reason':'Due learning and contribution maintenance','estimated_model_calls':0,'estimated_api_reads':0})
-    if research_available(conn,cfg,p):
+    permit=research_meta.discovery_permission(conn,cfg,p) if research_meta.enabled(cfg) else {'allowed':True}
+    if research_available(conn,cfg,p) and permit['allowed']:
         cycle=conn.execute('SELECT COALESCE(MAX(cycle_id),0) FROM research_cycles').fetchone()[0]
         previous=[d for _,d in events.records(conn,'research_work_selected')]
-        if not previous or previous[-1].get('research_watermark')!=cycle:
-            candidates.append({'id':'research:'+str(cycle),'kind':'research','research_watermark':cycle,'first_seen':util.now_iso(),
-                               'reason':'Preserve bounded new-research exploration','estimated_model_calls':None,'estimated_api_reads':None})
+        pending=next((d for d in reversed(previous) if d.get('kind')=='research' and d.get('research_watermark')==cycle),None)
+        candidates.append({'id':'research:'+str(cycle),'kind':'research','research_watermark':cycle,'first_seen':pending['first_seen'] if pending else util.now_iso(),
+                           'reason':'Preserve bounded new-research exploration','estimated_model_calls':None,'estimated_api_reads':None})
     selected=choose(conn,candidates)
-    if not selected:return {'state':'waiting_for_changed_evidence','allow_research':True}
+    if not selected:return {'state':permit.get('reason','waiting_for_changed_evidence') if not permit['allowed'] else 'waiting_for_changed_evidence','allow_research':False,'allow_existing_lifecycle':True,'allow_new_quant_cycle':False}
     decision={**selected,'options':[{'id':x['id'],'kind':x['kind'],'reason':x['reason']} for x in candidates],
               'policy_hash':util.sha256_json(p),'selection_version':'bounded_work_v1'}
     # Repeated waiting does not create repeated selection records or model calls.
@@ -250,7 +265,7 @@ def _tick(conn,cfg):
         result=research_maintenance.tick(conn,cfg,force=True)
         return {'state':'maintenance','result':result,'allow_research':False}
     if selected['kind']=='research':return {'state':'research','allow_research':True}
-    kind='research_reassess' if selected['kind']=='reassess' else 'research_evidence'
+    kind={'reassess':'research_reassess','evidence':'research_evidence','verify':'research_evidence_verify'}[selected['kind']]
     tid,created=store.enqueue_task(conn,kind,selected,selected['id'],max_attempts=2)
     return {'state':'queued','task_id':tid,'created':created,'allow_research':False}
 
@@ -271,7 +286,17 @@ def evidence_step(conn,cfg,task,payload,resources=None):
     if not gap or not source or util.sha256_json(source)!=payload['source_hash']:return 'blocked',{},'Evidence source superseded'
     if util.now()>=util.parse_iso(source['valid_until']):return 'blocked',{},'Evidence source authorization expired'
     try:
+        from . import research_meta,research_evidence
+        group=util.sha256_json({'adapter':source['adapter'],'source':source['source'],'account':cfg.get('account_alias')})
+        prior=[d for _,d in events.records(conn,'research_source_collected') if d['source_identity']==group]
+        if source['adapter']=='local_material_v1' and file_identity(source['source']['path'])!=source['source']['sha256']:
+            raise ValueError('Registered material changed')
+        if research_meta.enabled(cfg) and source['adapter']=='local_material_v1' and prior and file_identity(prior[-1]['receipt']['path'])==prior[-1]['receipt']['sha256']:
+            receipt=prior[-1]['receipt']
+            record_gap(conn,{**gap,'state':'collected','task_id':task['task_id'],'receipt':receipt,'attempts':payload['attempt'],'next_trigger':'semantic_contract_verification'})
+            return 'succeeded',{'gap_id':gap['gap_id'],'receipt':receipt,'semantic_authority':0,'shared_material':True},None
         if source['adapter']=='local_material_v1':
+            if research_meta.enabled(cfg):research_evidence.reserve_read(conn,cfg,source)
             raw=Path(source['source']['path']).read_bytes()
             if hashlib.sha256(raw).hexdigest()!=source['source']['sha256']:raise ValueError('Local material hash differs from registered source')
         else:
@@ -283,10 +308,12 @@ def evidence_step(conn,cfg,task,payload,resources=None):
                 from .brain_jobs import later
                 return later(conn,task['task_id'],(util.parse_iso(cooldown)-util.now()).total_seconds(),'Respect shared read cooldown')
             client=BrainClient(cfg.private_dir)
+            if research_meta.enabled(cfg):research_evidence.reserve_read(conn,cfg,source)
             if resources is not None:resources['api_read_attempts']+=1
             doc=catalog.field_snapshot(client,source['source']['field_id'],source['source']['query']) if source['adapter']=='brain_field_metadata_v1' else catalog.operator_snapshot(client)
             raw=json.dumps(doc,ensure_ascii=False,sort_keys=True).encode()
         receipt=research_observation.retain_bytes(Path(cfg.private_dir)/'research-evidence',raw)
+        if research_meta.enabled(cfg):events.append_once(conn,'source-collected:'+group+':'+receipt['sha256'],'research_source_collected',{'source_identity':group,'receipt':receipt})
         record_gap(conn,{**gap,'state':'collected','task_id':task['task_id'],'receipt':receipt,
                          'attempts':payload['attempt'],'next_trigger':'semantic_contract_verification',
                          'next_attempt_at':None})
@@ -324,7 +351,8 @@ def dispatch(conn,cfg,task,payload):
     resources={'task_id':task['task_id'],'kind':task['kind'],'model_calls':0,
                'api_read_attempts':0,'outcome':'interrupted'}
     try:
-        result=(evidence_step(conn,cfg,task,payload,resources) if task['kind']=='research_evidence'
+        from . import research_evidence
+        result=(research_evidence.verify(conn,cfg,task,payload) if task['kind']=='research_evidence_verify' else evidence_step(conn,cfg,task,payload,resources) if task['kind']=='research_evidence'
                 else reassess_step(conn,cfg,task,payload))
         resources['outcome']=result[0]
         return result
@@ -338,6 +366,39 @@ def dispatch(conn,cfg,task,payload):
         # Count logical reads; transport retries, if any, remain in the API transport logs.
         prior=events.records(conn,'research_work_resources')
         events.append_once(conn,'work-resources:'+str(len(prior)+1),'research_work_resources',resources)
+
+
+def progress(conn,cfg):
+    """Read-only quality and experiment health from the current ledger snapshot."""
+    from . import research_learning as learning,research_lifecycle as lifecycle,research_maintenance,research_meta
+    tables={r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    result={'recent_window':20,'recent_closed':0,'meta_mechanism':research_meta.state(conn),'base_status_counts':{},'learning_configured':cfg.get('research_learning','enabled',default=True),
+            'learning_state':research_maintenance.state(conn),'experiment':None}
+    if 'research_cycles' in tables:
+        cycles=list(conn.execute("SELECT cycle_id,simulation_task FROM research_cycles WHERE state='closed' ORDER BY cycle_id DESC LIMIT 20"))
+        result['recent_closed']=len(cycles)
+        result['recent_cycles']=[r['cycle_id'] for r in cycles]
+        counts={}
+        for row in cycles:
+            status='not_run' if not row['simulation_task'] else 'missing_result'
+            if row['simulation_task'] and 'tasks' in tables:
+                task=conn.execute('SELECT status FROM tasks WHERE task_id=?',(row['simulation_task'],)).fetchone()
+                if task and task[0] in ('queued','claimed','running'):status='pending'
+            if row['simulation_task'] and {'brain_runs','simulations'}<=tables:
+                sim=conn.execute('SELECT s.status FROM brain_runs b JOIN simulations s ON s.remote_id=b.alpha_id AND s.synthetic=0 WHERE b.task_id=?',(row['simulation_task'],)).fetchone()
+                if sim:status=sim[0]
+            counts[status]=counts.get(status,0)+1
+        result['base_status_counts']=counts
+    if 'learning_experiments' in tables:
+        row=conn.execute('SELECT * FROM learning_experiments ORDER BY created_at DESC,rowid DESC LIMIT 1').fetchone()
+        if row:
+            doc=json.loads(row['document_json']);current=learning.current_baseline(cfg)
+            stopped=lifecycle.stop_kind(conn,row['experiment_id'])
+            drift=[key for key in current if current[key]!=doc['baseline'].get(key)]
+            result['experiment']={'id':row['experiment_id'],'stop_type':stopped,'baseline_changes':drift,
+                                  'remaining':lifecycle.remaining(conn,row['experiment_id']),
+                                  'next_action':'approve_current_epoch' if stopped=='baseline_superseded' else 'retain_owner_stop' if stopped=='owner_stop' else 'review_baseline_change' if drift else 'observe_registered_comparison'}
+    return result
 
 
 def report(conn):
@@ -356,7 +417,7 @@ def command(args):
     from . import db,autopilot,research_agenda,research_lifecycle,research_knowledge
     cfg=Config.load(args.config,str(Path.cwd()));conn=db.connect(cfg.db_path)
     try:
-        if args.action=='report':result={**report(conn),'agenda':research_agenda.report(conn),'enabled':enabled(cfg)}
+        if args.action=='report':result={**report(conn),'agenda':research_agenda.report(conn),'enabled':enabled(cfg),'progress':progress(conn,cfg)}
         else:
             setup(conn)
             doc=util.read_json(args.file) if args.file else None

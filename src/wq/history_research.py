@@ -133,12 +133,16 @@ def progress(conn,cfg):
 
 def tick(conn,cfg):
     setup(conn);progress(conn,cfg)
+    from . import research_meta
+    if research_meta.enabled(cfg):return  # Deterministic meta controller replaces extra idle model reviews.
     settings=cfg.get('history_research',default={})
     if not settings.get('enabled'):return
     every=settings.get('every_cycles',5);hours=settings.get('min_interval_hours',24)
     if type(every) is not int or every<1 or type(hours) not in (int,float) or hours<1:raise ValueError('Invalid history research cadence')
-    if conn.execute("SELECT 1 FROM tasks WHERE status IN ('queued','claimed','running','unknown')").fetchone():return
-    if conn.execute("SELECT 1 FROM research_cycles WHERE state!='closed'").fetchone():return
+    # 多泳道下开放轮次是常态，不再挡住历史复盘：复盘任务仍走同一受控队列与
+    # 渠道串行槽。UNKNOWN 冻结一切；同一份复盘在途不重复开。
+    if conn.execute("SELECT 1 FROM tasks WHERE status='unknown' LIMIT 1").fetchone():return
+    if conn.execute("SELECT 1 FROM history_research WHERE state IN ('researching','reviewing') LIMIT 1").fetchone():return
     evidence=snapshot(conn)
     last=conn.execute('SELECT snapshot_json,created_at FROM history_research ORDER BY created_at DESC LIMIT 1').fetchone()
     previous=json.loads(last[0])['closed_cycles'] if last else 0

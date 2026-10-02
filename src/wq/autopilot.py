@@ -12,9 +12,8 @@ DDL = '''CREATE TABLE IF NOT EXISTS research_cycles(
  policy_json TEXT NOT NULL, policy_hash TEXT NOT NULL,
  research_task TEXT, review_task TEXT, simulation_task TEXT,
  candidate_json TEXT, candidate_hash TEXT, family_hash TEXT,
+ lane INTEGER NOT NULL DEFAULT 0,
  outcome TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
- CREATE UNIQUE INDEX IF NOT EXISTS one_active_research_cycle
- ON research_cycles((1)) WHERE state != 'closed';
  CREATE TABLE IF NOT EXISTS research_events(
  event_id INTEGER PRIMARY KEY AUTOINCREMENT, cycle_id INTEGER,
  kind TEXT NOT NULL, detail TEXT NOT NULL, created_at TEXT NOT NULL);
@@ -44,6 +43,44 @@ def setup(conn):
     # 不用executescript，避免它隐式提交调用者事务。
     for sql in DDL.split(';'):
         if sql.strip(): conn.execute(sql)
+    cols = {r[1] for r in conn.execute('PRAGMA table_info(research_cycles)')}
+    if 'lane' not in cols:
+        conn.execute('ALTER TABLE research_cycles ADD COLUMN lane INTEGER NOT NULL DEFAULT 0')
+    # 旧库的唯一索引约束「全库只能有一个未关闭轮次」；泳道化后收缩为「每泳道一个」。
+    conn.execute('DROP INDEX IF EXISTS one_active_research_cycle')
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS one_active_per_lane "
+                 "ON research_cycles(lane) WHERE state!='closed'")
+
+
+def lane_limit(cfg):
+    """同时开放的研究泳道数：autopilot.concurrent_lanes，默认 1（与原单轮行为一致）。
+
+    每条泳道是一个完整轮次（研究→审查→模拟），轮次内部仍串行推进；
+    泳道数只决定并行存在多少条这样的轮次。"""
+    raw = cfg.get('autopilot', 'concurrent_lanes', default=1)
+    if type(raw) is not int or not 1 <= raw <= 8:
+        raise ValueError('autopilot.concurrent_lanes 须为 1..8 的整数')
+    return raw
+
+
+def _lane_gate_at(conn, lane, cfg):
+    """该泳道下一次允许创建新轮次的时刻。单泳道下 lane0 仍以全局 autopilot_next_at 为准
+    （手动拨到过去=立即放行、拨到未来=顺延），与旧语义逐字节一致。"""
+    if lane == 0 and lane_limit(cfg) == 1:
+        return store.get_flag(conn, 'autopilot_next_at') or store.get_flag(conn, 'autopilot_next_at:0')
+    return store.get_flag(conn, f'autopilot_next_at:{lane}')
+
+
+def _refresh_next_flag(conn, cfg):
+    """autopilot_next_at 汇总成「最早有泳道可开新轮」的时刻，供状态/菜单展示。"""
+    values = []
+    for i in range(lane_limit(cfg)):
+        v = store.get_flag(conn, f'autopilot_next_at:{i}')
+        if v: values.append(v)
+    if len(values) < lane_limit(cfg):
+        store.set_flag(conn, 'autopilot_next_at', util.now_iso())
+    else:
+        store.set_flag(conn, 'autopilot_next_at', min(values, key=util.parse_iso))
 
 
 def event(conn, cid, kind, detail):
@@ -208,7 +245,7 @@ def budget_forecast(conn, cfg):
     if left <= 0:
         warning = '自动研究周预算已耗尽'
     elif exhaust < horizon:
-        warning = f'按最近24小时速率（{recent}次/日），周预算约在 {exhaust.astimezone().strftime("%m-%d %H:%M")} 耗尽，早于本周结束/授权到期；如需持续运行请放大 autopilot.max_simulations_per_week'
+        warning = f'按最近24小时速率（{recent}次/日），周预算约在 {exhaust.astimezone().strftime("%m-%d %H:%M")} 耗尽，早于本周结束/授权到期；应降低新请求节奏，转向补证、重评或等待原合同允许的下一周；不自动增加额度'
     return {'left': left, 'rate_per_day': recent, 'exhaust_at': exhaust.isoformat(), 'warning': warning}
 
 
@@ -268,10 +305,31 @@ def _remote_simulation_inflight(conn, tasks):
     return False
 
 
+def _cycle_agent_roots(conn, tasks):
+    """本轮 agent_call 任务的 job_dir 集合；取消单轮时只杀落在这些目录下的调用。"""
+    roots = []
+    for task in tasks:
+        if task.get('kind') != 'agent_call':
+            continue
+        row = conn.execute('SELECT payload_json FROM tasks WHERE task_id=?', (task['task_id'],)).fetchone()
+        try:
+            payload = json.loads(row['payload_json']) if row else {}
+        except (ValueError, TypeError):
+            continue
+        if payload.get('job_dir'):
+            roots.append(str(payload['job_dir']))
+    return roots
+
+
 def _stop_local_cycle_work(conn, tasks):
     running_agent = any(task.get('kind') == 'agent_call' and task.get('status') in ('claimed', 'running') for task in tasks)
     if running_agent:
+        roots = _cycle_agent_roots(conn, tasks)
         for call in store.live_agent_calls(conn):
+            prompt = str(call['prompt_file'] or '')
+            # 其它泳道的活调用不受影响；提示词不在本轮工作目录内的一律不碰。
+            if roots and not any(prompt.startswith(r) for r in roots):
+                continue
             pid = call['pid']
             if pid and store.pid_alive(pid):
                 util.kill_tree(int(pid), force=False)
@@ -336,8 +394,8 @@ def _task_remote_inflight(conn, task):
 def stop_now(conn, cfg):
     """立刻停掉本地任务并暂停。已经发到平台的模拟不撤回，只不再往下开新轮。"""
     setup(conn)
-    row = conn.execute("SELECT * FROM research_cycles WHERE state!='closed' ORDER BY cycle_id DESC LIMIT 1").fetchone()
-    tasks = _cycle_tasks(conn, dict(row)) if row else []
+    rows = [dict(r) for r in conn.execute("SELECT * FROM research_cycles WHERE state!='closed' ORDER BY cycle_id")]
+    tasks = [task for row in rows for task in _cycle_tasks(conn, row)]
     remote = [task for task in tasks if _task_remote_inflight(conn, task)]
     local = [task for task in tasks if task['task_id'] not in {item['task_id'] for item in remote}]
     _kill_live_agents(conn, '用户立即停止')
@@ -346,7 +404,7 @@ def stop_now(conn, cfg):
         for task in local:
             if task.get('status') in ('queued', 'claimed', 'running', 'blocked'):
                 store.finish_task(conn, task['task_id'], 'aborted', error='用户立即停止')
-        if row:
+        for row in rows:
             fresh = conn.execute("SELECT * FROM research_cycles WHERE cycle_id=? AND state!='closed'", (row['cycle_id'],)).fetchone()
             if fresh:
                 store.set_flag(conn, 'autopilot_run_next', '0')
@@ -364,13 +422,17 @@ def stop_now(conn, cfg):
     return {'remote_left': len(remote)}
 
 
-def cancel_open_cycle(conn, cfg):
-    """结束当前未归档轮次，并停掉这一轮还没发到平台的本地任务。
+def cancel_open_cycle(conn, cfg, cycle_id=None):
+    """结束指定（默认最新一条）未归档轮次，并停掉这一轮还没发到平台的本地任务。
 
-    已 POST 的模拟不撤回。自动研究开关和暂停状态保持原样，下一轮仍按间隔。
+    已 POST 的模拟不撤回。自动研究开关、暂停状态和其它泳道保持原样，
+    空出的泳道仍按自己的间隔重新开轮。
     """
     setup(conn)
-    row = conn.execute("SELECT * FROM research_cycles WHERE state!='closed' ORDER BY cycle_id DESC LIMIT 1").fetchone()
+    if cycle_id is None:
+        row = conn.execute("SELECT * FROM research_cycles WHERE state!='closed' ORDER BY cycle_id DESC LIMIT 1").fetchone()
+    else:
+        row = conn.execute("SELECT * FROM research_cycles WHERE cycle_id=? AND state!='closed'", (cycle_id,)).fetchone()
     if not row:
         return {'cancelled': False, 'reason': 'idle'}
     row = dict(row)
@@ -408,7 +470,11 @@ def request_run_next(conn, cfg):
         raise ValueError('已达到累计研究轮数上限')
     active = conn.execute("SELECT 1 FROM research_cycles WHERE state!='closed'").fetchone()
     store.set_flag(conn, 'autopilot_run_next', '1')
-    store.set_flag(conn, 'autopilot_next_at', util.now_iso())
+    now = util.now_iso()
+    store.set_flag(conn, 'autopilot_next_at', now)
+    # 「立刻运行」同时放开所有泳道的轮间等待；有轮次的泳道结束后立即接下一轮。
+    for i in range(lane_limit(cfg)):
+        store.set_flag(conn, f'autopilot_next_at:{i}', now)
     store.set_flag(conn, 'paused', '0')
     store.set_flag(conn, 'pause_origin', '')
     store.set_flag(conn, 'pause_reason', '')
@@ -431,6 +497,7 @@ def status(conn,cfg):
     setup(conn)
     scheduled = enabled(conn, cfg) or run_next_requested(conn)
     row=conn.execute("SELECT cycle_id,state,research_task,review_task,simulation_task,outcome,updated_at FROM research_cycles ORDER BY cycle_id DESC LIMIT 1").fetchone()
+    open_rows=[dict(r) for r in conn.execute("SELECT cycle_id,lane,state,research_task,review_task,simulation_task,outcome,updated_at FROM research_cycles WHERE state!='closed' ORDER BY lane,cycle_id")]
     text=store.get_flag(conn,'autopilot_message','尚未启用')
     next_at=store.get_flag(conn,'autopilot_next_at')
     if not scheduled: next_at=None
@@ -458,9 +525,21 @@ def status(conn,cfg):
     forecast=budget_forecast(conn,cfg) if scheduled else {'warning':None}
     if forecast['warning'] and '预算' not in text: text+='｜预警：'+forecast['warning']
     if next_at and util.parse_iso(next_at)<util.now(): next_at=None
+    open_cycles=[]
+    for r in open_rows:
+        plan=None
+        ev=conn.execute("SELECT detail FROM research_events WHERE cycle_id=? AND kind='route_plan' ORDER BY event_id DESC LIMIT 1",(r['cycle_id'],)).fetchone()
+        if ev:
+            try: plan=json.loads(ev[0])
+            except (ValueError,TypeError): plan=None
+        open_cycles.append({**r,'preset':store.get_flag(conn,f"cycle_preset_{r['cycle_id']}") or None,
+                            'research_preferred':(plan or {}).get('research_preferred'),
+                            'review_preferred':(plan or {}).get('review_preferred')})
     return {'total_cycles':conn.execute('SELECT COUNT(*) FROM research_cycles').fetchone()[0],
             'max_cycles_total':cfg.get('autopilot','max_cycles_total'),
             'enabled':enabled(conn,cfg),'run_next_requested':run_next_requested(conn),'paused':store.is_paused(conn),'message':text,
+            'concurrent_lanes':lane_limit(cfg),
+            'open_cycles':open_cycles,
             'next_cycle_at':next_at,
             'last_tick_at':store.get_flag(conn,'autopilot_last_tick'),
             'latest_cycle':dict(row) if row else None,
@@ -474,6 +553,10 @@ def status(conn,cfg):
 
 
 def finish(conn,cfg,row,outcome,problem=False):
+    from . import research_meta
+    if research_meta.enabled(cfg):
+        policy_doc=json.loads(row['policy_json'])
+        research_meta.record_discovery(conn,cfg,row['cycle_id'],research_meta.information_receipt(conn,row['cycle_id'],row.get('simulation_task')),policy_doc)
     conn.execute("UPDATE research_cycles SET state='closed',outcome=?,updated_at=? WHERE cycle_id=?",(outcome,util.now_iso(),row['cycle_id']))
     event(conn,row['cycle_id'],'closed',outcome)
     from . import research_learning
@@ -484,10 +567,13 @@ def finish(conn,cfg,row,outcome,problem=False):
     delay=0 if skip else int(cfg.get('autopilot','interval_s',default=3600))
     if problem:delay=max(delay,int(cfg.get('autopilot','error_cooldown_s',default=3600)))
     when = util.now() if delay == 0 else util.now()+dt.timedelta(seconds=max(60,delay))
-    store.set_flag(conn,'autopilot_next_at',when.isoformat())
+    # 轮间间隔按泳道记账：一条泳道结束只推迟它自己，别的泳道不受影响。
+    lane = row.get('lane') or 0
+    store.set_flag(conn,f'autopilot_next_at:{lane}',when.isoformat())
+    _refresh_next_flag(conn,cfg)
     store.set_flag(conn,'autopilot_run_next','0')
     tail = '；已按立刻运行跳过间隔' if skip else ('；下一轮由本地调度自动领取' if enabled(conn,cfg) else '；单轮请求已完成，自动运行未开启')
-    message(conn,'本轮结束：'+outcome+tail)
+    message(conn,f'本轮结束（泳道{lane}）：'+outcome+tail)
 
 
 def brain_preflight(conn, cfg, cache_s=300):
@@ -581,8 +667,8 @@ def same_route_channel(conn,a,b):
 
 
 def alternate_order(cfg, cid, role):
-    """单双轮互换研究/审查渠道：autopilot.alternate_research_providers=[A,B]。
-    单数轮 A 研究、B 审查；双数轮 B 研究、A 审查。只给优先顺序；渠道不可用时仍按链回落，审查仍必须与研究不同渠道。"""
+    """保底顺序：autopilot.alternate_research_providers=[A,B]。
+    单数轮 A 研究、B 审查；双数轮 B 研究、A 审查。它不盖过预设首选。"""
     pair = cfg.get('autopilot', 'alternate_research_providers', default=None)
     if pair is None: return None
     if not isinstance(pair, list) or len(pair) != 2 or any(not isinstance(x, str) for x in pair) or pair[0] == pair[1]:
@@ -591,23 +677,62 @@ def alternate_order(cfg, cid, role):
     return research if role == 'research' else research[::-1]
 
 
+def route_order(conn, cfg, cid, role):
+    """本轮该角色的渠道顺序：route_plan 登记的首选优先，互换对与预设其余渠道作保底。
+
+    泳道的首选渠道在建轮时登记进 route_plan；之后改预设或全局偏好都不会
+    改写本轮尚未开始的审查/研究应走的渠道。预设按本轮回绑（临时预设覆盖）解析。"""
+    data = routing.catalog(cfg)
+    routes = data['presets'][routing.active_preset(conn, cfg, data, cid)]['routes'].get(role) or []
+    head = routes[0] if routes else None
+    recorded = None
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='research_events'").fetchone():
+        row = conn.execute("SELECT detail FROM research_events WHERE cycle_id=? AND kind='route_plan' ORDER BY event_id DESC LIMIT 1", (cid,)).fetchone()
+        if row and row[0]:
+            try:
+                recorded = json.loads(row[0]).get('research_preferred' if role == 'research' else 'review_preferred')
+            except (TypeError, json.JSONDecodeError):
+                recorded = None
+    if recorded:
+        head = recorded
+    base = alternate_order(cfg, cid, role) or []
+    if recorded is None and not base:
+        return None
+    if not head:
+        return base or None
+    return [head] + [n for n in base if n != head]
+
+
 def make_job(conn,cfg,cid,role,text,exclude=None,order=None):
     from . import workflow
     from . import history_research
-    text=workflow.customize(cfg,role,text)+history_research.context(conn,cfg)
+    from . import research_meta
+    dual=research_meta.enabled(cfg)
+    frozen_key='dual-generation:'+str((__import__('wq.research_learning',fromlist=['active_experiment']).active_experiment(conn) or {}).get('experiment_id',cfg.get('research_dual_loop','root_id'))) if dual else None
+    frozen=json.loads(store.get_flag(conn,frozen_key,'null')) if dual else None
+    if dual and frozen is None:
+        from . import research_learning
+        frozen={'history_context':history_research.context(conn,cfg),'rules':research_learning.rules(conn)}
+        store.set_flag(conn,frozen_key,json.dumps(frozen))
+    text=workflow.customize(cfg,role,text)+(frozen['history_context'] if dual else history_research.context(conn,cfg))
     from . import research_learning as learning
     learning.setup(conn)
     if role=='research':
+        if dual:
+            research_meta.required_epoch(conn,cfg,cid)
+            store.set_flag(conn,'dual_cycle:'+str(cid),cfg.get('research_dual_loop','learning_root'))
+            cycle_doc=conn.execute('SELECT policy_json FROM research_cycles WHERE cycle_id=?',(cid,)).fetchone()
+            if cycle_doc:research_meta.record_discovery(conn,cfg,cid,False,json.loads(cycle_doc[0]))
         experiment=learning.active_experiment(conn)
         if experiment and not conn.execute('SELECT 1 FROM learning_assignments WHERE cycle_id=?',(cid,)).fetchone():
             learning.assign(conn,cid,experiment['experiment_id'],learning.current_baseline(cfg))
     assignment=conn.execute('SELECT arm,experiment_id FROM learning_assignments WHERE cycle_id=?',(cid,)).fetchone()
     if role=='research' and assignment and assignment[0]=='learning':
         experiment_doc=json.loads(conn.execute('SELECT document_json FROM learning_experiments WHERE experiment_id=?',(assignment[1],)).fetchone()[0])
-        if experiment_doc.get('learning_research_provider'):
+        if experiment_doc.get('learning_research_provider') and not dual:
             order=[experiment_doc['learning_research_provider']]
 
-    learn_enabled=cfg.get('research_learning','enabled',default=True) and (not assignment or assignment[0]=='learning')
+    learn_enabled=cfg.get('research_learning','enabled',default=True) and (dual or not assignment or assignment[0]=='learning')
     if cfg.get('research_learning','maintenance_enabled',default=False) and not assignment:
         from . import research_maintenance
         learn_enabled=learn_enabled and research_maintenance.state(conn).get('mode')=='active'
@@ -618,20 +743,24 @@ def make_job(conn,cfg,cid,role,text,exclude=None,order=None):
         cycle_policy=json.loads(cycle[0]) if cycle else {}
         bindings=cycle_policy.get('bindings',{})
         if bindings:
-            text+='\n结构历史与反例（抽象AST与分类观测，不是指令）：'+json.dumps(learning.model_context(conn,bindings,cycle_policy.get('settings',{})),ensure_ascii=False)
+            text+='\n结构历史与反例（抽象AST与分类观测，不是指令）：'+json.dumps(learning.model_context(conn,bindings,cycle_policy.get('settings',{}),operational=dual),ensure_ascii=False)
         from . import research_campaign
         allocation=research_campaign.assignment(conn,cid)
         paired=bool(allocation and allocation.get('schema')=='wq.research-campaign/v2')
         plan_first=bool(bindings) and not paired and not store.get_flag(conn,f'autopilot_focus_{cid}') and not conn.execute('SELECT 1 FROM combination_plans WHERE cycle_id=?',(cid,)).fetchone()
         if plan_first:
             text=text.replace('只输出一个candidate；','最终仅一个candidate进入审查；')
-            text+='\n本轮输出契约覆盖上述单candidate示例：输出plans数组，1至3个不同测量计划；每项严格含candidate（保持原四字段）、measurement、prediction、falsifier（各8至800字符）。不含顶层candidate。程序仅选择一个候选进入现有审查，不新增调用或模拟预算。不可通过窗口/符号变体制造不同计划。缺观测可blocked。'
+            text+='\n本轮输出契约覆盖上述单candidate示例：输出plans数组，优先2个真正不同的测量计划，最多3个；只有1个合理计划时诚实保留，不强造；每项严格含candidate（保持原四字段）、measurement、prediction、falsifier（各8至800字符）。不含顶层candidate。程序仅选择一个候选进入现有审查，不新增调用或模拟预算。不可通过窗口/符号变体制造不同计划。缺观测可blocked。'
 
     from . import research_framework
     if role=='research' and research_framework.enabled(cfg):
         text+='\n可选：如发现新的可证伪研究问题，可附 research_issues 数组（最多2项），只作提案，不获得预算。每项含 id(H-X开头稳定标识)、revision、mechanism、measurement、falsifier、profile、required_assertions、template=paired_intervention_v1。只有已登记 profile 可用；不写私有字段名。无法给出完整契约时省略。'
         from . import research_contracts
-        text+='\n允许的 profile ID：'+json.dumps(list((p.get('campaign') or {}).get('execution_profiles',{})))+'；required_assertions 至少包含：'+json.dumps(list(research_contracts.COMMON))
+        stored=conn.execute('SELECT policy_json FROM research_cycles WHERE cycle_id=?',(cid,)).fetchone()
+        cycle_policy=json.loads(stored[0]) if stored and stored[0] else {}
+        profiles=list((cycle_policy.get('campaign') or {}).get('execution_profiles') or {})
+        text+='\n允许的 profile ID：'+json.dumps(profiles)+'；required_assertions 至少包含：'+json.dumps(list(research_contracts.COMMON))
+        text+='\n新议题的 required_assertions 必须在以上四项之外包含至少一个与该机制测量直接相关的语义谓词（小写 snake_case，不能重复，总数最多24）。仅列四项会被拒绝。id 必须是未登记的 H-X 开头标识；已有方向的资料缺口不另建同名议题。revision 为正整数，mechanism/measurement/falsifier 各8至1600字符。'
     root=Path(cfg.private_dir)/'autopilot'/str(cid);root.mkdir(parents=True,exist_ok=True,mode=0o700)
     prompt=root/(role+'.md');prompt.write_text(text);prompt.chmod(0o600)
     # 仅这份公开概念提示进入受沙箱限制的副本。
@@ -674,12 +803,17 @@ class ReviewEvidenceError(ValueError):
 def fallback_once(conn, cfg, row, p, reason, original=None):
     """每轮一个额外模型调用；只处理已终止的模型失败/产物，不重放平台请求。"""
     if row['state'] not in ('researching', 'reviewing') or store.is_paused(conn): return False
+    from . import research_meta
+    if research_meta.enabled(cfg) and isinstance(original,dict) and isinstance(original.get('plans'),list):return False
     if util.sha256_json(p) != row['policy_hash']: return False
     if conn.execute('SELECT 1 FROM research_fallbacks WHERE cycle_id=?', (row['cycle_id'],)).fetchone(): return False
-    if conn.execute("SELECT 1 FROM tasks WHERE status IN ('unknown','claimed','running')").fetchone(): return False
+    # UNKNOWN 仍冻结一切；本泳道有在途任务时才让位，其它泳道的调用不拦截本轮补充。
+    if conn.execute("SELECT 1 FROM tasks WHERE status='unknown' LIMIT 1").fetchone(): return False
+    if any(t['status'] in ('claimed','running') for t in _cycle_tasks(conn,row)): return False
     role = 'review' if row['state'] == 'reviewing' else 'research'
     old = task(conn, row[role + '_task'])
     if old['status'] not in ('succeeded', 'failed'): return False
+    if store.get_flag(conn,'plans_seen:'+old['task_id']):return False
     route = conn.execute('SELECT snapshot_json,provider_index FROM task_routes WHERE task_id=?', (old['task_id'],)).fetchone()
     if not route: return False
     snap = json.loads(route['snapshot_json'])
@@ -1150,7 +1284,7 @@ def _advance_standard(conn,cfg,row,p):
         run=conn.execute('SELECT alpha_id FROM brain_runs WHERE task_id=?',(t['task_id'],)).fetchone()
         sim=conn.execute('SELECT status,stats_json FROM simulations WHERE remote_id=? AND synthetic=0',(run[0],)).fetchone() if run else None
         if not sim:raise ValueError('缺真实入账结果')
-        alphas=[('base',run[0])];notes=[]
+        alphas=[('base',run[0])];notes=[v['label']+'=预算不足，未运行' for v in variants if v['task_id'].startswith('skipped:')]
         for e in entries[1:]:
             vrun=conn.execute('SELECT alpha_id FROM brain_runs WHERE task_id=?',(e['task']['task_id'],)).fetchone()
             if e['task']['status']!='succeeded' or not vrun or not vrun[0]:
@@ -1165,10 +1299,15 @@ def _advance_standard(conn,cfg,row,p):
                     # 记录为已处理，避免每个 tick 重复判断；不占用请求。
                     conn.execute('INSERT INTO cycle_simulations VALUES(?,?,?,?,?)',(row['cycle_id'],label,'skipped:'+label,str(root/f'request-{label}.json'),util.now_iso()))
                     continue
-                rt,rcreated=brain_jobs.enqueue(conn,cfg,util.read_json(str(root/f'request-{label}.json')))
+                from .research_learning import RequestBudgetExhausted
+                try:rt,rcreated=brain_jobs.enqueue(conn,cfg,util.read_json(str(root/f'request-{label}.json')))
+                except RequestBudgetExhausted:
+                    event(conn,row['cycle_id'],'variant_skipped',label+' 原实验臂预约预算不足')
+                    conn.execute('INSERT INTO cycle_simulations VALUES(?,?,?,?,?)',(row['cycle_id'],label,'skipped:'+label,str(root/f'request-{label}.json'),util.now_iso()))
+                    continue
                 conn.execute('INSERT INTO cycle_simulations VALUES(?,?,?,?,?)',(row['cycle_id'],label,rt,str(root/f'request-{label}.json'),util.now_iso()))
                 event(conn,row['cycle_id'],'variant_enqueued',label+' '+rt+(' new' if rcreated else ' deduplicated'))
-            message(conn,f"第{row['cycle_id']}轮：基础结果满足预登记条件，派发 "+'、'.join(due));return
+            message(conn,f"第{row['cycle_id']}轮：基础结果满足预登记条件，处理分支 "+'、'.join(due));return
         from . import workflow
         if cfg.get('research_feedback','enabled') and workflow.stage_enabled(cfg,'feedback'):
             reports={}
@@ -1225,8 +1364,19 @@ def _advance_standard(conn,cfg,row,p):
             if payload.get('plan_contract_version') != 1: raise ValueError('未授权多计划输出契约')
             from . import research_learning
             from . import research_maintenance
+            from . import research_meta,research_strategy
+            dual=research_meta.enabled(cfg)
+            def preflight(c):
+                _,_,family=research_dsl.validate_candidate(c,p['bindings'])
+                if any(p['bindings'][r].get('cluster') in (p.get('paused_clusters') or []) for r in research_dsl.roles_used(c['ast'])):return 'paused_role'
+                d=research_strategy.family_decision(conn,c['ast'],family,row['cycle_id'],p,enabled=bool(cfg.get('research_learning','structural_diversity',default=False)))
+                return d['reason'] if d['blocked'] else None
+            assignment=conn.execute('SELECT experiment_id FROM learning_assignments WHERE cycle_id=?',(row['cycle_id'],)).fetchone()
+            key='dual-generation:'+str(assignment[0] if assignment else cfg.get('research_dual_loop','root_id'))
+            frozen=json.loads(store.get_flag(conn,key,'null')) if dual else None
             candidate=research_learning.select_plans(conn,row['cycle_id'],proposal,p['bindings'],p['settings'],
-                use_rules=research_maintenance.rules_enabled(conn,cfg,row['cycle_id']))
+                use_rules=research_maintenance.rules_enabled(conn,cfg,row['cycle_id']),preflight=preflight if dual else None,
+                frozen_rules=frozen['rules'] if frozen else None)
             if candidate is None:
                 finish(conn,cfg,row,'研究计划均为精确重复或不满足AST契约');return
 
@@ -1258,17 +1408,17 @@ def _advance_standard(conn,cfg,row,p):
         if decision['blocked']:finish(conn,cfg,row,'机制结构重复或结构探索上限：'+decision['reason']);return
         history=[{'cycle':r[0],'candidate':json.loads(r[1])} for r in conn.execute('SELECT cycle_id,candidate_json FROM research_cycles WHERE candidate_json IS NOT NULL AND cycle_id!=? ORDER BY cycle_id DESC LIMIT 40',(row['cycle_id'],))]
         history.append({'title':'基线机制：经营现金流相对正资产的截面强度排名','note':'平滑该基线本身不构成独立新机制；需要额外可证伪信息，不提供成绩'})
-        solo=routing.preset_is_solo(cfg,routing.active_preset(conn,cfg))
+        solo=routing.preset_is_solo(cfg,routing.active_preset(conn,cfg,cid=row['cycle_id']))
         review_text=review_prompt(candidate,history,feedback.model_context(conn) if cfg.get('research_feedback','enabled') else None,public_plan,p['bindings'])
         allocation=research_campaign.assignment(conn,row['cycle_id'])
         if allocation: review_text += research_campaign.prompt(p,allocation)
-        rt=make_job(conn,cfg,row['cycle_id'],'review',review_text,[] if solo else [provider(conn,t['task_id'])],None if solo else alternate_order(cfg,row['cycle_id'],'review'))
+        rt=make_job(conn,cfg,row['cycle_id'],'review',review_text,[] if solo else [provider(conn,t['task_id'])],None if solo else route_order(conn,cfg,row['cycle_id'],'review'))
         conn.execute("UPDATE research_cycles SET state='reviewing',review_task=? WHERE cycle_id=?",(rt,row['cycle_id']))
         event(conn,row['cycle_id'],'review_enqueued',rt)
     else:
         if conn.execute("SELECT 1 FROM tasks WHERE status='unknown' LIMIT 1").fetchone():
             message(conn,'存在UNKNOWN，完成对账前不派发新的研究模拟');return
-        if same_route_channel(conn,row['research_task'],row['review_task']) and not routing.preset_is_solo(cfg,routing.active_preset(conn,cfg)):
+        if same_route_channel(conn,row['research_task'],row['review_task']) and not routing.preset_is_solo(cfg,routing.active_preset(conn,cfg,cid=row['cycle_id'])):
             raise ValueError('研究和审查必须来自不同渠道')
         try:
             review = artifact(conn,t['task_id'])
@@ -1290,83 +1440,93 @@ def _advance_standard(conn,cfg,row,p):
         from . import workflow
         if not workflow.stage_enabled(cfg,"simulate"):
             finish(conn,cfg,row,"高级流程仅研究与审查，本轮不回测");return
+        # 建轮时只按当时余额粗查；多泳道并行下，放行模拟前再核一次周预算。
+        if week_budget_left(conn,cfg)<=0:
+            message(conn,f"第{row['cycle_id']}轮：自动研究周模拟预算不足，等待下周恢复后自动继续");return
         admit(conn,cfg,row,p)
 
 
-def tick(conn,cfg):
-    """必须在runner锁内执行；一次只推进一阶段，队列动作与状态同事务。"""
-    if not cfg.get('autopilot'):return
-    setup(conn);brain_jobs.setup(conn);store.set_flag(conn,'autopilot_last_tick',util.now_iso())
-    from . import brain_submission
+def _advance_guarded(conn,cfg,row,p):
+    """推进单条泳道一阶段；研究/审查期出错按原规则收尾，模拟期只留消息等下次。"""
+    conn.execute('BEGIN IMMEDIATE')
     try:
-        brain_submission.sync_standby(conn, cfg)
-        brain_submission.release_standby(conn, cfg)
+        advance(conn,cfg,row,p)
         conn.commit()
-    except (ValueError, OSError, KeyError, TypeError):
-        conn.rollback()
-    if not enabled(conn,cfg) and not run_next_requested(conn):message(conn,'自动补充任务已停用；现有在途任务单独对账');return
-    row=conn.execute("SELECT * FROM research_cycles WHERE state!='closed'").fetchone()
+    except (ValueError,KeyError,TypeError,OSError) as exc:
+        conn.execute('ROLLBACK')
+        if row['state'] in ('researching','reviewing'):
+            fresh=conn.execute('SELECT * FROM research_cycles WHERE cycle_id=?',(row['cycle_id'],)).fetchone()
+            if not fresh or fresh['state']=='closed':return
+            row=dict(fresh)
+            if row['state']=='researching':retain_rejected_candidate(conn,row)
+            finish(conn,cfg,row,'输入或验收错误：'+str(exc)[:180],problem=True)
+            conn.commit()
+        else:
+            message(conn,'需要处理自动研究错误：'+str(exc)[:180])
+            conn.commit()
+    except BaseException:
+        if conn.in_transaction:conn.execute('ROLLBACK')
+        raise
+
+
+def _owned_task_ids(conn, cycle_ids):
+    """开放轮次名下全部任务 id：轮次列、变体表与载荷回标三路合并。"""
+    ids=set()
+    if not cycle_ids:return ids
+    marks=','.join('?'*len(cycle_ids))
+    for r in conn.execute(f"SELECT research_task,review_task,simulation_task FROM research_cycles WHERE cycle_id IN ({marks})",tuple(cycle_ids)):
+        ids.update(x for x in r if x)
+    if _table_ready(conn,'cycle_simulations'):
+        for r in conn.execute(f"SELECT task_id FROM cycle_simulations WHERE cycle_id IN ({marks})",tuple(cycle_ids)):
+            if r[0] and not str(r[0]).startswith('skipped:'):ids.add(r[0])
+    for t in conn.execute("SELECT task_id,payload_json FROM tasks"):
+        try:p=json.loads(t['payload_json'] or '{}')
+        except (ValueError,TypeError):continue
+        if p.get('autopilot_cycle') in cycle_ids:ids.add(t['task_id'])
+    return ids
+
+
+def _open_route_prefs(conn, rows):
+    """各开放泳道已登记/已冻结的首选渠道：route_plan 事件 + 任务实际渠道回退。"""
+    taken={'research':set(),'review':set()}
+    for r in rows:
+        ev=conn.execute("SELECT detail FROM research_events WHERE cycle_id=? AND kind='route_plan' ORDER BY event_id DESC LIMIT 1",(r['cycle_id'],)).fetchone()
+        plan=None
+        if ev:
+            try:plan=json.loads(ev[0])
+            except (ValueError,TypeError):plan=None
+        for role in ('research','review'):
+            if plan and plan.get(role+'_preferred'):
+                taken[role].add(plan[role+'_preferred']);continue
+            tid=r.get(role+'_task')
+            if not tid:continue
+            rt=conn.execute('SELECT snapshot_json,provider_index FROM task_routes WHERE task_id=?',(tid,)).fetchone()
+            if rt:
+                try:taken[role].add(json.loads(rt['snapshot_json'])['chain'][rt['provider_index']])
+                except (ValueError,IndexError,KeyError):pass
+    return taken
+
+
+def _lane_pair(conn, cfg, data, preset, taken):
+    """为新泳道选研究/审查首选渠道：优先错开其它泳道；非 solo 时两者必须不同渠道。"""
+    solo=preset.get('solo')
+    avail_r=[n for n in (preset['routes'].get('research') or []) if not routing._unavailable(conn,cfg,n)]
+    avail_v=[n for n in (preset['routes'].get('review') or []) if not routing._unavailable(conn,cfg,n)]
+    research=next((n for n in avail_r if n not in taken['research']),avail_r[0] if avail_r else None)
+    if not research:return None
+    def ok(v):return solo or not routing.same_channel(data,research,v)
+    review=next((v for v in avail_v if ok(v) and v not in taken['review']),None)
+    if review is None:review=next((v for v in avail_v if ok(v)),None)
+    if not review:return None
+    return research,review
+
+
+def _create_cycle(conn,cfg,lane,p,data,taken,campaign_on):
+    """单条空闲泳道建轮：事务内完成插入、临时预设绑定、渠道登记与首个研究任务。"""
+    from . import research_campaign
+    conn.execute('BEGIN IMMEDIATE')
     try:
-        p=policy(cfg)
-        if row and row['state']=='simulating':
-            conn.execute('BEGIN IMMEDIATE')
-            advance(conn,cfg,dict(row),p);conn.commit();return
-        for deadline in [p['valid_until'],cfg.get('routing','authorized_until'),cfg.get('brain_api','authorized_until')]:
-            if not deadline or util.now()>=util.parse_iso(deadline):
-                message(conn,'授权已到期：不启动新研究或模拟；更新预算/有效期后自动继续');return
-        if row:
-            conn.execute('BEGIN IMMEDIATE')
-            advance(conn,cfg,dict(row),p);conn.commit();return
-        if apply_deferred_stop(conn):
-            return
-        if cycle_limit_reached(conn,cfg):
-            message(conn,'达到本次累计研究轮数上限；停止新轮次，等待检查结果');return
-        next_at=store.get_flag(conn,'autopilot_next_at')
-        if next_at and util.now()<util.parse_iso(next_at):message(conn,'等待下一轮 '+next_at);return
-        cooldown=store.get_flag(conn,'brain_not_before')
-        if cooldown and util.now()<util.parse_iso(cooldown):
-            message(conn,'平台要求等待至 '+cooldown+'；到期后自动继续');return
-        now=util.now();today=now.date().isoformat()
-        count=conn.execute('SELECT COUNT(*) FROM research_cycles WHERE created_at>=?',(today,)).fetchone()[0]
-        if count>=int(cfg.get('autopilot','max_cycles_per_day',default=4)):
-            message(conn,'达到UTC日研究轮数上限；次日自动继续');return
-        # 自动研究周预算按已登记的平台请求（基础+变体+翻转）计数；变体在派发时各自再检查余额。
-        if week_budget_left(conn,cfg)<=0:
-            message(conn,'达到自动研究周模拟上限（含变体）；下周预算有效时自动继续');return
-        used=sum(util.iso_week(util.parse_iso(r[0]))==util.iso_week(now) for r in conn.execute('SELECT started_at FROM brain_runs'))
-        if used>=int(cfg.get('limits','sims_per_week',default=24)):
-            message(conn,'达到平台本地周派发上限；下周自动检查');return
-        from . import research_campaign
-        campaign_on = bool((p.get('campaign') or {}).get('enabled'))
-        if campaign_on:
-            if p['campaign'].get('schema')=='wq.research-campaign/v2' and p['campaign']['account_alias']!=cfg.get('account_alias'):
-                raise ValueError('Campaign account mismatch')
-            research_campaign.select(conn,p)
-        data=routing.catalog(cfg);preset=data['presets'][routing.active_preset(conn,cfg,data)]
-        available={role:[n for n in preset['routes'][role] if not routing._unavailable(conn,cfg,n)] for role in ('research','review')}
-        solo=preset.get('solo')
-        if not any(solo or not routing.same_channel(data,a,b) for a in available['research'] for b in available['review']):
-            pauses=[q for q in routing.quota_pauses(conn,cfg,data) if any(q['provider'] in preset['routes'][r] for r in ('research','review'))]
-            if pauses:
-                message(conn,'额度暂停：'+'、'.join(f"{q['provider']} 至 {q['until']}" for q in pauses)+'；额度恢复后自动继续')
-            else:
-                message(conn,'需要至少两个可用的不同渠道完成研究与审查（同一服务的别名算一个）；配置/额度恢复后自动继续')
-            return
-        ready, reason = brain_preflight(conn, cfg)
-        if not ready:
-            message(conn, reason)
-            return
-        # 不与手工/其他周期的在途调用争抢；旧manual blocked不阻塞新链路。
-        # 只等真正在跑/待对账/已到期的任务；等定时器的排队任务（如提交的本地频率等待）不阻塞新轮次。
-        if conn.execute("SELECT 1 FROM tasks WHERE status IN ('claimed','running','unknown') OR (status='queued' AND (not_before IS NULL OR not_before<=?)) LIMIT 1",(util.now_iso(),)).fetchone():
-            if conn.execute("SELECT 1 FROM tasks WHERE status='unknown' LIMIT 1").fetchone():
-                message(conn,'等待UNKNOWN对账完成')
-            elif conn.execute("SELECT 1 FROM tasks WHERE kind='brain_feedback' AND status IN ('queued','claimed','running') LIMIT 1").fetchone():
-                message(conn,'等待历史/本轮真实结果资料回填；完成后继续研究')
-            else:message(conn,'等待现有任务完成')
-            return
-        conn.execute('BEGIN IMMEDIATE')
-        cur=conn.execute("INSERT INTO research_cycles(state,policy_json,policy_hash,created_at,updated_at) VALUES('researching',?,?,?,?)",(json.dumps(p),util.sha256_json(p),util.now_iso(),util.now_iso()))
+        cur=conn.execute("INSERT INTO research_cycles(state,policy_json,policy_hash,lane,created_at,updated_at) VALUES('researching',?,?,?,?,?)",(json.dumps(p),util.sha256_json(p),lane,util.now_iso(),util.now_iso()))
         cid=cur.lastrowid
         allocation=research_campaign.allocate(conn,p,cid) if campaign_on else None
         if allocation and allocation.get('schema')=='wq.research-campaign/v2':
@@ -1381,6 +1541,17 @@ def tick(conn,cfg):
             if left>0: store.set_flag(conn,'preset_once_cycles',str(left))
             else: store.set_flag(conn,'preset_once','');store.set_flag(conn,'preset_once_cycles','')
             event(conn,cid,'preset_once',once if left<=0 else f'{once}（临时，剩余 {left} 轮）')
+        # 渠道按本轮回绑后的预设（含临时覆盖）挑选；登记进 route_plan 即冻结本轮首选。
+        preset=data['presets'][routing.active_preset(conn,cfg,data,cid)]
+        pair=_lane_pair(conn,cfg,data,preset,taken)
+        if not pair:raise ValueError('该泳道无可用的不同渠道对，暂不开轮')
+        research_pref,review_pref=pair
+        default_pair=((preset['routes'].get('research') or [None])[0],(preset['routes'].get('review') or [None])[0])
+        if lane or (research_pref,review_pref)!=default_pair or cfg.get('autopilot','alternate_research_providers'):
+            event(conn,cid,'route_plan',json.dumps({'lane':lane,'research_preferred':research_pref,'review_preferred':review_pref,
+                                                  'fallback':[n for n in preset['routes'].get('research',[]) if n!=research_pref],
+                                                  'parity':'odd' if cid%2 else 'even'},ensure_ascii=False))
+        taken['research'].add(research_pref);taken['review'].add(review_pref)
         from . import feedback
         context=None;public_plan=None;focus=None if allocation else next_focus_role(conn,p)
         from . import workflow
@@ -1389,7 +1560,7 @@ def tick(conn,cfg):
             context=feedback.model_context(conn)
             advanced=workflow.load(cfg)
             combo=advanced['combinations'] if advanced else {'enabled':True,'max_plans':cfg.get('research_feedback','max_combination_plans',default=2)}
-            # 组合轮与自由探索轮交替：上一轮已是组合实验时，本轮不再登记组合，保证新角色继续被探测。
+            # 组合轮与自由探索轮交替：上一轮（含其它泳道）已是组合实验时，本轮不再登记组合，保证新角色继续被探测。
             previous=conn.execute('SELECT cycle_id FROM research_cycles WHERE cycle_id<? ORDER BY cycle_id DESC LIMIT 1',(cid,)).fetchone()
             previous_was_plan=bool(previous and conn.execute('SELECT 1 FROM combination_plans WHERE cycle_id=?',(previous[0],)).fetchone())
             plan=feedback.next_combination(conn,combo['max_plans'],current_policy=p) if combo['enabled'] and not previous_was_plan and not focus and not allocation else None
@@ -1399,7 +1570,7 @@ def tick(conn,cfg):
         if focus:
             store.set_flag(conn,f'autopilot_focus_{cid}',focus)
             event(conn,cid,'focus_role',focus)
-        order=alternate_order(cfg,cid,'research')
+        order=route_order(conn,cfg,cid,'research')
         research_prompt=generate_prompt(conn,context,public_plan,p['bindings'],focus,(p.get('paused_clusters') or None) if not focus else None,role_crowding(cfg,p),shadow_context(conn))
         if allocation: research_prompt += research_campaign.prompt(p,allocation)
         if allocation and allocation.get('schema')=='wq.research-campaign/v2' and allocation['step']=='confirmation':
@@ -1413,15 +1584,113 @@ def tick(conn,cfg):
         else:
             tid=make_job(conn,cfg,cid,'research',research_prompt,None,order)
         conn.execute('UPDATE research_cycles SET research_task=? WHERE cycle_id=?',(tid,cid))
-        if order: event(conn,cid,'route_plan',json.dumps({'research_preferred':order[0],'review_preferred':order[1],'parity':'odd' if cid%2 else 'even'}))
         event(conn,cid,'research_enqueued',tid);conn.commit()
-        message(conn,f'第{cid}轮已自动创建；由本地队列执行')
+        return cid
+    except BaseException:
+        conn.execute('ROLLBACK')
+        raise
+
+
+def tick(conn,cfg,allow_new=True):
+    """必须在runner锁内执行；每次协调把每条开放泳道最多推进一阶段，队列动作与状态同事务。
+
+    多泳道语义：autopilot.concurrent_lanes 条轮次可同时开放，每条仍走完整的
+    研究→审查→模拟 串行状态机。泳道间共享全局闸门（授权窗口、UNKNOWN、平台
+    冷却、日/周/累计上限、渠道额度），轮间间隔按泳道单独记账，互不等待。"""
+    if not cfg.get('autopilot'):return
+    setup(conn);brain_jobs.setup(conn);store.set_flag(conn,'autopilot_last_tick',util.now_iso())
+    from . import brain_submission
+    try:
+        brain_submission.sync_standby(conn, cfg)
+        brain_submission.release_standby(conn, cfg)
+        conn.commit()
+    except (ValueError, OSError, KeyError, TypeError):
+        conn.rollback()
+    if not enabled(conn,cfg) and not run_next_requested(conn):message(conn,'自动补充任务已停用；现有在途任务单独对账');return
+    rows=[dict(r) for r in conn.execute("SELECT * FROM research_cycles WHERE state!='closed' ORDER BY lane,cycle_id")]
+    lanes=lane_limit(cfg)
+    try:
+        p=policy(cfg)
+        prev_message=store.get_flag(conn,'autopilot_message')
+        # 已在等平台的泳道先推进：模拟不可撤回，也不占新授权窗口判断。
+        for row in [r for r in rows if r['state']=='simulating']:
+            _advance_guarded(conn,cfg,row,p)
+        for deadline in [p['valid_until'],cfg.get('routing','authorized_until'),cfg.get('brain_api','authorized_until')]:
+            if not deadline or util.now()>=util.parse_iso(deadline):
+                message(conn,'授权已到期：不启动新研究或模拟；更新预算/有效期后自动继续');return
+        for row in [r for r in rows if r['state']!='simulating']:
+            _advance_guarded(conn,cfg,row,p)
+        reason_set=store.get_flag(conn,'autopilot_message')!=prev_message
+        if not allow_new:return
+        if not rows and apply_deferred_stop(conn):
+            return
+        if store.get_flag(conn,'autopilot_stop_after_cycle','0')=='1':
+            message(conn,'当前各泳道轮次结束后停止自动研究');return
+        if cycle_limit_reached(conn,cfg):
+            message(conn,'达到本次累计研究轮数上限；停止新轮次，等待检查结果');return
+        open_lanes={r['lane'] for r in rows}
+        free=[l for l in range(lanes) if l not in open_lanes]
+        if not free:
+            if not reason_set:
+                message(conn,f'{len(open_lanes)} 条研究泳道并行进行中；轮间间隔按泳道单独计算')
+            return
+        cooldown=store.get_flag(conn,'brain_not_before')
+        if cooldown and util.now()<util.parse_iso(cooldown):
+            message(conn,'平台要求等待至 '+cooldown+'；到期后自动继续');return
+        now=util.now();today=now.date().isoformat()
+        count=conn.execute('SELECT COUNT(*) FROM research_cycles WHERE created_at>=?',(today,)).fetchone()[0]
+        if count>=int(cfg.get('autopilot','max_cycles_per_day',default=4)):
+            message(conn,'达到UTC日研究轮数上限；次日自动继续');return
+        # 自动研究周预算按已登记的平台请求（基础+变体+翻转）计数；变体在派发时各自再检查余额，
+        # 审查通过放行模拟前还会按当时余额复核。
+        if week_budget_left(conn,cfg)<=0:
+            message(conn,'达到自动研究周模拟上限（含变体）；下周预算有效时自动继续');return
+        used=sum(util.iso_week(util.parse_iso(r[0]))==util.iso_week(now) for r in conn.execute('SELECT started_at FROM brain_runs'))
+        if used>=int(cfg.get('limits','sims_per_week',default=24)):
+            message(conn,'达到平台本地周派发上限；下周自动检查');return
+        # UNKNOWN 全局冻结新轮次；结果资料回填与平台/程序在途任务维持原有串行约束。
+        # 其它泳道自己的模型调用和排队中的模型任务不挡新泳道——渠道额度与锁已串行约束它们。
+        if conn.execute("SELECT 1 FROM tasks WHERE status='unknown' LIMIT 1").fetchone():
+            message(conn,'等待UNKNOWN对账完成');return
+        if conn.execute("SELECT 1 FROM tasks WHERE kind='brain_feedback' AND status IN ('queued','claimed','running') LIMIT 1").fetchone():
+            message(conn,'等待历史/本轮真实结果资料回填；完成后继续研究');return
+        owned=_owned_task_ids(conn,{r['cycle_id'] for r in rows})
+        busy=conn.execute("SELECT task_id,kind FROM tasks WHERE (status IN ('claimed','running') OR (status='queued' AND (not_before IS NULL OR not_before<=?)))",(util.now_iso(),)).fetchall()
+        others=[t for t in busy if t['task_id'] not in owned and t['kind'] not in ('agent_call','brain_simulation')]
+        if others:
+            message(conn,'等待现有平台/程序任务完成');return
+        from . import research_campaign
+        campaign_on = bool((p.get('campaign') or {}).get('enabled'))
+        if campaign_on:
+            if p['campaign'].get('schema')=='wq.research-campaign/v2' and p['campaign']['account_alias']!=cfg.get('account_alias'):
+                raise ValueError('Campaign account mismatch')
+            research_campaign.select(conn,p)
+        # 预登记干预同一时刻只能由一条泳道持有；空位泳道退化为自由探索。
+        campaign_free = not any(research_campaign.assignment(conn,r['cycle_id']) for r in rows)
+        data=routing.catalog(cfg)
+        taken=_open_route_prefs(conn,rows)
+        created=[]
+        for lane in free:
+            gate=_lane_gate_at(conn,lane,cfg)
+            if gate and util.now()<util.parse_iso(gate):continue
+            if count+len(created)>=int(cfg.get('autopilot','max_cycles_per_day',default=4)):break
+            if week_budget_left(conn,cfg)<=0:break
+            ready,reason=brain_preflight(conn,cfg)
+            if not ready:
+                if not created:message(conn,reason)
+                break
+            try:
+                cid=_create_cycle(conn,cfg,lane,p,data,taken,campaign_on and campaign_free)
+            except (ValueError,KeyError,TypeError,OSError) as exc:
+                if not created:message(conn,'需要处理自动研究错误：'+str(exc)[:180])
+                break
+            created.append(cid)
+            campaign_free=False
+        if created:
+            message(conn,'、'.join(f'第{cid}轮' for cid in created)+'已自动创建；由本地队列并行执行')
     except (ValueError,KeyError,TypeError,OSError) as exc:
         if conn.in_transaction:conn.rollback()
-        if row and row['state'] in ('researching','reviewing'):
-            if row['state']=='researching':retain_rejected_candidate(conn,dict(row))
-            finish(conn,cfg,dict(row),'输入或验收错误：'+str(exc)[:180],problem=True)
-        else:message(conn,'需要处理自动研究错误：'+str(exc)[:180])
+        message(conn,'需要处理自动研究错误：'+str(exc)[:180])
     except BaseException:
         if conn.in_transaction:conn.rollback()
         raise

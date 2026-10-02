@@ -188,6 +188,11 @@ class RoutingTests(unittest.TestCase):
         self.assertFalse(_verify_terminal(str(f),'zcode')[0])
         f.write_text('{"type":"assistant","text":"partial"}')
         self.assertFalse(_verify_terminal(str(f),'zcode')[0])
+        f.write_text('ZCode Built-in skipped (not-due)\n'
+                     '{"sessionId":"sess_1","response":"done","projection":{"status":"idle","turnCount":1}}')
+        self.assertTrue(_verify_terminal(str(f),'zcode')[0])
+        f.write_text('{"sessionId":"sess_1","response":"  ","projection":{"status":"idle","turnCount":1}}')
+        self.assertFalse(_verify_terminal(str(f),'zcode')[0])
 
     def test_capacity_patterns(self):
         for tail in ('[1310] Weekly/Monthly Limit Exhausted',

@@ -170,6 +170,18 @@ def retire_submitted_standby(conn):
     return [row['alpha_id'] for row in rows]
 
 
+def retire_failed_standby(conn):
+    """官方检查已 FAIL、或提交已被拒绝的 Alpha，离开备选。这两类都不再 POST。"""
+    setup(conn)
+    rows = conn.execute("SELECT alpha_id FROM submission_standby WHERE state IN ('waiting','queued')").fetchall()
+    retired = []
+    for row in rows:
+        if _submission_disposition(conn, row['alpha_id']) in ('blocked', 'rejected'):
+            close_standby(conn, row['alpha_id'], 'dropped')
+            retired.append(row['alpha_id'])
+    return retired
+
+
 def mark_standby_outcome(conn, cycle_id):
     row = conn.execute('SELECT outcome FROM research_cycles WHERE cycle_id=?', (cycle_id,)).fetchone()
     if not row:
@@ -212,6 +224,7 @@ def sync_standby(conn, cfg):
     """把已经内部通过、尚未提交的结果补记为备选或立即入队。不重试官方 FAIL。"""
     setup(conn)
     retire_submitted_standby(conn)
+    retire_failed_standby(conn)
     if not _authorized(cfg):
         return []
     from .feedback import setup as feedback_setup
@@ -407,6 +420,7 @@ def step(conn, cfg, task, payload):
                 return 'unknown', {}, '未识别的平台提交状态，不能当作接收成功'
             if any(x.get('result') == 'FAIL' for x in alpha.get('is', {}).get('checks', [])):
                 set_state(conn, tid, 'rejected')
+                close_standby(conn, aid, 'dropped')
                 return 'blocked', {}, '平台检查未通过；不重新提交'
             return later(conn, tid, 300, '尚未观察到平台接收，保留原提交不重发')
         deadline = cfg.get('brain_submission', 'authorized_until')
@@ -421,6 +435,7 @@ def step(conn, cfg, task, payload):
             return 'blocked', {}, 'Alpha不是未提交状态'
         basic = alpha.get('is', {}).get('checks', [])
         if any(x.get('result') == 'FAIL' for x in basic):
+            close_standby(conn, aid, 'dropped')
             return 'blocked', {}, '最新回测已有FAIL，禁止提交'
         status, check_headers, check_data = get_with_reauth(client, cfg, '/alphas/'+aid+'/check')
         util.write_json(str(root/'checks.json'), {'status': status, 'data': check_data})
@@ -431,6 +446,7 @@ def step(conn, cfg, task, payload):
         if errors and all(x.endswith(':PENDING') for x in errors):
             return later(conn, tid, 300, '提交检查仍有PENDING；不发送POST')
         if errors:
+            close_standby(conn, aid, 'dropped')
             return 'blocked', {'checks': errors}, '提交检查未全部PASS：'+'; '.join(errors)
         if conn.execute("SELECT 1 FROM tasks WHERE status='unknown' AND task_id!=?", (tid,)).fetchone():
             return 'blocked', {}, '存在UNKNOWN，禁止新增提交'
@@ -464,6 +480,7 @@ def step(conn, cfg, task, payload):
                     store.set_flag(conn, 'brain_not_before', (util.now()+dt.timedelta(seconds=exc.retry_after or 300)).isoformat())
                 if exc.kind == AdapterError.AUTH:
                     raise
+                close_standby(conn, aid, 'dropped')
                 return 'blocked', {}, str(exc)+'；不会自动重发POST'
             raise
         util.write_json(str(root/'receipt.json'), {'status': status, 'headers': headers, 'data': data})

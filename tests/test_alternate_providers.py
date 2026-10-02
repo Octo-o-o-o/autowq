@@ -22,6 +22,18 @@ class AlternateOrderTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, '两个不同渠道'):
                 autopilot.alternate_order(cfg, 1, 'research')
 
+    def test_preset_head_stays_ahead_of_alternate_fallback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg, c = make_env(tmp, {'autopilot': {'alternate_research_providers': ['grok', 'devin']}})
+            data = {'default': 'zcode-rich', 'providers': {'grok': {}, 'devin': {}, 'zcode': {}, 'cursor': {}},
+                    'presets': {'zcode-rich': {'routes': {'research': ['grok', 'zcode', 'cursor', 'devin'],
+                                                         'review': ['zcode', 'devin', 'cursor', 'grok']}}}}
+            with patch('wq.routing.catalog', return_value=data), patch('wq.routing.active_preset', return_value='zcode-rich'):
+                self.assertEqual(autopilot.route_order(c, cfg, 2, 'research'), ['grok', 'devin'])
+                self.assertEqual(autopilot.route_order(c, cfg, 2, 'review'), ['zcode', 'grok', 'devin'])
+                self.assertEqual(autopilot.route_order(c, cfg, 1, 'review'), ['zcode', 'devin', 'grok'])
+            c.close()
+
     def test_snapshot_reorders_only_preset_members_and_keeps_exclusion(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg, c = make_env(tmp)
@@ -49,7 +61,7 @@ class AlternateCycleTests(AutopilotTests):
     def payload(self, tid):
         return json.loads(self.c.execute('SELECT payload_json FROM tasks WHERE task_id=?', (tid,)).fetchone()[0])
 
-    def test_odd_and_even_cycles_swap_preferred_providers(self):
+    def test_preset_head_stays_ahead_of_the_alternate_fallback(self):
         self.full_cycle()
         one = self.cycle(); self.assertEqual(one['cycle_id'], 1); self.assertEqual(one['state'], 'closed')
         self.assertEqual(self.payload(one['research_task'])['provider_order'], ['a', 'b'])
@@ -58,10 +70,11 @@ class AlternateCycleTests(AutopilotTests):
         store.set_flag(self.c, 'autopilot_next_at', '2000-01-01T00:00:00Z')
         self.full_cycle()
         two = self.cycle(); self.assertEqual(two['cycle_id'], 2)
-        self.assertEqual(self.payload(two['research_task'])['provider_order'], ['b', 'a'])
-        self.assertEqual(self.payload(two['review_task'])['provider_order'], ['a', 'b'])
+        self.assertEqual(self.payload(two['research_task'])['provider_order'], ['a', 'b'])
+        self.assertEqual(self.payload(two['review_task'])['provider_order'], ['b', 'a'])
         plans = [json.loads(r[0]) for r in self.c.execute("SELECT detail FROM research_events WHERE kind='route_plan' ORDER BY event_id")]
-        self.assertEqual([(x['parity'], x['research_preferred']) for x in plans], [('odd', 'a'), ('even', 'b')])
+        self.assertEqual([(x['parity'], x['research_preferred'], x['review_preferred']) for x in plans],
+                         [('odd', 'a', 'b'), ('even', 'a', 'b')])
 
     def test_without_config_no_order_and_no_event(self):
         self.cfg.data['autopilot'].pop('alternate_research_providers')

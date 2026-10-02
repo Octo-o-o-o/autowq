@@ -111,6 +111,18 @@ class DesktopDataTests(unittest.TestCase):
         self.assertIsNone(entries[0]['badge'])          # 正常完结不标状态
         self.assertIn('尚未完成', '\n'.join(entries[2]['detail']))
 
+    def test_open_cycle_shows_planned_review_before_the_task_exists(self):
+        autopilot.setup(self.c)
+        self.c.execute("INSERT INTO research_cycles(state,policy_json,policy_hash,created_at,updated_at) VALUES('researching','{}','x',?,?)",(util.now_iso(),util.now_iso()))
+        cid=self.c.execute('SELECT MAX(cycle_id) FROM research_cycles').fetchone()[0]
+        self.c.execute('INSERT INTO research_events(cycle_id,kind,detail,created_at) VALUES(?,?,?,?)',
+                       (cid,'route_plan',json.dumps({'research_preferred':'grok','review_preferred':'zcode'}),util.now_iso()))
+        data={'default':'p','providers':{'grok':{'model':'grok-4.7','label':'Grok'},'zcode':{'model':'zcode-model','label':'ZCode'}},
+              'presets':{'p':{'routes':{'research':['grok'],'review':['zcode']}}}}
+        with patch('wq.routing.catalog', return_value=data):
+            entry=next(item for item in desktop.history(self.c,self.cfg)['entries'] if item['title'].startswith(f'第 {cid} 轮'))
+        self.assertIn('zcode-model（待开始）', '\n'.join(entry['lines']))
+
     def test_history_highlights_cycle_with_accepted_submission(self):
         fid = store.insert_family(self.c, None, 'family', 'hypothesis', 'test', False, None)
         cidc = store.insert_candidate(self.c, fid, 'rank(x)', {}, 'hash', False)
@@ -227,6 +239,26 @@ class DesktopDataTests(unittest.TestCase):
         self.assertTrue(desktop.notifications_enabled(self.cfg))
         cfg2 = make_cfg(self.tmp.name + '/nested', {'desktop': {'notifications': False}})
         self.assertFalse(desktop.notifications_enabled(cfg2))
+
+    def test_next_model_follows_pending_temporary_preset_not_the_open_cycle(self):
+        data={'default':'core','providers':{'grok':{'model':'grok-4.7'},'devin':{'model':'swe-2-max'},'zcode':{'model':'zcode-current'}},
+              'presets':{'core':{'routes':{'research':['grok'],'review':['devin']}},
+                         'zcode-rich':{'routes':{'research':['grok'],'review':['zcode','devin']}}}}
+        store.set_flag(self.c, 'active_preset', 'core')
+        store.set_flag(self.c, 'preset_once', 'zcode-rich')
+        self.c.execute("INSERT INTO research_cycles(state,policy_json,policy_hash,created_at,updated_at) VALUES('simulating','{}','x',?,?)",
+                       (util.now_iso(), util.now_iso()))
+        cid=self.c.execute('SELECT MAX(cycle_id) FROM research_cycles').fetchone()[0]
+        store.set_flag(self.c, f'cycle_preset_{cid}', 'core')
+        with patch('wq.routing.catalog',return_value=data), patch('wq.routing._unavailable',return_value=None):
+            result=desktop.next_models(self.c,self.cfg)
+        self.assertIn('zcode-current', result[1]['title'])
+        self.assertNotIn('swe-2-max', result[1]['title'])
+        with patch('wq.routing.catalog',return_value=data), patch('wq.routing._unavailable', side_effect=lambda c, cfg, n: '用户已停用此渠道' if n == 'zcode' else None):
+            skipped = desktop.next_models(self.c, self.cfg)
+        self.assertIn('swe-2-max', skipped[1]['title'])
+        self.assertIn('ZCode CLI', skipped[1]['title'])
+        self.assertIn('用户已停用此渠道', skipped[1]['title'])
 
     def test_next_model_prediction_skips_unavailable_provider_and_separates_reviewer(self):
         data={'default':'p','providers':{'a':{'model':'A'},'b':{'model':'B'},'c':{'model':'C'}},

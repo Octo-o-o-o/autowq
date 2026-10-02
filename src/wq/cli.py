@@ -466,6 +466,15 @@ def cmd_preset(args) -> int:
     data = routing.catalog(cfg)
     if args.action == "use":
         cycles = getattr(args, "cycles", 1) or 1
+        closed = routing.closed_route_heads(conn, args.name, data)
+        if closed:
+            from .desktop import provider_label
+            labels = [provider_label(provider, data['providers'][provider], lang) for provider in closed]
+            listed = '、'.join(labels) if lang == 'zh' else ', '.join(labels)
+            raise WqExit(INVALID, text(
+                lang,
+                f'还不能切换到 {args.name}。请先在「渠道」里打开：{listed}。打开后才能设置这个预设。',
+                f'Cannot switch to {args.name} yet. Turn these providers on under Providers first: {listed}. The preset can be set after they are on.'))
         routing.choose_preset(conn, cfg, args.name, once=getattr(args, 'once', False), cycles=cycles)
         permanent = store.get_flag(conn, "active_preset") or data["default"]
         if getattr(args, 'once', False):
@@ -515,7 +524,8 @@ def cmd_provider(args) -> int:
             print(text(lang, f"{item['provider']}：{item['reason'] or '额度暂停'}，至 {item['until']} 自动恢复",
                               f"{item['provider']}: {item['reason'] or 'quota pause'}, resumes automatically at {item['until']}"))
         return OK
-    if args.name not in routing.catalog(cfg)['providers']:
+    catalog = routing.catalog(cfg)
+    if args.name not in catalog['providers']:
         raise WqExit(INVALID, text(lang, f"未知渠道：{args.name}", f"Unknown provider: {args.name}"))
     if args.action == 'resume':
         routing.clear_quota_pause(conn, args.name)
@@ -523,6 +533,16 @@ def cmd_provider(args) -> int:
         print(text(lang, f"{args.name} 的额度暂停已解除；下一次调度会再试它，若供应商仍拒绝会重新暂停。",
                           f"Quota pause cleared for {args.name}; the next dispatch tries it again and re-pauses if the vendor still refuses."))
         return OK
+    if args.action == 'disable':
+        used = routing.presets_headed_by(conn, cfg, args.name)
+        if used:
+            from .desktop import provider_label
+            label = provider_label(args.name, catalog['providers'][args.name], lang)
+            listed = '、'.join(used) if lang == 'zh' else ', '.join(used)
+            raise WqExit(INVALID, text(
+                lang,
+                f'还不能关闭{label}。它是预设 {listed} 的首选渠道。请先改路由预设，再关闭这个渠道。',
+                f'Cannot turn off {label}. It is a preferred provider for preset {listed}. Change the routing preset before turning this provider off.'))
     store.set_flag(conn, f'provider_disabled:{args.name}', '1' if args.action == 'disable' else '0')
     if args.action == 'disable':
         print(text(lang, f"{args.name} 已停用；不打断在途调用，后续任务不再路由到该渠道，预算闸门保留。",
@@ -780,8 +800,20 @@ def cmd_autopilot(args):
             label = cycle_state(cycle['state'], lang)
             print(text(lang, f"最近一轮：第{cycle['cycle_id']}轮，{label}；{translate(cycle['outcome'], lang) or text(lang, '按队列自动推进', 'advances automatically via the queue')}",
                               f"Latest cycle: #{cycle['cycle_id']}, {label}; {translate(cycle['outcome'], lang) or 'advances automatically via the queue'}"))
-        print(text(lang, '仅探索回测；无自动提交。告警同步见 var/run/autopilot-status.json。',
-                          'Exploratory backtests only; no automatic submission. Alert mirror: var/run/autopilot-status.json.'))
+        open_cycles = result.get('open_cycles') or []
+        if open_cycles:
+            from .task_view import cycle_state
+            print(text(lang, f"开放泳道：{len(open_cycles)}/{result.get('concurrent_lanes') or 1} 条",
+                              f"Open lanes: {len(open_cycles)}/{result.get('concurrent_lanes') or 1}"))
+            for r in open_cycles:
+                pair = ' → '.join(x for x in (r.get('research_preferred'), r.get('review_preferred')) if x)
+                print(text(lang, f"  泳道{(r.get('lane') or 0)+1} · 第{r['cycle_id']}轮 · {cycle_state(r['state'], lang)}"
+                                 + (f"（{pair}）" if pair else ''),
+                                 f"  Lane {(r.get('lane') or 0)+1} · #{r['cycle_id']} · {cycle_state(r['state'], lang)}"
+                                 + (f" ({pair})" if pair else '')))
+        submission_on=cfg.get('brain_submission','enabled',default=False)
+        print(text(lang, '正式提交配置：'+('启用' if submission_on else '停用')+'；按独立授权、研究证据、最新官方检查和限额执行。告警同步见 var/run/autopilot-status.json。',
+                          'Submission configuration: '+('enabled' if submission_on else 'disabled')+'; separate authorization, research evidence, current official checks and caps still apply. Alert mirror: var/run/autopilot-status.json.'))
     return OK
 
 
@@ -980,7 +1012,8 @@ def build_parser(lang=None) -> argparse.ArgumentParser:
                                     "For import tasks, confirm real rather than synthetic results"))
     s.set_defaults(fn=cmd_enqueue)
 
-    s = sub.add_parser("run-once", help=text(lang, "领取并处理一个到期任务（单并发）", "Claim and process one due task (single concurrency)"))
+    s = sub.add_parser("run-once", help=text(lang, "调度器回合：串行处理平台/程序任务，agent_call 由受限模型池并行（同一渠道仍串行）",
+                                                     "Scheduler tick: serial platform/program tasks plus a bounded model pool (still serial per provider)"))
     s.add_argument("--lease", type=int, default=300, help=text(lang, "租约秒数", "Lease duration in seconds"))
     s.set_defaults(fn=cmd_run_once)
 

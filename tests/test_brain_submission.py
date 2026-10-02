@@ -184,6 +184,29 @@ class SubmissionTests(unittest.TestCase):
         self.assertEqual(Client.calls, [('GET','/alphas/abc123'), ('GET','/alphas/abc123/check')])
         self.assertFalse(any(method == 'POST' for method, _ in Client.calls))
 
+    def test_official_fail_leaves_the_standby_list(self):
+        from wq import desktop
+        tid=self.enqueue()
+        self.c.execute("INSERT INTO submission_standby VALUES(?,?,?,?,?)",
+                       ('abc123', 1, 'queued', util.now_iso(), util.now_iso()))
+        checks=copy.deepcopy(self.alpha['is']['checks']);checks[0]['result']='FAIL'
+        Client.replies=[(200,{},self.alpha),(200,{}, {'is':{'checks':checks}})]
+        self.assertEqual(self.tick(tid),'blocked')
+        self.assertEqual(self.c.execute("SELECT state FROM submission_standby").fetchone()[0],'dropped')
+        self.assertEqual(desktop.standby(self.c)['count'],0)
+        self.assertFalse(any(m=='POST' for m,_ in Client.calls))
+
+    def test_sync_retires_standby_already_blocked_by_official_fail(self):
+        from wq import desktop
+        tid=self.enqueue()
+        store.finish_task(self.c,tid,'blocked',{},'提交检查未全部PASS：SELF_CORRELATION:FAIL')
+        self.c.execute("INSERT INTO submission_standby VALUES(?,?,?,?,?)",
+                       ('abc123', 1, 'queued', util.now_iso(), util.now_iso()))
+        self.assertEqual(sub.sync_standby(self.c,self.cfg),[])
+        self.assertEqual(sub.retire_failed_standby(self.c),[])
+        self.assertEqual(self.c.execute("SELECT state FROM submission_standby").fetchone()[0],'dropped')
+        self.assertEqual(desktop.standby(self.c)['count'],0)
+
     def test_standby_waits_out_the_cap_then_queues(self):
         from wq import autopilot, brain_jobs, desktop, feedback
         autopilot.setup(self.c); brain_jobs.setup(self.c); feedback.setup(self.c); sub.setup(self.c)

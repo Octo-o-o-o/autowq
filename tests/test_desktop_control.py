@@ -215,6 +215,21 @@ class SettingsControlTests(unittest.TestCase):
         data = json.loads(Path(self.cfg.path).read_text())
         self.assertIs(data['desktop']['notifications'], True)
 
+    def test_preset_switch_refuses_while_a_route_head_is_off(self):
+        store.set_flag(self.c, 'provider_disabled:a', '1')
+        with patch.object(desktop, '_cfg', return_value=self.cfg), patch('wq.routing.catalog', return_value=self.data):
+            with self.assertRaisesRegex(ValueError, '还不能切换到 q'):
+                desktop.control('preset', 'q')
+            with self.assertRaisesRegex(ValueError, 'a · A'):
+                desktop.control('preset-once', 'q:5')
+        self.assertNotEqual(store.get_flag(self.c, 'active_preset'), 'q')
+        self.assertFalse(store.get_flag(self.c, 'preset_once'))
+        store.set_flag(self.c, 'provider_disabled:a', '0')
+        with patch.object(desktop, '_cfg', return_value=self.cfg), patch('wq.routing.catalog', return_value=self.data):
+            result = desktop.control('preset-once', 'q:2')
+        self.assertIn('接下来 2 个新建轮次', result['message'])
+        self.assertEqual(store.get_flag(self.c, 'preset_once'), 'q')
+
     def test_preset_switch_writes_flag(self):
         with patch.object(desktop, '_cfg', return_value=self.cfg), patch('wq.routing.catalog', return_value=self.data):
             result = desktop.control('preset', 'q')
@@ -245,11 +260,20 @@ class SettingsControlTests(unittest.TestCase):
         self.assertEqual((store.get_flag(self.c, 'preset_once') or None, store.get_flag(self.c, 'preset_once_cycles') or None), (None, None))
 
     def test_provider_toggle_round_trip(self):
-        with patch.object(desktop, '_cfg', return_value=self.cfg), patch('wq.routing.catalog', return_value=self.data):
-            desktop.control('provider', 'a')
-            self.assertEqual(store.get_flag(self.c, 'provider_disabled:a'), '1')
-            desktop.control('provider', 'a')
-            self.assertEqual(store.get_flag(self.c, 'provider_disabled:a'), '0')
+        spare = {'default': 'p', 'providers': {'a': {'model': 'A'}, 'b': {'model': 'B'}, 'c': {'model': 'C'}},
+                 'presets': {'p': {'routes': {'research': ['b', 'c'], 'review': ['b'], 'engineering': ['b']}}}}
+        store.set_flag(self.c, 'active_preset', 'p')
+        with patch.object(desktop, '_cfg', return_value=self.cfg), patch('wq.routing.catalog', return_value=spare):
+            desktop.control('provider', 'c')
+            self.assertEqual(store.get_flag(self.c, 'provider_disabled:c'), '1')
+            desktop.control('provider', 'c')
+            self.assertEqual(store.get_flag(self.c, 'provider_disabled:c'), '0')
+            with self.assertRaisesRegex(ValueError, '还不能关闭'):
+                desktop.control('provider', 'b')
+            self.assertNotEqual(store.get_flag(self.c, 'provider_disabled:b'), '1')
+            store.set_flag(self.c, 'provider_disabled:a', '1')
+            with self.assertRaisesRegex(ValueError, '还不能把'):
+                desktop.control('provider-role', 'research:a')
             with self.assertRaises(ValueError):
                 desktop.control('provider', 'missing')
 

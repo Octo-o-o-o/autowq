@@ -332,9 +332,22 @@ def _verify_terminal(log_path: str, protocol: str) -> tuple[bool, str]:
     elif protocol == "grok":
         good = any(o.get("stopReason") == "end_turn" for o in objects)
     elif protocol == "zcode":
-        # 无头 --json 的最终事件：{"type":"result",...,"projection":{"status":"completed"|...}}
-        good = any(o.get("type") == "result" and isinstance(o.get("projection"), dict)
-                   and o["projection"].get("status") == "completed" for o in objects)
+        # 旧无头 JSON：{"type":"result","projection":{"status":"completed"}}。
+        # 现行 CLI 终稿没有 type，projection.status 为 idle，但带 sessionId、非空 response 和 turnCount。
+        def zcode_done(o):
+            projection = o.get("projection")
+            if not isinstance(projection, dict):
+                return False
+            status = projection.get("status")
+            if status in ("failed", "error", "cancelled"):
+                return False
+            if o.get("type") == "result" and status == "completed":
+                return True
+            turns = projection.get("turnCount")
+            return (status in ("idle", "completed") and bool(o.get("sessionId"))
+                    and isinstance(o.get("response"), str) and bool(o["response"].strip())
+                    and isinstance(turns, int) and turns >= 1)
+        good = any(zcode_done(o) for o in objects)
     else:
         return False, f"未支持的 terminal_protocol: {protocol}"
     return good, "CLI 终态已核验" if good else f"缺少 {protocol} 成功终态"

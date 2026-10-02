@@ -25,6 +25,7 @@ from wq.i18n import default_language, stored_language, text, translate, write_la
 # 菜单栏可调的 autopilot 设置：键名 → (取值范围, 显示名)。max_cycles_total 允许 none=不限。
 SETTINGS = {
     'interval_s': ((60, 86400), ('运行间隔', 'Run interval')),
+    'concurrent_lanes': ((1, 8), ('并行泳道', 'Parallel lanes')),
     'max_cycles_per_day': ((1, 500), ('每日轮数上限', 'Daily cycle limit')),
     'max_cycles_total': ((1, 100000), ('累计轮数上限', 'Total cycle limit')),
 }
@@ -425,6 +426,14 @@ def pause_detail(reason, lang):
     return translate(reason, lang)
 
 
+def _experiment_budget(conn):
+    from wq.research_lifecycle import experiment_cycle_budget
+    try:
+        return experiment_cycle_budget(conn)
+    except (ValueError, OSError, sqlite3.OperationalError):
+        return None
+
+
 def settings_snapshot(cfg, conn, lang='zh'):
     data = routing.catalog(cfg)
     labels = {name: desktop.provider_label(name, definition, lang) for name, definition in data['providers'].items()}
@@ -437,9 +446,11 @@ def settings_snapshot(cfg, conn, lang='zh'):
         return labels.get(chain[0], chain[0])
     for name, preset in data['presets'].items():
         routes = preset.get('routes', {})
+        closed = [labels.get(provider, provider) for provider in routing.closed_route_heads(conn, name, data)]
         presets.append({'name': name,
                         'research': route_head(routes, 'research'),
                         'review': route_head(routes, 'review'),
+                        'closed': closed,
                         'routes': '；'.join(
             f"{text(lang, zh, en)}：{' → '.join(routes.get(role, []))}" for role, zh, en in role_labels)})
     providers = [{'name': name, 'label': labels[name],
@@ -461,8 +472,12 @@ def settings_snapshot(cfg, conn, lang='zh'):
             'language': lang,
             'language_setting': (stored_language(cfg.path) if cfg.path else None) or 'auto',
             'interval_s': cfg.get('autopilot', 'interval_s', default=3600),
+            'concurrent_lanes': cfg.get('autopilot', 'concurrent_lanes', default=1),
+            'lane_presets': [1, 2, 3, 4],
             'max_cycles_per_day': cfg.get('autopilot', 'max_cycles_per_day', default=4),
             'max_cycles_total': cfg.get('autopilot', 'max_cycles_total'),
+            'experiment': _experiment_budget(conn),
+            'experiment_presets': [40, 80, 160, 320],
             'submission_enabled': cfg.get('brain_submission', 'enabled') is True,
             'launch_research': launch_research_enabled(cfg),
             'automatic_submission': False,
@@ -496,11 +511,11 @@ def _begin_research(lang, automatic=False):
         return {'started': False, 'message': text(lang, '保持停止，直到手动开始。',
                                                   'Staying stopped until you start it.')}
     if automatic:
-        latest = None
+        open_cycle = None
         if not state.get('live_agent_calls'):
             auto = wq('autopilot', 'status', '--json')
-            latest = (auto.get('latest_cycle') or {}).get('state')
-        if state.get('live_agent_calls') or latest not in (None, '', 'closed'):
+            open_cycle = bool(auto.get('open_cycles')) or (auto.get('latest_cycle') or {}).get('state') not in (None, '', 'closed')
+        if state.get('live_agent_calls') or open_cycle:
             return {'started': False, 'message': text(lang, '后台任务继续，只打开了菜单。',
                                                       'Background work continues; only the menu was opened.')}
     if not loaded():
@@ -555,15 +570,21 @@ def control(action, arg=None):
         from wq.db import connect
         from wq import autopilot
         cfg = _cfg()
+        cid = None
+        if arg:
+            try:
+                cid = int(arg)
+            except (TypeError, ValueError):
+                raise ValueError(text(lang, '轮次编号必须是整数', 'The cycle id must be an integer'))
         conn = connect(cfg.db_path)
         try:
-            result = autopilot.cancel_open_cycle(conn, cfg)
+            result = autopilot.cancel_open_cycle(conn, cfg, cid)
         finally:
             conn.close()
         if result.get('cancelled'):
-            return {'cancelled': True, 'message': text(
-                lang, '已取消当前轮次。还没发出的本地任务已停止；自动研究保持开启，下一轮仍按间隔开始。',
-                'Current cycle cancelled. Local work that had not been sent is stopped; automatic research stays on and the next cycle follows the interval.')}
+            return {'cancelled': True, 'cycle_id': result.get('cycle_id'), 'message': text(
+                lang, f"已取消第 {result.get('cycle_id')} 轮。还没发出的本地任务已停止；其它泳道不受影响，自动研究保持开启。",
+                f"Cycle {result.get('cycle_id')} cancelled. Local work that had not been sent is stopped; other lanes are unaffected and automatic research stays on.")}
         if result.get('reason') == 'remote':
             return {'cancelled': False, 'message': text(
                 lang, '这一轮的平台模拟已经发出，不能撤回。可以停止自动研究，等它收尾。',
@@ -607,6 +628,15 @@ def control(action, arg=None):
                     head, _, tail = arg.rpartition(':')
                     if tail.isdigit():
                         name, cycles = head, int(tail)
+                data = routing.catalog(cfg)
+                closed = routing.closed_route_heads(conn, name, data)
+                if closed:
+                    labels = [desktop.provider_label(provider, data['providers'][provider], lang) for provider in closed]
+                    listed = '、'.join(labels) if lang == 'zh' else ', '.join(labels)
+                    raise ValueError(text(
+                        lang,
+                        f'还不能切换到 {name}。请先在「渠道」里打开：{listed}。打开后才能设置这个预设。',
+                        f'Cannot switch to {name} yet. Turn these providers on under Providers first: {listed}. The preset can be set after they are on.'))
                 routing.choose_preset(conn, cfg, name, once=(action == 'preset-once'), cycles=cycles)
                 permanent = store.get_flag(conn, 'active_preset') or routing.catalog(cfg)['default']
         finally:
@@ -640,6 +670,12 @@ def control(action, arg=None):
         cfg = _cfg()
         conn = connect(cfg.db_path)
         try:
+            if store.get_flag(conn, f'provider_disabled:{name}') == '1':
+                label = desktop.provider_label(name, routing.catalog(cfg)['providers'][name], lang)
+                raise ValueError(text(
+                    lang,
+                    f'还不能把{label}设为这个角色。请先在「渠道」里打开它，打开后才能设置。',
+                    f'Cannot assign {label} to this role yet. Turn it on under Providers first. It can be selected after it is on.'))
             assigned = providers.assign_role(cfg, conn, role, name)
         finally:
             conn.close()
@@ -657,6 +693,15 @@ def control(action, arg=None):
         conn = connect(cfg.db_path)
         try:
             was_disabled = store.get_flag(conn, f'provider_disabled:{arg}') == '1'
+            if not was_disabled:
+                used = routing.presets_headed_by(conn, cfg, arg)
+                if used:
+                    label = desktop.provider_label(arg, routing.catalog(cfg)['providers'][arg], lang)
+                    listed = '、'.join(used) if lang == 'zh' else ', '.join(used)
+                    raise ValueError(text(
+                        lang,
+                        f'还不能关闭{label}。它是预设 {listed} 的首选渠道。请先改路由预设，再关闭这个渠道。',
+                        f'Cannot turn off {label}. It is a preferred provider for preset {listed}. Change the routing preset before turning this provider off.'))
             store.set_flag(conn, f'provider_disabled:{arg}', '0' if was_disabled else '1')
         finally:
             conn.close()
@@ -742,6 +787,23 @@ def control(action, arg=None):
             _write_config_values(cfg.path, 'limits', {'model_spend_cap_usd': cap, 'model_spend_as_of': util.now_iso()})
             return {'message': text(lang, f'模型花费上限已设为 ${cap:g}。从现在起计算已知金额，达到后停止新的模型调用。金额未知的调用不记成 $0，也不计入这个上限。',
                                     f'Model spend cap set to ${cap:g}. Known dollars count from now; new model calls stop when the cap is reached. Calls with an unknown price are not treated as $0 and are not added to this total.')}
+        if key == 'experiment_cycles':
+            from wq.db import connect
+            from wq.research_lifecycle import set_experiment_cycle_limit
+            try:
+                chosen = int(raw)
+            except ValueError:
+                raise ValueError(text(lang, '实验轮数上限必须是整数', 'The experiment cycle limit must be an integer'))
+            cfg = _cfg()
+            conn = connect(cfg.db_path)
+            try:
+                budget = set_experiment_cycle_limit(conn, chosen)
+                conn.commit()
+            finally:
+                conn.close()
+            return {'message': text(lang,
+                                    f"实验轮数上限已设为 {budget['limit']}。已用 {budget['used']}，还剩 {budget['remaining']}。",
+                                    f"Experiment cycle limit set to {budget['limit']}. Used {budget['used']}, {budget['remaining']} left.")}
         if key not in SETTINGS:
             raise ValueError(text(lang, '未知设置项', 'Unknown setting'))
         (low, high), (label_zh, label_en) = SETTINGS[key]
@@ -757,6 +819,13 @@ def control(action, arg=None):
         if key == 'interval_s':
             shown = text(lang, f'{value // 60} 分钟', f'{value // 60} minutes') if value >= 60 else text(lang, f'{value} 秒', f'{value} seconds')
             return {'message': text(lang, f'运行间隔已设为 {shown}；下一次调度起采用。', f'Run interval set to {shown}; applies from the next scheduling tick.')}
+        if key == 'concurrent_lanes':
+            return {'message': text(lang,
+                f'并行泳道已设为 {value}。每条泳道仍是一轮完整的研究→审查→模拟：研究与审查必须不同渠道，'
+                '同一渠道同一时刻只有一个调用，平台模拟与提交保持串行，授权/预算/UNKNOWN 门禁不变。对在途轮次不打断。',
+                f'Parallel lanes set to {value}. Each lane remains a full research→review→simulate cycle: research and review '
+                'must use different channels, one call per channel at a time, platform simulation and submission stay serial, '
+                'and authorization/budget/UNKNOWN gates are unchanged. In-flight cycles are not interrupted.')}
         if key == 'max_cycles_per_day':
             return {'message': text(lang, f'每日轮数上限已设为 {value}；按 UTC 日计。', f'Daily cycle limit set to {value} (UTC days).')}
         return {'message': text(lang, '已取消累计轮数上限。', 'Total cycle limit removed.') if value is None
@@ -809,7 +878,8 @@ def control(action, arg=None):
     auto = wq('autopilot', 'status', '--json')
     scheduler = loaded()
     latest = auto.get('latest_cycle') or {}
-    cycle_open = latest.get('state') not in (None, '', 'closed')
+    open_cycles = auto.get('open_cycles') or []
+    cycle_open = bool(open_cycles) or latest.get('state') not in (None, '', 'closed')
     if state['paused']:
         title = text(lang, '已暂停（当前任务可收尾）', 'Paused (running tasks may finish)')
     elif state['unknown_pending']:
@@ -823,25 +893,59 @@ def control(action, arg=None):
     else:
         title = text(lang, '自动研究已启用', 'Automatic research on')
     cfg = _cfg()
+    experiment = None
+    history_token = '0'
     conn = desktop.connect_readonly(cfg)
     try:
         routes = desktop.next_models(conn, cfg, lang)
+        try:
+            experiment = _experiment_budget(conn)
+            history_token = desktop.history_token(conn)
+            research_token = desktop.research_token(conn, cfg)
+        except sqlite3.OperationalError:
+            experiment, history_token, research_token = None, '0', '0'
     finally:
         conn.close()
     unlimited = text(lang, '不限', 'unlimited')
     detail = pause_detail(state.get('pause_reason') or '', lang) if state['paused'] else translate(auto.get('message') or '', lang)
+    if experiment:
+        experiment_line = text(lang,
+                               f"实验轮数：已用 {experiment['used']} / 上限 {experiment['limit']}，还剩 {experiment['remaining']}",
+                               f"Experiment cycles: {experiment['used']} used / limit {experiment['limit']}, {experiment['remaining']} left")
+    else:
+        experiment_line = text(lang, '实验轮数：未设置', 'Experiment cycles: not set')
     try:
         identity, _refreshed = menu_identity(cfg, lang)
     except (OSError, ValueError, TypeError):
         identity = {'bound': brain_bound(), 'title': text(lang, 'WorldQuant 账号', 'WorldQuant account'), 'detail': ''}
+    lanes = []
+    state_names = {'researching': ('研究', 'researching'), 'reviewing': ('审查', 'reviewing'),
+                   'simulating': ('模拟', 'simulating')}
+    try:
+        data = routing.catalog(cfg)
+        provider_defs = data['providers']
+    except (OSError, ValueError, KeyError, TypeError):
+        provider_defs = {}
+    for r in open_cycles:
+        def _label(name):
+            return desktop.provider_label(name, provider_defs.get(name) or {}, lang) if name else ''
+        lanes.append({'lane': r.get('lane'), 'cycle_id': r.get('cycle_id'),
+                      'state': r.get('state') or '',
+                      'state_label': text(lang, *state_names.get(r.get('state'), (r.get('state') or '', r.get('state') or ''))),
+                      'research': _label(r.get('research_preferred')), 'review': _label(r.get('review_preferred')),
+                      'research_task': r.get('research_task'), 'review_task': r.get('review_task')})
     return {'title': title, 'paused': state['paused'], 'enabled': bool(auto.get('enabled')),
             'identity': identity,
             'cycle_open': cycle_open, 'cycle_state': latest.get('state') or '',
+            'lanes': lanes, 'concurrent_lanes': auto.get('concurrent_lanes') or 1,
             'scheduler': scheduler,
             'brain_bound': brain_bound(),
             'message': desktop.localize_message(detail, lang),
             'next_models': routes,
             'next_at': desktop.beijing(auto.get('next_cycle_at'), text(lang, '待当前任务完成／调度检查', 'awaiting current task / scheduler check'), lang=lang),
+            'experiment_line': experiment_line,
+            'history_token': history_token,
+            'research_token': research_token,
             'cycles': text(lang, f"累计 {auto['total_cycles']} / {auto.get('max_cycles_total') or unlimited} 轮",
                                   f"{auto['total_cycles']} / {auto.get('max_cycles_total') or unlimited} cycles total"),
             'last_tick': desktop.beijing(auto.get('last_tick_at'), lang=lang), 'unknown': state['unknown_pending'],

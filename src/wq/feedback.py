@@ -633,18 +633,25 @@ def combination_diagnostics(conn, max_plans=2, min_parent_sharpe=MIN_PARENT_SHAR
         pa,pb=[policies[x] for x in ids]
         if simulation_settings(pa['settings'])!=simulation_settings(pb['settings']):block('SETTINGS_MISMATCH')
         corr={'value':None}
+        # 已经有阻断原因时，相关性数值不会改变首因，也不参与下一对选择。只保留能把「阻断」改成「未知」的便宜判断。
         if all(x in pnls for x in ids):
             if daily[ids[0]]!=daily[ids[1]]:block('EVALUATION_PERIOD_MISMATCH')
-            corr=correlation(pnls[ids[0]],pnls[ids[1]],prepared=(prepared[ids[0]],prepared[ids[1]]))
-            if corr['value'] is None:block('PNL_OR_CORRELATION_UNKNOWN',True)
-            elif abs(corr['value'])>=.3:block('PAIR_CORRELATION_HIGH')
+            if not reasons:
+                corr=correlation(pnls[ids[0]],pnls[ids[1]],prepared=(prepared[ids[0]],prepared[ids[1]]))
+                if corr['value'] is None:block('PNL_OR_CORRELATION_UNKNOWN',True)
+                elif abs(corr['value'])>=.3:block('PAIR_CORRELATION_HIGH')
+            else:
+                left,right=prepared[ids[0]],prepared[ids[1]]
+                short=left['dates']==right['dates'] and (len(left['centered'])<252 or left['variance']<=0 or right['variance']<=0)
+                if short:block('PNL_OR_CORRELATION_UNKNOWN',True)
         else:block('PNL_OR_CORRELATION_UNKNOWN',True)
         ast={'op':'add','left':{'op':'rank','arg':candidates[ids[0]]['ast']},
              'right':{'op':'rank','arg':candidates[ids[1]]['ast']}}
         policy=current_policy or pa; bindings=policy['bindings']; paused=set(policy.get('paused_clusters') or [])
-        if any(bindings.get(r,{}).get('cluster') in paused for r in research_dsl.roles_used(ast)):block('PAUSED_ROLE')
-        try:research_dsl.compile_ast(ast,bindings,'combination')
-        except (ValueError,KeyError,TypeError):block('AST_INVALID')
+        if not reasons:
+            if any(bindings.get(r,{}).get('cluster') in paused for r in research_dsl.roles_used(ast)):block('PAUSED_ROLE')
+            try:research_dsl.compile_ast(ast,bindings,'combination')
+            except (ValueError,KeyError,TypeError):block('AST_INVALID')
         rank_key=(-(strengths[ids[0]]+strengths[ids[1]]),abs(corr['value'])) if not reasons else None
         output.append({'pair_key':key,'parents':list(ids),'parent_cycles':[a['cycle_id'],b['cycle_id']],
             'eligibility':'unknown' if unknown else 'blocked' if reasons else 'eligible',

@@ -172,6 +172,8 @@ def assign_role(cfg, conn, role, provider):
     profiles = json.loads(path.read_text(encoding='utf-8'))
     if provider not in profiles.get('providers', {}):
         raise ValueError('还没有这个模型')
+    if store.get_flag(conn, f'provider_disabled:{provider}') == '1':
+        raise ValueError('这个渠道未打开。请先在渠道里打开，再把它设为研究或审查')
     preset_name = store.get_flag(conn, 'active_preset') or profiles.get('default')
     preset = (profiles.get('presets') or {}).get(preset_name)
     if not isinstance(preset, dict):

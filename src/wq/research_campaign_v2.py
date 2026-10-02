@@ -383,7 +383,7 @@ def enqueue_review(conn,cfg,row,p,pair,arm):
          'paired_candidates':pair['candidates'],'inference':'descriptive pilot only'},ensure_ascii=False)
     solo=routing.preset_is_solo(cfg,routing.active_preset(conn,cfg))
     tid=autopilot.make_job(conn,cfg,row['cycle_id'],'review',text,[] if solo else [autopilot.provider(conn,row['research_task'])],
-                          None if solo else autopilot.alternate_order(cfg,row['cycle_id'],'review'))
+                          None if solo else autopilot.route_order(conn,cfg,row['cycle_id'],'review'))
     append_once(conn,'review:'+tid,'campaign_review_enqueued',{'pair_id':pair['pair_id'],'arm':arm,'task_id':tid},row['cycle_id'])
     if arm=='treatment':conn.execute("UPDATE research_cycles SET state='reviewing',review_task=? WHERE cycle_id=?",(tid,row['cycle_id']))
     return tid

@@ -111,15 +111,15 @@ def templates(bindings, maximum=6):
     return result
 
 
-def rule_advice(conn, ast, bindings, settings, history=None):
+def rule_advice(conn, ast, bindings, settings, history=None, frozen_rules=None):
     from .research_learning import as_of, rules
     history = history if history is not None else as_of(conn)
     parent, edit = actual_parent(history, ast, bindings, settings)
     result = {'parent_id': parent['trial_id'] if parent else None, 'edit': edit,
-              'score': 0, 'matched_rules': [], 'evidence': 'observed_association_not_causality'}
+              'score': 0, 'matched_rules': [], 'action_domain':'ast','parent_kind':'retrieval_neighbor_not_declared_intervention','evidence': 'observed_association_not_causality'}
     if parent is None: return result
-    for rule in rules(conn):
-        if rule['expired'] or rule['scope_id'] != parent['scope_id'] or rule['edit'] != edit: continue
+    for rule in (rules(conn) if frozen_rules is None else frozen_rules):
+        if rule['expired'] or util.now()>=util.parse_iso(rule['expires_at']) or rule['scope_id'] != parent['scope_id'] or rule['edit'] != edit: continue
         result['matched_rules'].append(rule['rule_id'])
         # Use independent families, not the number of nearly identical child trials.
         by_id = {t['trial_id']: t for t in history}
@@ -190,3 +190,19 @@ def sensitivity(conn):
         group['trials'].append({'trial_id':t['trial_id'],'edit':doc['edit'],'execution':outcome.get('execution','not_run')})
     return [{**g, 'quality':dict(g['quality']), 'robustness_score':None,
              'interpretation':'All observed variants; incomplete/technical failures remain separate, no universal threshold.'} for g in groups.values()]
+
+
+def measurement_opportunities(bindings):
+    cards=[];concepts=set()
+    for role,b in sorted(bindings.items()):
+        if b.get('group_field'):continue
+        m=b.get('measurement') or {};concept=m.get('concept') or b.get('cluster') or role
+        if concept in concepts:continue
+        concepts.add(concept)
+        cards.append({'role':role,'observed_quantity':b.get('description',role),
+                      'frequency':m.get('update_frequency','unverified'),'unit':m.get('unit','unverified'),
+                      'scope':'approved_current_platform_screen_only','cannot_establish':['first_publication','causality','net_return'],
+                      'prediction_and_counterexample_required':True})
+        if len(cards)>=3:break
+    return {'opportunity_cards':cards,'bounded_edits':[],
+            'instruction':'Use measured quantities and related counterexamples. Do not invent windows, events or units. No automatic new permissions.'}

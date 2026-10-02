@@ -296,3 +296,13 @@ wq research-framework approve-epoch --file /absolute/epoch-approval.json
 `research_work_selected` 保存可选项、选择原因、策略 hash 和确定性选择版本；`research_work_resources` 保存每次补证/重评的模型调用数、逻辑 API 读取尝试数和单调时钟运行秒数。底层 transport 的重试仍以原 API 日志为准。无辅助模型调用的费用为 0；发生 API 读取但没有价格凭据时 API 费用为 null；运行时货币成本始终未估算为 null。原模型和模拟费用继续由原账本统计。
 
 本候选的验收证据是离线状态转换、真实本地 runner/SQLite 恢复、源码与安装包一致性及隔离桌面检查。模拟 transport 不是 BRAIN 真服务验证；当前未配置的真实资料与采集约定仍保持阻断。没有自动增加额度、提交 Alpha、部署运行时或自改源码。
+
+### 2026-10-02 本机双环更新操作契约
+
+`research_dual_loop` 只对当前明确绑定的 learning_root 和授权窗口启用。新 Quant 工作必须有有效的 approved epoch/冻结baseline和原累积余额；默认2个实质不同测量计划（最多3），资格先行，完整plans保留且不能通过回落重新生成。原人工/旧任务不追认进该实验。
+
+缺真实观测时，已批准scope/binding可以用内建来源补元数据，仍需语义合同。固定 `private_dir/research-inbox/*.request.json` 写出精确缺口；材料填入对应 `*.material.json`，至少包含 gap_id、scope、source_ref、text（8–50000字符）。收到材料自动版本留存/身份核验，不自动更新policy或把metadata算作PIT通过。无source的方向同样能核验收件并继续诚实等待。108个取证包只一次本地汇总通知，不外发。
+
+每个输入episode最多2次无信息发现，cid预约固定；只有该轮新完整真实模拟入账释放一次发现位，UNKNOWN/旧结果不释放。模型启动预约总64、补证读取24、同来源3、collect+verify日4；原更小budget/期限/暂停仍优先。重启或新提案不续额。
+
+机制环第一期只比较 gap full/cache 的工程等价与开销；任何steps路径始终full，无法证明稳定的结果不缓存。自然8有效配对、12机会或72h截止，中位节省≥20%才能工程启用；6h/8hits审计不等价则回滚并阻止金融可比性晋级。没有任意自改源码/自动加权新策略/自动部署AI补丁。图与真实运行证据见 `var/dual-loop-20261002/`。

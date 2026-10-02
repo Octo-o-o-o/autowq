@@ -11,6 +11,9 @@ from collections import Counter
 from . import store, usage, util
 from .i18n import text, translate
 
+# 一次历史渲染里复用任务索引。sqlite3.Connection 不能挂自定义属性。
+_TASKS_BY_PURPOSE = {}
+
 TITLES = {
     "week1-01-preregister": ("Grok：修订研究方案", "明确研究假设、样本范围和放弃标准。",
                              "Grok: revise the research plan", "State the hypothesis, sample scope and abandonment criteria."),
@@ -107,7 +110,11 @@ def group_cost_data(conn, rows, cfg=None):
                 if call: linked[cid] = call
         # 路由purpose是唯一job ID；包含崩溃前尚未来得及写provider_result的调用。
         purpose = payload.get('purpose')
-        same = [r for r in store.list_tasks(conn) if json.loads(r['payload_json']).get('purpose') == purpose]
+        indexed = _TASKS_BY_PURPOSE.get(id(conn))
+        if indexed is not None:
+            same = indexed.get(purpose, []) if purpose else []
+        else:
+            same = [r for r in store.list_tasks(conn) if json.loads(r['payload_json']).get('purpose') == purpose]
         if purpose and len(same) == 1:
             for call in conn.execute('SELECT * FROM agent_calls WHERE purpose=? AND started_at>=?', (purpose, row['created_at'])):
                 linked[call['call_id']] = call

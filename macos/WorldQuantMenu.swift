@@ -55,13 +55,14 @@ final class FlippedView: NSView {
 
 /// 预设切换对话框里的临时轮数输入（标签 + 数字框 + 步进器）；确认按钮标题随轮数实时更新。
 /// NSAlert 的 accessoryView 区域对 NSStackView 的固有尺寸支持不可靠（标签会被压没），这里用固定 frame 布局。
-final class PresetCyclesInput: NSObject {
+final class PresetCyclesInput: NSObject, NSTextFieldDelegate {
     static let maxCycles = 100
     let alert: NSAlert
     let lang: String
     let field = NSTextField(string: "1")
     let stepper = NSStepper()
     let row = NSView(frame: NSRect(x: 0, y: 0, width: 220, height: 26))
+    weak var onceButton: NSButton?
 
     init(alert: NSAlert, lang: String) {
         self.alert = alert
@@ -73,8 +74,9 @@ final class PresetCyclesInput: NSObject {
         field.alignment = .center
         field.font = .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
         field.frame = NSRect(x: 72, y: 1, width: 48, height: 24)
+        field.delegate = self
         field.target = self; field.action = #selector(changed(_:))
-        stepper.minValue = 1; stepper.maxValue = Double(Self.maxCycles); stepper.valueWraps = false
+        stepper.minValue = 1; stepper.maxValue = Double(Self.maxCycles); stepper.integerValue = 1; stepper.valueWraps = false
         stepper.frame = NSRect(x: 72 + 48 + UI.controlGap, y: 0, width: 20, height: 26)
         stepper.target = self; stepper.action = #selector(changed(_:))
         let label = NSTextField(labelWithString: lang == "zh" ? "临时轮数" : "Cycles")
@@ -84,16 +86,28 @@ final class PresetCyclesInput: NSObject {
         row.addSubview(stepper)
     }
     func value() -> Int { max(1, min(Self.maxCycles, field.integerValue)) }
-    func buttonTitle() -> String {
-        let n = value()
-        return lang == "zh" ? (n <= 1 ? "仅切换一轮" : "临时切换 \(n) 轮")
-                            : (n <= 1 ? "One cycle only" : "Temporary for \(n) cycles")
+    func buttonTitle(for n: Int) -> String {
+        let shown = max(1, min(Self.maxCycles, n))
+        return lang == "zh" ? (shown <= 1 ? "仅切换一轮" : "临时切换 \(shown) 轮")
+                            : (shown <= 1 ? "One cycle only" : "Temporary for \(shown) cycles")
+    }
+    func buttonTitle() -> String { buttonTitle(for: value()) }
+    func showCount(_ n: Int) {
+        onceButton?.title = buttonTitle(for: n)
+    }
+    func controlTextDidChange(_ obj: Notification) {
+        guard let n = Int(field.stringValue), (1...Self.maxCycles).contains(n) else { return }
+        stepper.integerValue = n
+        showCount(n)
     }
     @objc private func changed(_ sender: Any?) {
-        if sender as? NSStepper === stepper { field.integerValue = stepper.integerValue }
-        stepper.integerValue = value()   // 数字框手输越界时按钳制值同步回显
-        field.integerValue = value()
-        alert.buttons.first?.title = buttonTitle()
+        if sender as? NSStepper === stepper {
+            field.stringValue = String(stepper.integerValue)
+        } else {
+            stepper.integerValue = value()
+            field.integerValue = value()
+        }
+        showCount(sender as? NSStepper === stepper ? stepper.integerValue : value())
     }
 }
 
@@ -161,7 +175,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var providerMenu = NSMenu()
     var modelMenu = NSMenu()
     var intervalMenu = NSMenu()
+    var laneMenu = NSMenu()
     var dailyMenu = NSMenu()
+    var experimentMenu = NSMenu()
     var totalMenu = NSMenu()
     var languageMenu = NSMenu()
     var spendMenu = NSMenu()
@@ -169,7 +185,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var notifyTimer: Timer?
     var actionBusy = false
     var loading = Set<String>()
+    /// 同一种读取已经在飞时，只记住一次后续请求。always 盖过 force，force 盖过 stale。完成后只补跑这一次。
+    var pendingReadMode: [String: String] = [:]
     var fetched: [String: Date] = [:]
+    var wantedHistoryToken = ""
+    var displayedHistoryToken = ""
+    var historyRequestToken = ""
+    var wantedResearchToken = ""
+    var displayedResearchToken = ""
+    var researchRequestToken = ""
+    var researchUpdating = false
+    var presetClosed: [String: String] = [:]
     var lockFD: Int32 = -1
     var ready = false
     var root: String { UserDefaults.standard.string(forKey: "WQWorkspace") ?? "" }
@@ -195,8 +221,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     let tick = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     let nextAt = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    let experimentRow = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     let researchModel = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     let reviewModel = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    let lanesRow = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     let accountRow = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     let brainRow = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     let notifyRow = NSMenuItem(title: "", action: #selector(apply(_:)), keyEquivalent: "")
@@ -280,8 +308,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         row.view = view; row.isEnabled = false
         return row
     }
+    /// 对话框会激活这个菜单栏应用，AppKit 随后投递 applicationShouldHandleReopen。
+    /// 那条路径本来只该在用户再次打开应用时显示研究进展；对话框期间先压住，并多留一个主线程回合，
+    /// 盖住模态结束后才送到的同一次事件。
+    var researchReopenHolds = 0
+    func holdResearchReopen<T>(_ body: () -> T) -> T {
+        researchReopenHolds += 1
+        let value = body()
+        DispatchQueue.main.async { [weak self] in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.researchReopenHolds = max(0, self.researchReopenHolds - 1)
+            }
+        }
+        return value
+    }
+    @discardableResult
+    func runAlert(_ box: NSAlert) -> NSApplication.ModalResponse {
+        holdResearchReopen {
+            NSApp.activate(ignoringOtherApps: true)
+            return box.runModal()
+        }
+    }
     func alert(_ title: String, _ text: String) {
-        let box = NSAlert(); box.messageText = title; box.informativeText = text; box.runModal()
+        let box = NSAlert(); box.messageText = title; box.informativeText = text; runAlert(box)
     }
     func applicationDidFinishLaunching(_ notification: Notification) {
         let bundlePath = Bundle.main.bundlePath
@@ -307,7 +357,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else { buildFirstRunMenu() }
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if ready { showResearch() }
+        if ready && researchReopenHolds == 0 { showResearch() }
         return true
     }
     /// 研究进展窗口：工具行（标题左 + 按钮右）+ 分隔线 + 卡片式分节列表，全部 Auto Layout。
@@ -387,10 +437,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             researchWindow = window
             window.center()
         }
+        researchUpdating = !researchResponse.isEmpty
         updateResearchWindow()
         researchWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        perform("research")
+        refreshResearchIfNeeded(force: true)
     }
     /// 单个分节卡片：圆角底板 + 标题（13 semibold）+ 正文（13 regular，行距 3pt）。
     func researchCard(title: String, lines: [String], meta: Bool = false) -> NSView {
@@ -444,6 +495,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         let entries = researchResponse["entries"] as? [[String: Any]] ?? []
         var cards: [NSView] = []
+        if researchUpdating && !entries.isEmpty {
+            cards.append(researchCard(title: t("正在更新…", "Updating…"), lines: [], meta: true))
+        }
         if entries.isEmpty {
             cards.append(researchCard(title: t("正在读取本地账本…", "Reading the local ledger…"), lines: [], meta: true))
         } else {
@@ -467,7 +521,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         stack.addArrangedSubview(spacer)
         researchScroll?.contentView.scroll(to: NSPoint(x: 0, y: 0))
     }
-    @objc func refreshResearch() { perform("research") }
+    @objc func refreshResearch() { refreshResearchIfNeeded(always: true) }
     @objc func openTrayMenu() {
         guard let content = researchWindow?.contentView, let button = researchMenuButton else { return }
         menu.popUp(positioning: nil, at: NSPoint(x: button.frame.minX, y: button.frame.minY), in: content)
@@ -520,8 +574,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         box.addButton(withTitle: t("本轮结束后停止并退出", "Stop after this cycle and quit"))
         box.addButton(withTitle: t("立刻结束所有任务并更新", "Stop all tasks and update"))
         box.addButton(withTitle: t("仅退出", "Quit menu only"))
-        NSApp.activate(ignoringOtherApps: true)
-        switch box.runModal() {
+        switch runAlert(box) {
         case .alertFirstButtonReturn:
             runSetup(["setup", "--workspace", root, "--allow-busy"]) { self.finishEngineSetup($0) }
         case .alertSecondButtonReturn:
@@ -557,7 +610,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             : FileManager.default.homeDirectoryForCurrentUser
         panel.message = create ? t("选择或新建一个目录作为工作区（建议 ~/autowq）", "Choose or create a workspace directory (~/autowq recommended)")
             : t("选择一个已包含 config/config.json 的工作区目录", "Choose a directory that already contains config/config.json")
-        guard panel.runModal() == .OK, let url = panel.url else { return nil }
+        guard holdResearchReopen({ panel.runModal() }) == .OK, let url = panel.url else { return nil }
         return url.path
     }
     /// 应用自带的 Python（与本进程同架构）；只有源码/旧版构建缺少内置运行时才退回系统 python3。
@@ -709,7 +762,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func buildMainMenu() {
         // 语言切换后整棵静态菜单按当前 lang 重建；动态数据由后续 fill* 回填。
         for row in [accountRow, brainRow, headline, detail, tick, nextAt, researchModel, reviewModel,
-                    cycles, submissions, standby, research, launchRow, notifyRow, autoSubmitRow, submissionRow,
+                    lanesRow, cycles, submissions, standby, research, launchRow, notifyRow, autoSubmitRow, submissionRow,
                     activateRow, activateSep, cycleRow, powerRow] {
             detach(row)
         }
@@ -742,8 +795,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(accountRow)
         // 状态区：标题 13 semibold + 说明/调度/模型 12 辅助色，全部折行，等状态回填。
         wrapRow(headline, t("正在读取状态…", "Reading status…"), font: UI.fontTitle, color: .labelColor)
-        for row in [detail, tick, nextAt, researchModel, reviewModel] { wrapRow(row, " ") }
-        for row in [headline, detail, tick, nextAt, researchModel, reviewModel] { menu.addItem(row) }
+        for row in [detail, tick, nextAt, experimentRow, researchModel, reviewModel, lanesRow] { wrapRow(row, " ") }
+        for row in [headline, detail, tick, nextAt, experimentRow, researchModel, reviewModel, lanesRow] { menu.addItem(row) }
         menu.addItem(.separator())
         historyMenu = NSMenu(title: t("轮次历史", "Cycle history"))
         submissionsMenu = NSMenu(title: t("已提交 Alpha", "Submitted Alphas"))
@@ -760,7 +813,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         presetMenu = NSMenu(title: t("路由预设", "Routing presets"))
         providerMenu = NSMenu(title: t("渠道", "Providers"))
         intervalMenu = NSMenu(title: t("运行间隔", "Run interval"))
+        laneMenu = NSMenu(title: t("并行泳道", "Parallel lanes"))
         dailyMenu = NSMenu(title: t("每日轮数上限", "Daily cycle limit"))
+        experimentMenu = NSMenu(title: t("实验轮数上限", "Experiment cycle limit"))
         totalMenu = NSMenu(title: t("累计轮数上限", "Total cycle limit"))
         languageMenu = NSMenu(title: t("界面语言", "Interface language"))
         spendMenu = NSMenu(title: t("模型花费上限", "Model spend cap"))
@@ -797,8 +852,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             (t("运行间隔", "Run interval"), intervalMenu,
              t("两轮研究之间的等待时长；下一次调度起采用。",
                "Wait between research cycles; applies from the next scheduling tick.")),
+            (t("并行泳道", "Parallel lanes"), laneMenu,
+             t("同时开放的研究轮数。每条泳道是一轮完整的研究→审查→模拟；研究与审查必须不同渠道，同一渠道同一时刻只有一个调用，模拟与提交仍串行。",
+               "How many research cycles may run at once. Each lane is a full research→review→simulate cycle; research and review must use different channels, one call per channel at a time, and simulation/submission stay serial.")),
             (t("每日轮数上限", "Daily cycle limit"), dailyMenu,
              t("每个 UTC 日最多启动的研究轮数。", "Research cycles started at most per UTC day.")),
+            (t("实验轮数上限", "Experiment cycle limit"), experimentMenu,
+             t("这一段实验总共能跑多少轮。可以提前跑完，不必摊到授权最后一天。",
+               "How many cycles this experiment may run in total. It can finish early; it is not spread to the last day of authorization.")),
             (t("累计轮数上限", "Total cycle limit"), totalMenu,
              t("累计研究轮数达到上限后停止启动新轮次。", "No new cycles once the total reaches this limit."))
         ] {
@@ -852,21 +913,99 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     func menuWillOpen(_ opened: NSMenu) {
         guard ready else { return }
-        if opened === historyMenu { load("history") }
+        if opened === historyMenu { refreshHistoryIfNeeded(force: true) }
         else if opened === submissionsMenu { load("submissions") }
         else if opened === standbyMenu { load("standby") }
-        else if opened === researchMenu { load("research") }
+        else if opened === researchMenu { refreshResearchIfNeeded(force: true) }
         else if opened === settingsMenu { updateActivateRow(); load("settings") }
         else if opened === menu { refresh() }
     }
+    func menu(for kind: String) -> NSMenu? {
+        switch kind {
+        case "history": return historyMenu
+        case "submissions": return submissionsMenu
+        case "standby": return standbyMenu
+        case "research": return researchMenu
+        case "settings": return settingsMenu
+        default: return nil
+        }
+    }
+    func showListLoading(_ target: NSMenu) {
+        if target.items.first?.tag == 1 { return }
+        let placeholder = target.items.allSatisfy {
+            $0.isSeparatorItem || $0.tag == 1 || $0.title.hasPrefix(t("正在读取", "Reading")) || $0.title.hasPrefix(t("正在更新", "Updating"))
+        }
+        if placeholder { return }
+        let row = info(t("正在更新…", "Updating…"))
+        row.tag = 1
+        target.insertItem(row, at: 0)
+    }
     func load(_ kind: String) {
-        if fetched[kind] == nil || Date().timeIntervalSince(fetched[kind]!) > 30 { perform(kind) }
+        let stale = fetched[kind] == nil || Date().timeIntervalSince(fetched[kind]!) > 30
+        if !stale { return }
+        if let target = menu(for: kind) { showListLoading(target) }
+        perform(kind)
+    }
+    func showHistoryLoading() {
+        showListLoading(historyMenu)
+    }
+    func refreshHistoryIfNeeded(force: Bool = false) {
+        let stale = wantedHistoryToken != displayedHistoryToken
+        if !force && !stale { return }
+        if force && !stale && !loading.contains("history") { return }
+        if !displayedHistoryToken.isEmpty { showHistoryLoading() }
+        if loading.contains("history") {
+            notePendingRead("history", force ? "force" : "stale")
+            return
+        }
+        historyRequestToken = wantedHistoryToken
+        perform("history")
+    }
+    func refreshResearchIfNeeded(force: Bool = false, always: Bool = false) {
+        let stale = wantedResearchToken != displayedResearchToken
+        if !always && !force && !stale { return }
+        if !always && force && !stale && !loading.contains("research") { return }
+        showListLoading(researchMenu)
+        if !researchResponse.isEmpty { researchUpdating = true; updateResearchWindow() }
+        if loading.contains("research") {
+            notePendingRead("research", always ? "always" : (force ? "force" : "stale"))
+            return
+        }
+        researchRequestToken = wantedResearchToken
+        perform("research")
+    }
+    func notePendingRead(_ action: String, _ mode: String) {
+        let rank = ["stale": 1, "force": 2, "always": 3]
+        let previous = pendingReadMode[action] ?? ""
+        if (rank[mode] ?? 0) >= (rank[previous] ?? 0) {
+            pendingReadMode[action] = mode
+        }
+    }
+    func settleRead(_ action: String) {
+        guard let mode = pendingReadMode.removeValue(forKey: action) else { return }
+        switch action {
+        case "history":
+            refreshHistoryIfNeeded(force: mode == "force" || mode == "always")
+        case "research":
+            refreshResearchIfNeeded(force: mode == "force", always: mode == "always")
+        case "submissions", "standby", "settings":
+            fetched[action] = nil
+            load(action)
+        case "notifications":
+            perform("notifications")
+        case "status":
+            refresh()
+        case "identity-refresh":
+            perform("identity-refresh")
+        default:
+            break
+        }
     }
     func applyIcon(active: Bool) {
         // 模板图标本身是单色。暂停时再降低不透明度，和旁边常亮的菜单栏图标区分开。
         item.button?.alphaValue = active ? 1 : 0.4
     }
-    func applyRunState(paused: Bool, enabled: Bool, cycleOpen: Bool) {
+    func applyRunState(paused: Bool, enabled: Bool, cycleOpen: Bool, lanes: [[String: Any]] = []) {
         let running = !paused && enabled
         powerStops = running
         powerRow.title = running ? t("停止自动研究", "Stop automatic research") : t("开始自动研究", "Start automatic research")
@@ -874,7 +1013,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             ? t("不再领取新任务；当前这一轮允许收尾。要立刻结束这一轮，用「取消当前轮次」。",
                "Stops claiming new tasks; the current cycle may finish. Use “Cancel current cycle” to end that cycle now.")
             : t("恢复队列，按既有间隔持续研究。", "Resumes the queue and keeps researching at the configured interval.")
+        cycleRow.submenu = nil
         cycleCancels = cycleOpen
+        if lanes.count > 1 {
+            cycleRow.isHidden = false
+            cycleRow.action = nil
+            cycleRow.title = t("取消轮次…", "Cancel cycle…")
+            cycleRow.toolTip = t("结束某一条泳道的这一轮；其它泳道不受影响，自动研究保持开启。已经发出的模拟不会撤回。",
+                                 "Ends one lane’s cycle; other lanes are unaffected and automatic research stays on. A simulation already sent is not withdrawn.")
+            let picker = NSMenu(title: cycleRow.title)
+            picker.autoenablesItems = false
+            for item in lanes {
+                let lane = (item["lane"] as? Int ?? 0) + 1
+                let cid = item["cycle_id"] as? Int ?? 0
+                let state = item["state_label"] as? String ?? item["state"] as? String ?? ""
+                let row = NSMenuItem(title: t("泳道\(lane) · 第\(cid)轮 · \(state)", "Lane \(lane) · cycle \(cid) · \(state)"),
+                                     action: #selector(apply(_:)), keyEquivalent: "")
+                row.target = self
+                row.representedObject = "cancel-cycle=\(cid)"
+                picker.addItem(row)
+            }
+            cycleRow.submenu = picker
+            cycleRow.isEnabled = true
+            return
+        }
+        cycleRow.action = #selector(cycleAction)
         if cycleOpen {
             cycleRow.isHidden = false
             cycleRow.title = t("取消当前轮次", "Cancel current cycle")
@@ -911,8 +1074,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         box.addButton(withTitle: t("本轮结束后停止", "Stop after this cycle"))
         box.addButton(withTitle: t("立刻结束所有任务", "Stop all tasks now"))
         box.addButton(withTitle: t("取消", "Cancel"))
-        NSApp.activate(ignoringOtherApps: true)
-        switch box.runModal() {
+        switch runAlert(box) {
         case .alertFirstButtonReturn:
             NSApp.terminate(nil)
         case .alertSecondButtonReturn:
@@ -932,6 +1094,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let code = sender.representedObject as? String else { return }
         let parts = code.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
         if parts[0] == "preset", parts.count > 1 {
+            if let blocked = presetClosed[parts[1]], !blocked.isEmpty {
+                let box = NSAlert()
+                box.messageText = t("还不能切换这个预设", "This preset cannot be set yet")
+                box.informativeText = t("请先在「渠道」里打开：", "Turn these providers on under Providers first: ") + blocked
+                    + t("。打开后才能设置。", ". You can set the preset after they are on.")
+                box.addButton(withTitle: t("好", "OK"))
+                _ = runAlert(box)
+                return
+            }
             // 切换预设前让用户选择：临时 N 轮（步进器可调，默认 1）还是永久切换。
             let box = NSAlert()
             box.messageText = t("切换路由预设：", "Switch routing preset: ") + parts[1]
@@ -939,11 +1110,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                     "Temporary: the next N new research cycles use this preset (set N with the stepper above), then the current permanent preset resumes.\nPermanent: all new tasks use it from now on.\nIn-flight tasks keep their routes either way.")
             let cyclesInput = PresetCyclesInput(alert: box, lang: lang)
             box.accessoryView = cyclesInput.row
-            box.addButton(withTitle: cyclesInput.buttonTitle())
+            cyclesInput.onceButton = box.addButton(withTitle: cyclesInput.buttonTitle())
             box.addButton(withTitle: t("永久切换", "Permanent"))
             box.addButton(withTitle: t("取消", "Cancel"))
-            NSApp.activate(ignoringOtherApps: true)
-            switch box.runModal() {
+            switch runAlert(box) {
             case .alertFirstButtonReturn: perform("preset-once", parts[1] + ":" + String(cyclesInput.value()))
             case .alertSecondButtonReturn: perform("preset", parts[1])
             default: return
@@ -964,6 +1134,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         target.removeAllItems()
         let entries = response["entries"] as? [[String: Any]] ?? []
         if kind == "research" {
+            researchUpdating = false
             researchResponse = response; updateResearchWindow()
             let row = NSMenuItem(title: t("打开研究进展窗口…", "Open research progress window…"), action: #selector(showResearch), keyEquivalent: "")
             row.target = self; row.isEnabled = true; target.addItem(row); target.addItem(.separator())
@@ -1011,6 +1182,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
         fetched[kind] = Date()
+        if kind == "history" {
+            displayedHistoryToken = historyRequestToken
+        }
+        if kind == "research" {
+            displayedResearchToken = researchRequestToken
+        }
     }
 
     func fillSettings(_ response: [String: Any]) {
@@ -1047,6 +1224,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                            "Writes ui.language in config.json; auto follows the system."), in: languageMenu)
         }
         presetMenu.removeAllItems()
+        presetClosed = [:]
         let active = response["active_preset"] as? String ?? ""
         let permanent = response["permanent_preset"] as? String ?? active
         let once = response["preset_once"] as? String ?? ""
@@ -1069,6 +1247,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let name = preset["name"] as? String ?? ""
             let research = preset["research"] as? String ?? ""
             let review = preset["review"] as? String ?? ""
+            let closed = preset["closed"] as? [String] ?? []
+            presetClosed[name] = closed.joined(separator: lang == "zh" ? "、" : ", ")
             let row = NSMenuItem(title: name, action: #selector(apply(_:)), keyEquivalent: "")
             row.target = self
             row.representedObject = "preset=" + name
@@ -1132,6 +1312,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if currentInterval > 0 && !intervals.contains(where: { $0.0 == currentInterval }) {
             intervalMenu.addItem(info(t("当前值 \(currentInterval) 秒", "Current: \(currentInterval) s")))
         }
+        laneMenu.removeAllItems()
+        laneMenu.addItem(info(t("每条泳道是一轮完整的研究→审查→模拟；对在途轮次不打断，下一轮起生效。",
+                                "Each lane is a full research→review→simulate cycle; in-flight cycles are not interrupted.")))
+        let currentLanes = response["concurrent_lanes"] as? Int ?? 1
+        let laneChoices = (response["lane_presets"] as? [NSNumber])?.map { $0.intValue } ?? [1, 2, 3, 4]
+        for value in laneChoices {
+            pickRow(value == 1 ? t("1 条（串行）", "1 (serial)") : t("\(value) 条", "\(value) lanes"),
+                    "config=concurrent_lanes=\(value)", on: value == currentLanes,
+                    tip: t("研究与审查必须不同渠道；同一渠道同一时刻只有一个调用，模拟与提交仍串行，额度/授权/UNKNOWN 门禁不变。",
+                           "Research and review must use different channels; one call per channel at a time, simulation and submission stay serial, quota/authorization/UNKNOWN gates unchanged."),
+                    in: laneMenu)
+        }
+        if currentLanes > 0 && !laneChoices.contains(currentLanes) {
+            laneMenu.addItem(info(t("当前值 \(currentLanes) 条", "Current: \(currentLanes) lanes")))
+        }
         let dailies: [(Int, String, String)] = [(10, "10 轮", "10 cycles"), (20, "20 轮", "20 cycles"),
                                                  (40, "40 轮", "40 cycles"), (80, "80 轮", "80 cycles")]
         let currentDaily = response["max_cycles_per_day"] as? Int ?? 0
@@ -1142,6 +1337,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         if currentDaily > 0 && !dailies.contains(where: { $0.0 == currentDaily }) {
             dailyMenu.addItem(info(t("当前值 \(currentDaily) 轮", "Current: \(currentDaily) cycles")))
+        }
+        experimentMenu.removeAllItems()
+        let experiment = response["experiment"] as? [String: Any]
+        let experimentLimit = experiment?["limit"] as? Int
+        let experimentUsed = experiment?["used"] as? Int ?? 0
+        let experimentLeft = experiment?["remaining"] as? Int ?? 0
+        if experiment == nil {
+            experimentMenu.addItem(info(t("当前没有实验轮数上限", "No experiment cycle limit is active")))
+        } else {
+            experimentMenu.addItem(info(t("已用 \(experimentUsed) / 上限 \(experimentLimit ?? 0)，还剩 \(experimentLeft)",
+                                        "Used \(experimentUsed) / limit \(experimentLimit ?? 0), \(experimentLeft) left")))
+            let experimentPresets = (response["experiment_presets"] as? [NSNumber])?.map { $0.intValue } ?? [40, 80, 160, 320]
+            for value in experimentPresets {
+                pickRow(t("\(value) 轮", "\(value) cycles"), "config=experiment_cycles=\(value)", on: value == experimentLimit,
+                        tip: t("把这一段实验的总轮数设为 \(value)。不能低于已经用掉的 \(experimentUsed) 轮。",
+                               "Set this experiment’s total cycles to \(value). It cannot be lower than the \(experimentUsed) already used."),
+                        in: experimentMenu)
+            }
+            if let experimentLimit, !experimentPresets.contains(experimentLimit) {
+                experimentMenu.addItem(info(t("当前上限 \(experimentLimit) 轮", "Current limit: \(experimentLimit) cycles")))
+            }
         }
         let totals: [(Int, String, String)] = [(50, "50 轮", "50 cycles"), (100, "100 轮", "100 cycles"),
                                                 (150, "150 轮", "150 cycles"), (300, "300 轮", "300 cycles")]
@@ -1189,8 +1405,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         box.accessoryView = form.view
         box.addButton(withTitle: t("添加", "Add"))
         box.addButton(withTitle: t("取消", "Cancel"))
-        NSApp.activate(ignoringOtherApps: true)
-        guard box.runModal() == .alertFirstButtonReturn else { return }
+        guard runAlert(box) == .alertFirstButtonReturn else { return }
         guard let spec = form.spec() else {
             alert(t("还不能添加", "Cannot add it yet"), t("名称、协议、地址和模型 ID 都要填写。", "Name, protocol, address and model ID are all required."))
             return
@@ -1201,7 +1416,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     func perform(_ action: String, _ arg: String? = nil, env: [String: String] = [:]) {
         let readOnly = ["status", "history", "submissions", "standby", "research", "settings", "notifications", "identity-refresh"].contains(action)
-        if loading.contains(action) || (!readOnly && actionBusy) { return }
+        if loading.contains(action) || (!readOnly && actionBusy) {
+            if readOnly && loading.contains(action) { notePendingRead(action, "stale") }
+            return
+        }
+        if action == "history" { historyRequestToken = wantedHistoryToken }
+        if action == "research" { researchRequestToken = wantedResearchToken }
         loading.insert(action)
         if !readOnly {
             actionBusy = true; controls.forEach { $0.isEnabled = false }; wrapRow(headline, t("正在处理…", "Working…"), font: UI.fontTitle, color: .labelColor)
@@ -1234,10 +1454,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 if !readOnly { self.actionBusy = false; self.controls.forEach { $0.isEnabled = true } }
                 if !ok {
                     let error = response["error"] as? String ?? self.t("读取失败", "Read failed")
-                    if action == "identity-refresh" { return }
+                    if action == "research" {
+                        self.researchUpdating = false
+                        self.updateResearchWindow()
+                    }
+                    if action == "identity-refresh" {
+                        self.settleRead(action)
+                        return
+                    }
                     if action == "history" || action == "submissions" || action == "standby" || action == "research" {
                         let target = action == "research" ? self.researchMenu : (action == "history" ? self.historyMenu : (action == "standby" ? self.standbyMenu : self.submissionsMenu))
-                        target.removeAllItems(); target.addItem(self.block([error])); return
+                        target.removeAllItems(); target.addItem(self.block([error]))
+                        self.settleRead(action)
+                        return
                     }
                     self.fetched["settings"] = nil
                     self.wrapRow(self.headline, self.t("读取失败", "Read failed"), font: UI.fontTitle, color: .labelColor)
@@ -1246,25 +1475,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     if action == "launch" {
                         self.refresh()
                     } else if !readOnly {
-                        let alert = NSAlert(); alert.messageText = self.t("操作未完成", "Action failed"); alert.informativeText = error; alert.runModal()
+                        let alert = NSAlert(); alert.messageText = self.t("操作未完成", "Action failed"); alert.informativeText = error; self.runAlert(alert)
                     }
+                    self.settleRead(action)
                 } else if action == "quit-after-cycle" || action == "quit-now" { NSApp.terminate(nil)
-                } else if action == "history" || action == "submissions" || action == "standby" || action == "research" { self.fill(action, response)
+                } else if action == "history" || action == "submissions" || action == "standby" || action == "research" {
+                    self.fill(action, response)
+                    self.settleRead(action)
                 } else if action == "update" {
                     let message = response["message"] as? String ?? self.t("检查更新失败", "Update check failed")
                     self.alert("WorldQuant", message)
                     if response["update"] as? Bool == true, let raw = response["url"] as? String, let link = URL(string: raw) {
                         NSWorkspace.shared.open(link)
                     }
-                } else if action == "settings" { self.fillSettings(response)
-                } else if action == "notifications" { self.postNotifications(response)
+                } else if action == "settings" {
+                    self.fillSettings(response)
+                    self.settleRead(action)
+                } else if action == "notifications" {
+                    self.postNotifications(response)
+                    self.settleRead(action)
                 } else if action == "identity-refresh" {
                     self.applyIdentity(response["identity"] as? [String: Any])
                     if let message = response["message"] as? String, !message.isEmpty {
                         self.alert("WorldQuant", message)
                     }
+                    self.settleRead(action)
                 } else if action == "status" {
-                    if self.actionBusy { return }
+                    if self.actionBusy {
+                        self.settleRead(action)
+                        return
+                    }
                     let identity = response["identity"] as? [String: Any] ?? [:]
                     self.applyIdentity(identity)
                     self.wrapRow(self.headline, response["title"] as? String ?? self.t("状态未知", "Status unknown"),
@@ -1274,6 +1514,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     self.cycles.toolTip = response["cycles"] as? String ?? ""
                     self.wrapRow(self.tick, self.t("最近调度：", "Last tick: ") + (response["last_tick"] as? String ?? self.t("尚无记录", "No records yet")))
                     self.wrapRow(self.nextAt, self.t("下一轮：", "Next cycle: ") + (response["next_at"] as? String ?? self.t("待当前任务完成／调度检查", "awaiting current task / scheduler check")))
+                    self.wrapRow(self.experimentRow, response["experiment_line"] as? String ?? self.t("实验轮数：未设置", "Experiment cycles: not set"))
+                    self.wantedHistoryToken = response["history_token"] as? String ?? ""
+                    self.wantedResearchToken = response["research_token"] as? String ?? ""
+                    self.refreshHistoryIfNeeded()
+                    self.refreshResearchIfNeeded()
                     if (identity["detail"] as? String ?? "").isEmpty {
                         self.textRow(self.brainRow, (response["brain_bound"] as? Bool) == true
                                      ? self.t("已登录", "Signed in")
@@ -1285,12 +1530,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                         row.toolTip = self.t("预估下一轮路由；任务领取时冻结，重试可能切换备用渠道。",
                                              "Estimated routing for the next cycle; frozen at claim time, retries may switch to a fallback provider.")
                     }
+                    let lanes = response["lanes"] as? [[String: Any]] ?? []
+                    if lanes.isEmpty {
+                        self.lanesRow.isHidden = true
+                    } else {
+                        self.lanesRow.isHidden = false
+                        var lines: [String] = []
+                        for item in lanes {
+                            let lane = (item["lane"] as? Int ?? 0) + 1
+                            let cid = item["cycle_id"] as? Int ?? 0
+                            let state = item["state_label"] as? String ?? item["state"] as? String ?? ""
+                            var line = self.t("泳道\(lane) · 第\(cid)轮 · \(state)", "Lane \(lane) · cycle \(cid) · \(state)")
+                            let pair = [item["research"] as? String, item["review"] as? String].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " → ")
+                            if !pair.isEmpty { line += self.t("（\(pair)）", " (\(pair))") }
+                            lines.append(line)
+                        }
+                        self.wrapRow(self.lanesRow, lines.joined(separator: "\n"))
+                        self.lanesRow.toolTip = self.t("每条泳道是一轮完整的研究→审查→模拟；模拟与提交仍串行。",
+                                                       "Each lane is a full research→review→simulate cycle; simulation and submission stay serial.")
+                    }
                     let paused = response["paused"] as? Bool == true
                     let enabled = response["enabled"] as? Bool == true
                     let cycleOpen = response["cycle_open"] as? Bool == true
-                    self.applyRunState(paused: paused, enabled: enabled, cycleOpen: cycleOpen)
+                    self.applyRunState(paused: paused, enabled: enabled, cycleOpen: cycleOpen, lanes: lanes)
                     self.applyIcon(active: !paused && enabled)
                     self.item.button?.toolTip = self.headline.title + "\n" + self.detail.title
+                    self.settleRead(action)
                 } else if action.hasPrefix("brain-") {
                     if let message = response["message"] as? String, !message.isEmpty {
                         self.alert("WorldQuant", message)
