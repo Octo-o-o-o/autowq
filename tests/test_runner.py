@@ -53,6 +53,27 @@ class TestRunOnce(unittest.TestCase):
         code, lines = runner.run_once(self.conn, self.cfg)
         self.assertEqual((code, "idle" in lines[0]), (0, True))
 
+    def test_framework_gate_still_ticks_and_reports_reason(self):
+        """研究框架挂起新研究时：autopilot.tick 仍须运行（last_tick 更新）且写出阻塞原因。"""
+        from wq import autopilot, research_framework
+        autopilot.setup(self.conn)  # 最小库缺 autopilot 表；cfg 无 autopilot 段时 tick 会提前返回
+        cfg = self.cfg
+        cfg.data.setdefault('autopilot', {'enabled': False})
+        orig_enabled = research_framework.enabled
+        orig_tick = research_framework.tick
+        research_framework.enabled = lambda c: True
+        research_framework.tick = lambda conn, c: {
+            'state': 'Dual-loop baseline not approved',
+            'allow_research': False, 'allow_new_quant_cycle': False}
+        try:
+            runner._coordinate(self.conn, cfg)
+        finally:
+            research_framework.enabled = orig_enabled
+            research_framework.tick = orig_tick
+        self.assertTrue(store.get_flag(self.conn, 'autopilot_last_tick'))
+        self.assertEqual(store.get_flag(self.conn, 'autopilot_message'),
+                         '自动研究待命：双环路冻结基线未审批')
+
     def test_simulation_manual_blocked_policy(self):
         store.enqueue_task(self.conn, "simulation",
                            {"expression": "rank(x)", "config": {"delay": 1}}, "h")

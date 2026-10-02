@@ -225,11 +225,26 @@ def agent_pool_size(cfg) -> int:
     return autopilot.lane_limit(cfg)
 
 
+# 持续研究框架挂起新研究时返回的 state/reason → 界面可读原因。
+_FRAMEWORK_WAITING_ZH = {
+    'paused': '全部任务已暂停',
+    'waiting_inflight': '等待 UNKNOWN 对账完成',
+    'waiting_queue': '研究框架任务排队中',
+    'maintenance': '学习/贡献维护进行中',
+    'queued': '研究框架工作项已入队',
+    'waiting_for_changed_evidence': '等待足以改变决策的新证据',
+    'dual_loop_authority_expired': '双环路学习授权已到期',
+    'Dual-loop baseline not approved': '双环路冻结基线未审批',
+    'waiting_unreadable_or_changed_registered_material': '已登记材料不可读或已变更',
+}
+
+
 def _coordinate(conn, cfg):
     """状态机推进只在 supervisor 主线程串行执行。返回不产生副作用之外的标志。"""
     from . import autopilot, history_research, research_maintenance, research_framework
     allow_research = True
     allow_new = True
+    work = {}
     try:
         if research_framework.enabled(cfg):
             work = research_framework.tick(conn, cfg)
@@ -249,9 +264,12 @@ def _coordinate(conn, cfg):
         autopilot.tick(conn, cfg, allow_new=allow_new)
     else:
         history_research.progress(conn, cfg)
-        # Waiting suppresses new calls, but never abandons already frozen lifecycle.
-        if conn.execute("SELECT 1 FROM research_cycles WHERE state!='closed'").fetchone():
-            autopilot.tick(conn, cfg, allow_new=False)
+        # 框架挂起新研究时仍照常推进：tick 更新 last_tick、推进在途泳道生命周期；
+        # 无在途轮次时把框架给出的原因写进界面消息，不让界面停在「等待本地调度」。
+        autopilot.tick(conn, cfg, allow_new=False)
+        if cfg.get('autopilot') and not conn.execute("SELECT 1 FROM research_cycles WHERE state!='closed'").fetchone():
+            reason = work.get('reason') or work.get('state') or 'waiting_for_changed_evidence'
+            autopilot.message(conn, '自动研究待命：' + _FRAMEWORK_WAITING_ZH.get(reason, str(reason))[:160])
     conn.commit()
 
 
