@@ -97,6 +97,8 @@ _EXACT_EN = {
     '研究框架工作项已入队': 'a research-framework work item has been enqueued',
     '学习/贡献维护进行中': 'learning/contribution maintenance in progress',
     '已登记材料不可读或已变更': 'registered material is unreadable or has changed',
+    '发现额度暂尽：等待可改变观察的新证据登记': 'discovery allowance spent; waiting for new evidence registration that changes the observation',
+    '有界发现进行中': 'bounded discovery in progress',
     '全部任务已暂停': 'all tasks paused',
     '已停止创建新轮次；现有任务继续执行，全部暂停用 wq pause': 'No new cycles will be created; existing tasks continue. Use wq pause to pause everything',
     '已请求立刻运行一轮；仍需通过授权、预算、平台冷却及队列闸门': 'Immediate run requested; still gated by authorization, budget, platform cooldown and the queue',

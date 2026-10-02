@@ -236,6 +236,8 @@ _FRAMEWORK_WAITING_ZH = {
     'dual_loop_authority_expired': '双环路学习授权已到期',
     'Dual-loop baseline not approved': '双环路冻结基线未审批',
     'waiting_unreadable_or_changed_registered_material': '已登记材料不可读或已变更',
+    'waiting_changed_observation': '发现额度暂尽：等待可改变观察的新证据登记',
+    'bounded_discovery': '有界发现进行中',
 }
 
 
