@@ -132,6 +132,85 @@ def next_models(conn, cfg, lang='zh'):
     return titles
 
 
+def lane_rows(conn, cfg, auto=None, lang='zh'):
+    """每条泳道的当前状态：开放轮次明细，多泳道时空闲泳道附冷却时间与预测渠道对。"""
+    from . import autopilot
+    if auto is None:
+        auto = autopilot.status(conn, cfg)
+    open_cycles = auto.get('open_cycles') or []
+    n = int(auto.get('concurrent_lanes') or 1)
+    try:
+        data = routing.catalog(cfg)
+        provider_defs = data['providers']
+    except (OSError, ValueError, KeyError, TypeError):
+        data = None
+        provider_defs = {}
+
+    def _label(name):
+        return provider_label(name, provider_defs.get(name) or {}, lang) if name else ''
+
+    state_names = {'researching': ('研究', 'researching'), 'reviewing': ('审查', 'reviewing'),
+                   'simulating': ('模拟', 'simulating')}
+    open_by_lane = {(r.get('lane') or 0): r for r in open_cycles}
+    rows = []
+    for lane_no in sorted(open_by_lane):
+        r = open_by_lane[lane_no]
+        rows.append({'lane': r.get('lane'), 'cycle_id': r.get('cycle_id'),
+                     'state': r.get('state') or '',
+                     'state_label': text(lang, *state_names.get(r.get('state'), (r.get('state') or '', r.get('state') or ''))),
+                     'research': _label(r.get('research_preferred')), 'review': _label(r.get('review_preferred')),
+                     'research_task': r.get('research_task'), 'review_task': r.get('review_task')})
+    if n <= 1:
+        return rows
+    try:
+        taken = autopilot._open_route_prefs(conn, open_cycles)
+        preset = None
+        if data is not None:
+            pending = store.get_flag(conn, 'preset_once') or ''
+            if pending in data['presets']:
+                name = pending
+            elif cfg.get('workflow', 'file'):
+                name = 'advanced'
+            else:
+                name = store.get_flag(conn, 'active_preset', data['default'])
+                if name not in data['presets']:
+                    name = data['default']
+            preset = data['presets'].get(name)
+    except (OSError, ValueError, KeyError, TypeError, sqlite3.OperationalError):
+        return rows
+    for lane_no in range(n):
+        if lane_no in open_by_lane:
+            continue
+        if auto.get('paused'):
+            state_label = text(lang, '已暂停', 'paused')
+        elif not (auto.get('enabled') or auto.get('run_next_requested')):
+            state_label = text(lang, '已停用', 'disabled')
+        else:
+            try:
+                gate = autopilot._lane_gate_at(conn, lane_no, cfg)
+            except sqlite3.OperationalError:
+                gate = None
+            if gate and util.parse_iso(gate) > util.now():
+                when = beijing(gate, '', fmt='%H:%M:%S', lang=lang)
+                state_label = text(lang, f'冷却至 {when}', f'cooldown until {when}')
+            else:
+                state_label = text(lang, '待调度开放', 'awaiting scheduler')
+        pair = None
+        if preset is not None:
+            try:
+                pair = autopilot._lane_pair(conn, cfg, data, preset, taken)
+            except (ValueError, KeyError, TypeError):
+                pair = None
+        if pair:
+            taken['research'].add(pair[0])
+            taken['review'].add(pair[1])
+        rows.append({'lane': lane_no, 'cycle_id': None, 'state': 'idle', 'state_label': state_label,
+                     'research': _label(pair[0]) if pair else '', 'review': _label(pair[1]) if pair else '',
+                     'research_task': None, 'review_task': None})
+    rows.sort(key=lambda r: r.get('lane') or 0)
+    return rows
+
+
 def cycle_directive(conn, cycle, lang='zh'):
     """本轮预登记的研究指令：单角色基线 / 有限组合 / 自由探索。"""
     cid = cycle['cycle_id']
@@ -270,6 +349,12 @@ def _history(conn, cfg, lang, tasks):
     if has_fallbacks:
         for row in conn.execute('SELECT * FROM research_fallbacks'):
             fallback_by_cycle[row['cycle_id']] = row
+    try:
+        from . import autopilot
+        multi_lane = autopilot.lane_limit(cfg) > 1 or any(
+            (r[0] or 0) > 0 for r in conn.execute("SELECT DISTINCT lane FROM research_cycles"))
+    except (ImportError, AttributeError, sqlite3.OperationalError):
+        multi_lane = False
     entries = []
     for cycle in conn.execute('SELECT * FROM research_cycles ORDER BY cycle_id DESC'):
         members = groups.get(cycle['cycle_id'], [])
@@ -293,8 +378,10 @@ def _history(conn, cfg, lang, tasks):
                 if reason not in raw_outcome:
                     raw_outcome += '；' + reason
         outcome = translate(raw_outcome, lang) or text(lang, '进行中', 'In progress')
-        title = (text(lang, f"第 {cycle['cycle_id']} 轮", f"Cycle {cycle['cycle_id']}") + ' · ' + cycle_directive(conn, cycle, lang)
-                 + (f" · {badge_text}" if badge_text else ''))
+        lane_no = cycle['lane'] if 'lane' in cycle.keys() else 0
+        lane_tag = text(lang, f"泳道{(lane_no or 0) + 1} · ", f"lane {(lane_no or 0) + 1} · ") if multi_lane else ''
+        title = (text(lang, f"第 {cycle['cycle_id']} 轮", f"Cycle {cycle['cycle_id']}") + ' · ' + lane_tag
+                 + cycle_directive(conn, cycle, lang) + (f" · {badge_text}" if badge_text else ''))
         fallback = fallback_by_cycle.get(cycle['cycle_id'])
         retry = tasks.get(fallback['fallback_task']) if fallback else None
         review_lines, review_detail = review_details(conn, cycle, force=bool(fallback and fallback['stage'] == 'review' and retry and retry['status'] == 'succeeded'), lang=lang)

@@ -899,6 +899,10 @@ def control(action, arg=None):
     try:
         routes = desktop.next_models(conn, cfg, lang)
         try:
+            lanes = desktop.lane_rows(conn, cfg, auto, lang)
+        except (OSError, ValueError, KeyError, TypeError, sqlite3.OperationalError):
+            lanes = []
+        try:
             experiment = _experiment_budget(conn)
             history_token = desktop.history_token(conn)
             research_token = desktop.research_token(conn, cfg)
@@ -918,22 +922,6 @@ def control(action, arg=None):
         identity, _refreshed = menu_identity(cfg, lang)
     except (OSError, ValueError, TypeError):
         identity = {'bound': brain_bound(), 'title': text(lang, 'WorldQuant 账号', 'WorldQuant account'), 'detail': ''}
-    lanes = []
-    state_names = {'researching': ('研究', 'researching'), 'reviewing': ('审查', 'reviewing'),
-                   'simulating': ('模拟', 'simulating')}
-    try:
-        data = routing.catalog(cfg)
-        provider_defs = data['providers']
-    except (OSError, ValueError, KeyError, TypeError):
-        provider_defs = {}
-    for r in open_cycles:
-        def _label(name):
-            return desktop.provider_label(name, provider_defs.get(name) or {}, lang) if name else ''
-        lanes.append({'lane': r.get('lane'), 'cycle_id': r.get('cycle_id'),
-                      'state': r.get('state') or '',
-                      'state_label': text(lang, *state_names.get(r.get('state'), (r.get('state') or '', r.get('state') or ''))),
-                      'research': _label(r.get('research_preferred')), 'review': _label(r.get('review_preferred')),
-                      'research_task': r.get('research_task'), 'review_task': r.get('review_task')})
     return {'title': title, 'paused': state['paused'], 'enabled': bool(auto.get('enabled')),
             'identity': identity,
             'cycle_open': cycle_open, 'cycle_state': latest.get('state') or '',

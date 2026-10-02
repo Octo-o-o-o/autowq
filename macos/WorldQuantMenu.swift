@@ -1015,7 +1015,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             : t("恢复队列，按既有间隔持续研究。", "Resumes the queue and keeps researching at the configured interval.")
         cycleRow.submenu = nil
         cycleCancels = cycleOpen
-        if lanes.count > 1 {
+        let openLanes = lanes.filter { $0["cycle_id"] as? Int != nil }
+        if openLanes.count > 1 {
             cycleRow.isHidden = false
             cycleRow.action = nil
             cycleRow.title = t("取消轮次…", "Cancel cycle…")
@@ -1023,7 +1024,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                  "Ends one lane’s cycle; other lanes are unaffected and automatic research stays on. A simulation already sent is not withdrawn.")
             let picker = NSMenu(title: cycleRow.title)
             picker.autoenablesItems = false
-            for item in lanes {
+            for item in openLanes {
                 let lane = (item["lane"] as? Int ?? 0) + 1
                 let cid = item["cycle_id"] as? Int ?? 0
                 let state = item["state_label"] as? String ?? item["state"] as? String ?? ""
@@ -1538,9 +1539,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                         var lines: [String] = []
                         for item in lanes {
                             let lane = (item["lane"] as? Int ?? 0) + 1
-                            let cid = item["cycle_id"] as? Int ?? 0
                             let state = item["state_label"] as? String ?? item["state"] as? String ?? ""
-                            var line = self.t("泳道\(lane) · 第\(cid)轮 · \(state)", "Lane \(lane) · cycle \(cid) · \(state)")
+                            var line = "Lane \(lane)"
+                            if let cid = item["cycle_id"] as? Int {
+                                line = self.t("泳道\(lane) · 第\(cid)轮 · \(state)", "Lane \(lane) · cycle \(cid) · \(state)")
+                            } else {
+                                line = self.t("泳道\(lane) · \(state)", "Lane \(lane) · \(state)")
+                            }
                             let pair = [item["research"] as? String, item["review"] as? String].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " → ")
                             if !pair.isEmpty { line += self.t("（\(pair)）", " (\(pair))") }
                             lines.append(line)

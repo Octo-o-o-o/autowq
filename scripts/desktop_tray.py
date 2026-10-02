@@ -381,7 +381,7 @@ def run_actions(st, lang):
     paused = bool(st.get('paused'))
     enabled = bool(st.get('enabled'))
     cycle_open = bool(st.get('cycle_open'))
-    lanes = st.get('lanes') or []
+    lanes = [item for item in (st.get('lanes') or []) if item.get('cycle_id')]
     rows = []
     if len(lanes) > 1:
         rows.append(submenu(text(lang, '取消轮次…', 'Cancel cycle…'),
@@ -424,10 +424,11 @@ def menu_model(state):
     items += [info(text(lang, '下轮', 'Next: ') + str(m.get('title', text(lang, '未知', 'unknown')))) for m in st.get('next_models') or []]
     for item in st.get('lanes') or []:
         pair = ' → '.join(x for x in (item.get('research'), item.get('review')) if x)
-        items.append(info(text(lang, f"泳道{(item.get('lane') or 0)+1} · 第{item.get('cycle_id')}轮 · {item.get('state_label') or item.get('state')}"
-                                     + (f"（{pair}）" if pair else ''),
-                               f"Lane {(item.get('lane') or 0)+1} · cycle {item.get('cycle_id')} · {item.get('state_label') or item.get('state')}"
-                                     + (f" ({pair})" if pair else ''))))
+        label = item.get('state_label') or item.get('state') or ''
+        if item.get('cycle_id'):
+            label = text(lang, f"第{item.get('cycle_id')}轮 · ", f"cycle {item.get('cycle_id')} · ") + label
+        items.append(info(text(lang, f"泳道{(item.get('lane') or 0)+1} · {label}" + (f"（{pair}）" if pair else ''),
+                               f"Lane {(item.get('lane') or 0)+1} · {label}" + (f" ({pair})" if pair else ''))))
     items += [
         sep(),
         submenu(text(lang, f"轮次历史（{hist.get('count', '…')}）", f"Cycle history ({hist.get('count', '…')})"),

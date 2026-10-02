@@ -29,6 +29,10 @@ def write_progress(conn, cfg):
         "note": "Task completion is not platform validation or income. Refreshes after each runner tick.",
     }
     snapshot['active_preset'] = store.get_flag(conn, 'active_preset')
+    if cfg.get('autopilot'):
+        snapshot['lanes'] = [
+            {'lane': r.get('lane'), 'cycle_id': r.get('cycle_id'), 'state': r.get('state')}
+            for r in auto.get('open_cycles') or []]
     snapshot['routes'] = [
         {'task_id': r['task_id'], 'preset': json.loads(r['snapshot_json'])['preset'],
          'provider_index': r['provider_index'], 'retry_index': r['retry_index'], 'phase': r['phase']}

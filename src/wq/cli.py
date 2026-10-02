@@ -801,16 +801,30 @@ def cmd_autopilot(args):
             print(text(lang, f"最近一轮：第{cycle['cycle_id']}轮，{label}；{translate(cycle['outcome'], lang) or text(lang, '按队列自动推进', 'advances automatically via the queue')}",
                               f"Latest cycle: #{cycle['cycle_id']}, {label}; {translate(cycle['outcome'], lang) or 'advances automatically via the queue'}"))
         open_cycles = result.get('open_cycles') or []
-        if open_cycles:
+        lanes_n = int(result.get('concurrent_lanes') or 1)
+        if open_cycles or lanes_n > 1:
             from .task_view import cycle_state
-            print(text(lang, f"开放泳道：{len(open_cycles)}/{result.get('concurrent_lanes') or 1} 条",
-                              f"Open lanes: {len(open_cycles)}/{result.get('concurrent_lanes') or 1}"))
-            for r in open_cycles:
-                pair = ' → '.join(x for x in (r.get('research_preferred'), r.get('review_preferred')) if x)
-                print(text(lang, f"  泳道{(r.get('lane') or 0)+1} · 第{r['cycle_id']}轮 · {cycle_state(r['state'], lang)}"
-                                 + (f"（{pair}）" if pair else ''),
-                                 f"  Lane {(r.get('lane') or 0)+1} · #{r['cycle_id']} · {cycle_state(r['state'], lang)}"
-                                 + (f" ({pair})" if pair else '')))
+            from .desktop import lane_rows
+            print(text(lang, f"开放泳道：{len(open_cycles)}/{lanes_n} 条",
+                              f"Open lanes: {len(open_cycles)}/{lanes_n}"))
+            try:
+                rows = lane_rows(conn, cfg, result, lang)
+            except Exception:
+                rows = []
+            by_lane = {r.get('lane'): r for r in rows}
+            for lane_no in sorted(by_lane):
+                r = by_lane[lane_no]
+                pair = ' → '.join(x for x in (r.get('research'), r.get('review')) if x)
+                if r.get('cycle_id'):
+                    print(text(lang, f"  泳道{(r.get('lane') or 0)+1} · 第{r['cycle_id']}轮 · {cycle_state(r['state'], lang)}"
+                                     + (f"（{pair}）" if pair else ''),
+                                     f"  Lane {(r.get('lane') or 0)+1} · #{r['cycle_id']} · {cycle_state(r['state'], lang)}"
+                                     + (f" ({pair})" if pair else '')))
+                else:
+                    print(text(lang, f"  泳道{(r.get('lane') or 0)+1} · {r.get('state_label') or '空闲'}"
+                                     + (f"（{pair}）" if pair else ''),
+                                     f"  Lane {(r.get('lane') or 0)+1} · {r.get('state_label') or 'idle'}"
+                                     + (f" ({pair})" if pair else '')))
         submission_on=cfg.get('brain_submission','enabled',default=False)
         print(text(lang, '正式提交配置：'+('启用' if submission_on else '停用')+'；按独立授权、研究证据、最新官方检查和限额执行。告警同步见 var/run/autopilot-status.json。',
                           'Submission configuration: '+('enabled' if submission_on else 'disabled')+'; separate authorization, research evidence, current official checks and caps still apply. Alert mirror: var/run/autopilot-status.json.'))
