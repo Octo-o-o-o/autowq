@@ -226,8 +226,12 @@ def _snapshot(conn, cfg, tid, payload):
     routes = preset['routes'][payload['role']]
     order = payload.get('provider_order')
     if isinstance(order, list) and order:
-        # 调用方已把预设首选放在前面，保底顺序只排其余渠道。只能重排预设已含的渠道。
-        routes = [n for n in order if n in routes] + [n for n in routes if n not in order]
+        if payload.get('provider_pinned'):
+            # 固定泳道：链只含登记的首选渠道；重试耗尽即失败停止，不换预设默认渠道。
+            routes = [n for n in order if n in routes]
+        else:
+            # 调用方已把预设首选放在前面，保底顺序只排其余渠道。只能重排预设已含的渠道。
+            routes = [n for n in order if n in routes] + [n for n in routes if n not in order]
     excluded = payload.get('excluded_providers', [])
     # 审查排除提案渠道时连同其别名（同一服务地址/同一 CLI）一起排除。
     chain = [n for n in routes if not any(same_channel(data, n, e) for e in excluded)]

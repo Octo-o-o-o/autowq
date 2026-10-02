@@ -443,9 +443,32 @@ def _notify_builders(lang):
                                   f"{row['remote_id']} submitted ({row['status']})")},
         lambda row: {'id': f"failed-{row['task_id']}", 'kind': 'failed',
                      'title': text(lang, '任务失败', 'Task failed'),
-                     'body': text(lang, f"{row['kind']} {row['task_id']}：{(row['last_error'] or '原因未记录')[:120]}",
-                                  f"{row['kind']} {row['task_id']}: {(row['last_error'] or 'reason not recorded')[:120]}")},
+                     'body': _failed_body(row, lang)},
     )
+
+
+_ROLE_LABELS = {'research': ('研究', 'research'), 'review': ('审查', 'review'), 'simulation': ('模拟', 'simulation')}
+
+
+def _failed_body(row, lang):
+    """失败通知正文：轮次任务带「泳道N · 第X轮 · 角色」便于定位；普通任务保持原样。"""
+    data = dict(row)
+    err = (data.get('last_error') or ('原因未记录' if lang == 'zh' else 'reason not recorded'))[:120]
+    if data.get('cycle_id') and data.get('role'):
+        zh, en = _ROLE_LABELS.get(data['role'], (data['role'], data['role']))
+        return text(lang, f"泳道{(data.get('lane') or 0) + 1} · 第{data['cycle_id']}轮·{zh}：{err}",
+                        f"lane {(data.get('lane') or 0) + 1} · cycle {data['cycle_id']} {en}: {err}")
+    return text(lang, f"{data['kind']} {data['task_id']}：{err}", f"{data['kind']} {data['task_id']}: {err}")
+
+
+_FAIL_PLAIN = """SELECT task_id,kind,last_error,updated_at,NULL AS cycle_id,NULL AS lane,NULL AS role FROM tasks
+    WHERE status='failed' AND updated_at>? ORDER BY updated_at LIMIT 10"""
+
+_FAIL_WITH_CYCLE = """SELECT t.task_id,t.kind,t.last_error,t.updated_at,c.cycle_id,c.lane,
+        CASE WHEN t.task_id=c.research_task THEN 'research'
+             WHEN t.task_id=c.review_task THEN 'review' ELSE 'simulation' END AS role
+        FROM tasks t LEFT JOIN research_cycles c ON t.task_id IN (c.research_task,c.review_task,c.simulation_task)
+        WHERE t.status='failed' AND t.updated_at>? ORDER BY t.updated_at LIMIT 10"""
 
 
 NOTIFY_SOURCES = (
@@ -454,9 +477,7 @@ NOTIFY_SOURCES = (
         JOIN simulations s ON s.sim_id=sub.sim_id
         WHERE s.synthetic=0 AND sub.status IN ('accepted','final_valid') AND sub.updated_at>?
         ORDER BY sub.updated_at LIMIT 10"""),
-    ('desktop_notified_failures',
-     """SELECT task_id,kind,last_error,updated_at FROM tasks
-        WHERE status='failed' AND updated_at>? ORDER BY updated_at LIMIT 10"""),
+    ('desktop_notified_failures', _FAIL_PLAIN),
 )
 
 
@@ -471,7 +492,11 @@ def pending_notifications(conn, lang='zh'):
                 'body':text(lang,'请查看本地 research-inbox；元数据核验后仍需语义证据。','Review the local research-inbox; semantic evidence is still required.')+' '+batch['path']})
             store.set_flag(conn,'desktop_handoff_notified',batch['id'])
     builders = _notify_builders(lang)
+    # research_cycles 仅在 autopilot 初始化后存在；极简库退回不带轮次信息的查询。
+    has_cycles = bool(conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='research_cycles'").fetchone())
     for (key, query), build in zip(NOTIFY_SOURCES, builders):
+        if key == 'desktop_notified_failures' and has_cycles:
+            query = _FAIL_WITH_CYCLE
         mark = store.get_flag(conn, key)
         if mark is None:
             store.set_flag(conn, key, util.now_iso())   # 首次只建基线，不回放历史

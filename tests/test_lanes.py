@@ -426,6 +426,48 @@ class LaneTests(unittest.TestCase):
         self.assertIn('c', idle['research'])
         self.assertIn('b', idle['review'])
 
+    def test_pinned_lane_chain_has_no_preset_fallback(self):
+        """固定泳道的链只含 pin 渠道：重试耗尽即停，不落到预设默认顺序。"""
+        self.cfg.data['autopilot']['concurrent_lanes'] = 2
+        self.cfg.data['autopilot']['lane_pins'] = {'1': {'research': 'b', 'review': 'a'}}
+        autopilot.tick(self.c, self.cfg)
+        self.c.commit()
+        rows = {r['lane']: r for r in self.cycles()}
+        cid = rows[1]['cycle_id']
+        self.assertTrue(self._plan(cid)['pinned'])
+        self.assertEqual(autopilot.route_order(self.c, self.cfg, cid, 'research'), ['b'])
+        self.assertEqual(autopilot.route_order(self.c, self.cfg, cid, 'review'), ['a'])
+        # 任务快照链冻结为单渠道——失败路径没有预设尾部可切。
+        tid = rows[1]['research_task']
+        payload = json.loads(self.c.execute(
+            "SELECT payload_json FROM tasks WHERE task_id=?", (tid,)).fetchone()[0])
+        self.assertTrue(payload['provider_pinned'])
+        self.assertEqual(payload['provider_order'], ['b'])
+        snap = routing._snapshot(self.c, self.cfg, tid, payload)
+        self.assertEqual(json.loads(snap['snapshot_json'])['chain'], ['b'])
+        # 未固定泳道不受影响：链仍带预设尾部兜底。
+        snap0 = routing._snapshot(self.c, self.cfg, rows[0]['research_task'],
+                                  json.loads(self.c.execute(
+                                      "SELECT payload_json FROM tasks WHERE task_id=?",
+                                      (rows[0]['research_task'],)).fetchone()[0]))
+        self.assertEqual(json.loads(snap0['snapshot_json'])['chain'], ['a', 'b'])
+
+    def test_failed_notification_names_lane_cycle_role(self):
+        """泳道任务失败通知带「泳道 · 轮次 · 角色」。"""
+        from wq import desktop
+        autopilot.tick(self.c, self.cfg)
+        self.c.commit()
+        row = self.cycles()[0]
+        tid = row['research_task']
+        self.c.execute("UPDATE tasks SET status='failed',last_error='重试耗尽' WHERE task_id=?",
+                       (tid,))
+        store.set_flag(self.c, 'desktop_notified_failures', '2020-01-01T00:00:00.000+00:00')
+        items = desktop.pending_notifications(self.c)
+        body = next(i['body'] for i in items if i['id'] == f'failed-{tid}')
+        self.assertIn('泳道1', body)
+        self.assertIn(f"第{row['cycle_id']}轮", body)
+        self.assertIn('研究', body)
+
 
 if __name__ == '__main__':
     unittest.main()

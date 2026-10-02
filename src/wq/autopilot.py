@@ -709,15 +709,21 @@ def route_order(conn, cfg, cid, role):
     routes = data['presets'][routing.active_preset(conn, cfg, data, cid)]['routes'].get(role) or []
     head = routes[0] if routes else None
     recorded = None
+    pinned = False
     if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='research_events'").fetchone():
         row = conn.execute("SELECT detail FROM research_events WHERE cycle_id=? AND kind='route_plan' ORDER BY event_id DESC LIMIT 1", (cid,)).fetchone()
         if row and row[0]:
             try:
-                recorded = json.loads(row[0]).get('research_preferred' if role == 'research' else 'review_preferred')
+                plan = json.loads(row[0])
+                recorded = plan.get('research_preferred' if role == 'research' else 'review_preferred')
+                pinned = bool(plan.get('pinned'))
             except (TypeError, json.JSONDecodeError):
                 recorded = None
     if recorded:
         head = recorded
+    if pinned:
+        # 固定泳道只走登记的首选渠道：重试耗尽即停，不落到预设默认顺序。
+        return [head] if head else None
     base = alternate_order(cfg, cid, role) or []
     if recorded is None and not base:
         return None
@@ -791,6 +797,10 @@ def make_job(conn,cfg,cid,role,text,exclude=None,order=None):
     payload=json.loads(task(conn,tid)['payload_json'])
     payload.update(autopilot_cycle=cid,excluded_providers=exclude or [],fallback_only_capacity=True,
                    prompt_version=PROMPT_VERSION)
+    plan_row=conn.execute("SELECT detail FROM research_events WHERE cycle_id=? AND kind='route_plan' ORDER BY event_id DESC LIMIT 1",(cid,)).fetchone()
+    if plan_row:
+        try: payload['provider_pinned']=bool(json.loads(plan_row[0]).get('pinned'))
+        except (TypeError,json.JSONDecodeError): pass
     if role == 'review': payload['review_contract_version'] = 2
     if plan_first: payload['plan_contract_version'] = 1
     if order: payload['provider_order']=list(order)
@@ -1582,9 +1592,11 @@ def _create_cycle(conn,cfg,lane,p,data,taken,campaign_on):
                 raise LanePinBlocked(f"泳道{lane+1}固定渠道对暂不可用或不合规（{pin.get('research')}→{pin.get('review')}），该泳道等待")
             raise ValueError('该泳道无可用的不同渠道对，暂不开轮')
         research_pref,review_pref=pair
+        pinned=lane in lane_pins(cfg)
         default_pair=((preset['routes'].get('research') or [None])[0],(preset['routes'].get('review') or [None])[0])
-        if lane or (research_pref,review_pref)!=default_pair or cfg.get('autopilot','alternate_research_providers'):
+        if lane or pinned or (research_pref,review_pref)!=default_pair or cfg.get('autopilot','alternate_research_providers'):
             event(conn,cid,'route_plan',json.dumps({'lane':lane,'research_preferred':research_pref,'review_preferred':review_pref,
+                                                  'pinned':pinned,
                                                   'fallback':[n for n in preset['routes'].get('research',[]) if n!=research_pref],
                                                   'parity':'odd' if cid%2 else 'even'},ensure_ascii=False))
         taken['research'].add(research_pref);taken['review'].add(review_pref)
