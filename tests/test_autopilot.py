@@ -177,6 +177,12 @@ class AutopilotTests(unittest.TestCase):
         self.assertIsNone(closed['simulation_task'])
         self.assertEqual(self.posts,0)
 
+    def test_status_automatic_submission_reflects_configuration(self):
+        self.cfg.data.setdefault('brain_submission', {})['enabled'] = True
+        self.assertTrue(autopilot.status(self.c, self.cfg)['automatic_submission'])
+        self.cfg.data['brain_submission']['enabled'] = False
+        self.assertFalse(autopilot.status(self.c, self.cfg)['automatic_submission'])
+
     def test_status_daily_cap_does_not_show_past_next_cycle(self):
         for _ in range(4):
             self.c.execute("INSERT INTO research_cycles(state,policy_json,policy_hash,created_at,updated_at) VALUES('closed','{}','x',?,?)",(util.now_iso(),util.now_iso()))

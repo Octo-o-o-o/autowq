@@ -573,7 +573,7 @@ def status(conn,cfg):
             'preset_once_cycles':(int(v) if (v:=store.get_flag(conn,'preset_once_cycles') or '').isdigit() else None),
             'cycle_preset':(store.get_flag(conn,f"cycle_preset_{row['cycle_id']}") or None) if row and row['state']!='closed' else None,
             'closed_cycles':conn.execute("SELECT COUNT(*) FROM research_cycles WHERE state='closed'").fetchone()[0],
-            'automatic_submission':False}
+            'automatic_submission':cfg.get('brain_submission','enabled') is True}
 
 
 def finish(conn,cfg,row,outcome,problem=False):
