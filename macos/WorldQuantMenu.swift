@@ -365,11 +365,11 @@ final class SettingsPane: NSObject, NSWindowDelegate, NSSearchFieldDelegate {
         button.bezelStyle = .rounded; button.identifier = NSUserInterfaceItemIdentifier(code)
         let row = NSStackView(views: [button]); row.edgeInsets = NSEdgeInsets(top: 6, left: 0, bottom: 6, right: 0); add(row)
     }
-    func menuControl(_ label: String, menu: NSMenu) {
+    func menuControl(_ label: String, menu: NSMenu, selection: String? = nil) {
         let name = NSTextField(labelWithString: label); name.font = .systemFont(ofSize: 13)
         let button = NSPopUpButton(frame: .zero, pullsDown: true)
         let copy = menu.copy() as! NSMenu
-        copy.insertItem(withTitle: t("选择…", "Choose…"), action: nil, keyEquivalent: "", at: 0)
+        copy.insertItem(withTitle: selection ?? t("选择…", "Choose…"), action: nil, keyEquivalent: "", at: 0)
         button.menu = copy; button.widthAnchor.constraint(equalToConstant: 270).isActive = true
         let row = NSStackView(views: [name, button]); row.distribution = .equalSpacing
         row.edgeInsets = NSEdgeInsets(top: 8, left: 0, bottom: 8, right: 0); add(row)
@@ -416,9 +416,20 @@ final class SettingsPane: NSObject, NSWindowDelegate, NSSearchFieldDelegate {
             }
             if section == "models" {
                 text(t("固定泳道优先于默认模型。路由切换只影响新任务；已开始的工作保留原选择。", "Pinned lanes take priority over defaults. Route changes affect new work; active work retains its selection."))
-                menuControl(t("默认研究与审查", "Default research & review"), menu: owner.modelMenu)
-                menuControl(t("路由预设", "Routing preset"), menu: owner.presetMenu)
-                menuControl(t("渠道开关", "Provider availability"), menu: owner.providerMenu)
+                let providers = snapshot["providers"] as? [[String: Any]] ?? []
+                for (role, label) in [("research", t("默认研究模型", "Default research model")), ("review", t("默认审查模型", "Default review model"))] {
+                    let head = snapshot["editable_" + role + "_provider"] as? String ?? ""
+                    let selected = providers.first { $0["name"] as? String == head }?["label"] as? String ?? head
+                    let choices = NSMenu(); choices.autoenablesItems = false
+                    for provider in providers {
+                        let name = provider["name"] as? String ?? ""
+                        owner.pickRow(provider["label"] as? String ?? name, "provider-role=\(role):\(name)", on: name == head,
+                                      tip: t("现有任务结束后应用", "Applies after existing work finishes"), in: choices)
+                    }
+                    menuControl(label, menu: choices, selection: selected)
+                }
+                menuControl(t("路由预设", "Routing preset"), menu: owner.presetMenu, selection: snapshot["permanent_preset"] as? String)
+                menuControl(t("渠道开关", "Provider availability"), menu: owner.providerMenu, selection: t("管理渠道…", "Manage providers…"))
                 command(t("添加自定义模型…", "Add custom model…"), code: "add-model")
                 text(t("额度、超时与重试位于“调用与花费”。", "Budgets, timeouts and retries are under Calls & spending."))
             }
