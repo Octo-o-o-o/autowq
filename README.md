@@ -1,6 +1,6 @@
 # autowq
 
-持续运行与故障恢复见 [持续运行指南](docs/reliable-automation.md)。源码版 0.2.25 已加入新的 macOS 原生设置与研究窗口，安装包仍处于发布候选阶段；下方已公证公开下载仍为 0.2.21。
+持续运行与故障恢复见 [持续运行指南](docs/reliable-automation.md)。macOS 0.2.25 已发布新的原生设置与研究窗口，完整包与轻量包均已签名及 Apple 公证，并包含多泳道研究与批量设置。
 
 [English](README.en.md) | 简体中文
 

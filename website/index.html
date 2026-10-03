@@ -41,7 +41,7 @@
       "name": "autowq",
       "applicationCategory": "DeveloperApplication",
       "operatingSystem": "macOS, Windows, Linux",
-      "softwareVersion": "0.2.21",
+      "softwareVersion": "0.2.25",
       "isAccessibleForFree": true,
       "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
       "license": "https://www.apache.org/licenses/LICENSE-2.0",
@@ -54,7 +54,7 @@
       "featureList": [
         "异渠道审查：研究与审查渠道强制分离",
         "逐渠道预算与授权闸门，默认全关",
-        "源码版功能（公开 macOS 0.2.21 尚未包含）：多泳道并行推进研究→审查→模拟，同一渠道同一时刻只跑一个调用，模拟与提交保持串行；泳道可按「研究→审查」对单独固定",
+        "多泳道并行推进研究→审查→模拟，同一渠道同一时刻只跑一个调用，模拟与提交保持串行；泳道可按「研究→审查」对单独固定",
         "本地 SQLite 账本与真实结果诊断",
         "提交前独立验收门禁",
         "金牌后的持续研究框架：有界补证、晚到重评、证据回流",
@@ -111,8 +111,8 @@
         </button>
         <div class="cta-menu" id="heroMenu" role="menu" aria-label="下载选项" hidden>
           <div class="cm-head">桌面版 · 打开即用</div>
-          <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/macos-v0.2.21/WorldQuant-0.2.21.dmg" data-os="macos"><span class="cm-l">macOS 完整包</span><span class="cm-r">DMG · 56.7 MB</span></a>
-          <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/macos-v0.2.21/WorldQuant-0.2.21-light.dmg"><span class="cm-l">macOS 轻量包</span><span class="cm-r">DMG · 1.4 MB</span></a>
+          <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/macos-v0.2.25/WorldQuant-0.2.25.dmg" data-os="macos"><span class="cm-l">macOS 完整包</span><span class="cm-r">DMG · 57.1 MB</span></a>
+          <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/macos-v0.2.25/WorldQuant-0.2.25-light.dmg"><span class="cm-l">macOS 轻量包</span><span class="cm-r">DMG · 1.7 MB</span></a>
           <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.20/WorldQuantTray.exe" data-os="windows"><span class="cm-l">Windows 托盘版</span><span class="cm-r">.exe · 实验性</span></a>
           <hr>
           <div class="cm-head">开发者</div>
@@ -156,7 +156,7 @@
     <div class="pillar"><div class="k">可见</div><div class="d">每条泳道的轮次、渠道配对、预算全在托盘</div></div>
     <div class="pillar"><div class="k">可控制</div><div class="d">预算、授权、暂停随时在手</div></div>
     <div class="pillar"><div class="k">安全</div><div class="d">状态留在本地账本，闸门默认关闭</div></div>
-    <div class="pillar"><div class="k">开源</div><div class="d">Apache-2.0 · 871 项工程测试</div></div>
+    <div class="pillar"><div class="k">开源</div><div class="d">Apache-2.0 · 918 项工程测试</div></div>
   </div>
 </section>
 
@@ -216,7 +216,7 @@
   <div class="principles rise">
     <div class="p"><div class="idx">STEP 1</div><h3>跑一次首次向导</h3><p>检测你已订阅的 Agent CLI、按你的选择生成配置、调起 BRAIN 与渠道登录——就是上面那段演示，之后不用再做。</p></div>
     <div class="p"><div class="idx">STEP 2</div><h3>设定预算与期限</h3><p>在你的预算、你的授权期限内启用自动研究。模型、研究、提交默认全关，你显式打开才跑。</p></div>
-    <div class="p"><div class="idx">STEP 3</div><h3>每轮自动循环</h3><p>提出假设 → 异渠道审查 → 有限回测。研究渠道与审查渠道强制不同。源码版新增多泳道并行；公开 macOS 0.2.21 仍为单泳道，模拟与提交逐条串行。</p></div>
+    <div class="p"><div class="idx">STEP 3</div><h3>每轮自动循环</h3><p>提出假设 → 异渠道审查 → 有限回测。研究渠道与审查渠道强制不同。macOS 0.2.25 支持多泳道并行和逐泳道模型配对，模拟与提交逐条串行。</p></div>
     <div class="p"><div class="idx">STEP 4</div><h3>看真实结果</h3><p>轮次历史、真实回执、失败与 UNKNOWN 如实记账；失败的候选能查到原因，不会静默重来。</p></div>
     <div class="p"><div class="idx">STEP 5</div><h3>过验收再提交</h3><p>合格候选先过独立的提交前验收，再核对平台回执——然后进入下一轮，把圈再缩一圈。</p></div>
     <div class="p"><div class="idx">全程可见</div><h3>一切都在托盘里</h3><p>每条泳道的轮次、渠道配对与冷却、下轮研究 / 审查渠道、已提交 Alpha、真实回执与异常阻塞，随时可查、可暂停、可按泳道取消。</p></div>
@@ -280,18 +280,18 @@
     <div class="dl-card featured" data-os="macos">
       <div class="dl-tag">推荐 · 打开即用</div>
       <h3>macOS 完整包</h3>
-      <div class="dl-size">56.7 <span>MB</span></div>
+      <div class="dl-size">57.1 <span>MB</span></div>
       <p>自带 Python 3.12——不需要系统 Python、Xcode 命令行工具或 pip。拖进「应用程序」双击，首启向导直接接管。</p>
-      <a class="btn primary dl-btn" href="https://github.com/Octo-o-o-o/autowq/releases/download/macos-v0.2.21/WorldQuant-0.2.21.dmg" target="_blank" rel="noopener">下载完整版 DMG</a>
-      <div class="dl-meta">0.2.21 · Apple 已公证 · 菜单栏 App</div>
+      <a class="btn primary dl-btn" href="https://github.com/Octo-o-o-o/autowq/releases/download/macos-v0.2.25/WorldQuant-0.2.25.dmg" target="_blank" rel="noopener">下载完整版 DMG</a>
+      <div class="dl-meta">0.2.25 · Apple 已公证 · 菜单栏 App</div>
     </div>
     <div class="dl-card" data-os="macos">
       <div class="dl-tag">已装 Python 的选这个</div>
       <h3>macOS 轻量包</h3>
-      <div class="dl-size">1.4 <span>MB</span></div>
+      <div class="dl-size">1.7 <span>MB</span></div>
       <p>不含 Python。首次设置自动使用本机 Python 3.11+（Homebrew 或 Xcode 命令行工具），没有会引导你装。功能与完整包完全相同。</p>
-      <a class="btn dl-btn" href="https://github.com/Octo-o-o-o/autowq/releases/download/macos-v0.2.21/WorldQuant-0.2.21-light.dmg" target="_blank" rel="noopener">下载轻量版 DMG</a>
-      <div class="dl-meta">0.2.21 · Apple 已公证 · 菜单栏 App</div>
+      <a class="btn dl-btn" href="https://github.com/Octo-o-o-o/autowq/releases/download/macos-v0.2.25/WorldQuant-0.2.25-light.dmg" target="_blank" rel="noopener">下载轻量版 DMG</a>
+      <div class="dl-meta">0.2.25 · Apple 已公证 · 菜单栏 App</div>
     </div>
     <div class="dl-card" data-os="windows">
       <div class="dl-tag">Windows · 实验性</div>

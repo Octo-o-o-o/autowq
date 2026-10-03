@@ -1,6 +1,6 @@
 {
-  "version": "0.2.21",
-  "dmg": "https://github.com/Octo-o-o-o/autowq/releases/download/macos-v0.2.21/WorldQuant-0.2.21.dmg",
-  "dmg_light": "https://github.com/Octo-o-o-o/autowq/releases/download/macos-v0.2.21/WorldQuant-0.2.21-light.dmg",
-  "notes": "菜单栏界面焕新：统一设计规范、长文本折行、卡片式研究进展窗口。macOS 完整包与轻量包均已签名及 Apple 公证。"
+  "version": "0.2.25",
+  "dmg": "https://github.com/Octo-o-o-o/autowq/releases/download/macos-v0.2.25/WorldQuant-0.2.25.dmg",
+  "dmg_light": "https://github.com/Octo-o-o-o/autowq/releases/download/macos-v0.2.25/WorldQuant-0.2.25-light.dmg",
+  "notes": "macOS 原生界面焕新：系统玻璃工具栏与侧栏、明暗自适应设置、结构化研究详情与指标。支持多泳道研究、批量设置和任务结束后安全应用修改。完整包与轻量包均已签名及 Apple 公证。"
 }

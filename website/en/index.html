@@ -41,7 +41,7 @@
       "name": "autowq",
       "applicationCategory": "DeveloperApplication",
       "operatingSystem": "macOS, Windows, Linux",
-      "softwareVersion": "0.2.21",
+      "softwareVersion": "0.2.25",
       "isAccessibleForFree": true,
       "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
       "license": "https://www.apache.org/licenses/LICENSE-2.0",
@@ -54,7 +54,7 @@
       "featureList": [
         "Cross-provider review: research and review channels are forced apart",
         "Per-provider budget and authorization gates, all off by default",
-        "Source-only feature (not in the public macOS 0.2.21 download): parallel lanes each run research → review → simulation; one call per provider at a time, simulation and submission stay serial; any lane can be pinned to a chosen pair",
+        "parallel lanes each run research → review → simulation; one call per provider at a time, simulation and submission stay serial; any lane can be pinned to a chosen pair",
         "Local SQLite ledger with real-outcome diagnostics",
         "Independent pre-submission acceptance gates",
         "Continuous-research framework after Gold: bounded evidence collection, late reassessment, findings that feed the next round",
@@ -111,8 +111,8 @@
         </button>
         <div class="cta-menu" id="heroMenu" role="menu" aria-label="Download options" hidden>
           <div class="cm-head">Desktop · just open it</div>
-          <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/macos-v0.2.21/WorldQuant-0.2.21.dmg" data-os="macos"><span class="cm-l">macOS full package</span><span class="cm-r">DMG · 56.7 MB</span></a>
-          <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/macos-v0.2.21/WorldQuant-0.2.21-light.dmg"><span class="cm-l">macOS light package</span><span class="cm-r">DMG · 1.4 MB</span></a>
+          <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/macos-v0.2.25/WorldQuant-0.2.25.dmg" data-os="macos"><span class="cm-l">macOS full package</span><span class="cm-r">DMG · 57.1 MB</span></a>
+          <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/macos-v0.2.25/WorldQuant-0.2.25-light.dmg"><span class="cm-l">macOS light package</span><span class="cm-r">DMG · 1.7 MB</span></a>
           <a role="menuitem" href="https://github.com/Octo-o-o-o/autowq/releases/download/v0.2.20/WorldQuantTray.exe" data-os="windows"><span class="cm-l">Windows tray</span><span class="cm-r">.exe · experimental</span></a>
           <hr>
           <div class="cm-head">Developers</div>
@@ -156,7 +156,7 @@
     <div class="pillar"><div class="k">Visible</div><div class="d">Per-lane cycles, provider pairs, budget — all in the tray</div></div>
     <div class="pillar"><div class="k">Control</div><div class="d">Budgets, authorization, pause — always yours</div></div>
     <div class="pillar"><div class="k">Safe</div><div class="d">State stays in a local ledger; gates closed by default</div></div>
-    <div class="pillar"><div class="k">Open</div><div class="d">Apache-2.0 · 871 engineering tests</div></div>
+    <div class="pillar"><div class="k">Open</div><div class="d">Apache-2.0 · 918 engineering tests</div></div>
   </div>
 </section>
 
@@ -216,7 +216,7 @@
   <div class="principles rise">
     <div class="p"><div class="idx">STEP 1</div><h3>Run the wizard once</h3><p>It detects the agent CLIs you already subscribe to, writes config from your choices and launches BRAIN + provider logins — the demo above. You never repeat it.</p></div>
     <div class="p"><div class="idx">STEP 2</div><h3>Set budget &amp; window</h3><p>Enable research inside your own budget and authorization window. Models, research and submission are all off by default; nothing runs until you say so.</p></div>
-    <div class="p"><div class="idx">STEP 3</div><h3>Every cycle, automated</h3><p>Hypothesis → cross-provider review → bounded simulation. Research and review channels are forced apart. Multi-lane concurrency is source-only for now; the public macOS 0.2.21 download uses one lane. Simulation and submission stay serial.</p></div>
+    <div class="p"><div class="idx">STEP 3</div><h3>Every cycle, automated</h3><p>Hypothesis → cross-provider review → bounded simulation. Research and review channels are forced apart. macOS 0.2.25 supports parallel research lanes with per-lane model pairs. Simulation and submission stay serial.</p></div>
     <div class="p"><div class="idx">STEP 4</div><h3>Read real outcomes</h3><p>Cycle history, real receipts, failures and UNKNOWNs are all recorded as-is; failed candidates carry their reasons and never silently retry.</p></div>
     <div class="p"><div class="idx">STEP 5</div><h3>Gate, then submit</h3><p>Qualified candidates pass an independent pre-submission acceptance gate, then you verify the platform receipt — and the next cycle tightens the loop again.</p></div>
     <div class="p"><div class="idx">ALWAYS ON</div><h3>Everything in the tray</h3><p>Per-lane cycles, provider pairs and cooldowns, next research / review providers, submitted alphas, real receipts and blocked states — visible, pausable, cancellable per lane.</p></div>
@@ -280,18 +280,18 @@
     <div class="dl-card featured" data-os="macos">
       <div class="dl-tag">Recommended · just open it</div>
       <h3>macOS full package</h3>
-      <div class="dl-size">56.7 <span>MB</span></div>
+      <div class="dl-size">57.1 <span>MB</span></div>
       <p>Ships with Python 3.12 — no system Python, Xcode CLT or pip needed. Drag into Applications, double-click, and the wizard takes over.</p>
-      <a class="btn primary dl-btn" href="https://github.com/Octo-o-o-o/autowq/releases/download/macos-v0.2.21/WorldQuant-0.2.21.dmg" target="_blank" rel="noopener">Download the full DMG</a>
-      <div class="dl-meta">0.2.21 · Notarized by Apple · menu-bar app</div>
+      <a class="btn primary dl-btn" href="https://github.com/Octo-o-o-o/autowq/releases/download/macos-v0.2.25/WorldQuant-0.2.25.dmg" target="_blank" rel="noopener">Download the full DMG</a>
+      <div class="dl-meta">0.2.25 · Notarized by Apple · menu-bar app</div>
     </div>
     <div class="dl-card" data-os="macos">
       <div class="dl-tag">If you already have Python</div>
       <h3>macOS light package</h3>
-      <div class="dl-size">1.4 <span>MB</span></div>
+      <div class="dl-size">1.7 <span>MB</span></div>
       <p>No bundled Python. First setup uses your local Python 3.11+ (Homebrew or Xcode CLT) and guides you if it's missing. Features are identical.</p>
-      <a class="btn dl-btn" href="https://github.com/Octo-o-o-o/autowq/releases/download/macos-v0.2.21/WorldQuant-0.2.21-light.dmg" target="_blank" rel="noopener">Download the light DMG</a>
-      <div class="dl-meta">0.2.21 · Notarized by Apple · menu-bar app</div>
+      <a class="btn dl-btn" href="https://github.com/Octo-o-o-o/autowq/releases/download/macos-v0.2.25/WorldQuant-0.2.25-light.dmg" target="_blank" rel="noopener">Download the light DMG</a>
+      <div class="dl-meta">0.2.25 · Notarized by Apple · menu-bar app</div>
     </div>
     <div class="dl-card" data-os="windows">
       <div class="dl-tag">Windows · experimental</div>

@@ -1,6 +1,6 @@
 # autowq
 
-For continuous operation and exact epoch recovery, see the [operations guide](docs/reliable-automation.md). Source version 0.2.25 includes the redesigned native macOS settings and research windows. Its installers are release candidates; notarized public downloads below remain 0.2.21.
+For continuous operation and exact epoch recovery, see the [operations guide](docs/reliable-automation.md). macOS 0.2.25 ships redesigned native settings and research windows, multi-lane research and batch settings. Both full and light installers are signed and notarized by Apple.
 
 English | [简体中文](README.md)
 

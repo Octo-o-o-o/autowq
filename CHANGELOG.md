@@ -1,11 +1,11 @@
 # Changelog
 
-## 0.2.25 (release candidate)
+## 0.2.25 — 2026-10-03
 
 - Rebuild macOS settings and research windows around native AppKit toolbars and split-view sidebars, with system Liquid Glass on recent macOS releases and native fallback on older supported systems.
 - Introduce aligned grouped forms, adaptive light and dark surfaces, compact record summaries, structured research details and actual simulation metric summaries. Preserve complete text, unknown costs and keyboard editing.
 - Clarify immediate model-selection saves and keep typed settings as one explicit save operation.
-- Includes the engine and desktop improvements prepared in 0.2.22–0.2.24. Public notarization and release are tracked separately from source verification.
+- Includes the engine and desktop improvements prepared in 0.2.22–0.2.24. Both universal macOS installers are signed, notarized, stapled and published with SHA-256 checksums.
 
 ## 0.2.24 (local candidate; not publicly released)
 
