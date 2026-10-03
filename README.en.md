@@ -1,6 +1,6 @@
 # autowq
 
-For continuous operation and exact epoch recovery, see the [operations guide](docs/reliable-automation.md). Source version 0.2.22 is not publicly released; public downloads below remain 0.2.21.
+For continuous operation and exact epoch recovery, see the [operations guide](docs/reliable-automation.md). Source version 0.2.25 includes the redesigned native macOS settings and research windows. Its installers are release candidates; notarized public downloads below remain 0.2.21.
 
 English | [简体中文](README.md)
 
