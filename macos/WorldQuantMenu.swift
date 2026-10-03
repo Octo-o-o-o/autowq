@@ -39,6 +39,50 @@ enum UI {
     }
 }
 
+/// Shared native window chrome. AppKit supplies Liquid Glass on macOS 26 and later.
+final class DesktopChrome: NSObject, NSToolbarDelegate {
+    let items: [NSToolbarItem]
+    init(window: NSWindow, name: String, items: [NSToolbarItem]) {
+        self.items = items; super.init()
+        let toolbar = NSToolbar(identifier: name)
+        toolbar.delegate = self; toolbar.displayMode = .iconOnly
+        toolbar.allowsUserCustomization = false
+        window.toolbar = toolbar; window.toolbarStyle = .unified
+        window.titlebarSeparatorStyle = .none
+    }
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { items.map { $0.itemIdentifier } }
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { [.flexibleSpace] + items.map { $0.itemIdentifier } }
+    func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier identifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? { items.first { $0.itemIdentifier == identifier } }
+    static func item(_ id: String, label: String, view: NSView) -> NSToolbarItem {
+        let item = NSToolbarItem(itemIdentifier: NSToolbarItem.Identifier(id)); item.label = label; item.view = view
+        return item
+    }
+    static func split(window: NSWindow, sidebar: NSView, content: NSView, width: CGFloat) -> NSSplitViewController {
+        let controller = NSSplitViewController()
+        let side = NSViewController(); side.view = sidebar
+        let main = NSViewController(); main.view = content
+        let navigation = NSSplitViewItem(sidebarWithViewController: side)
+        navigation.minimumThickness = width; navigation.maximumThickness = width + 80; navigation.canCollapse = false
+        let detail = NSSplitViewItem(viewController: main)
+        #if compiler(>=6.2)
+        if #available(macOS 26.0, *) { detail.automaticallyAdjustsSafeAreaInsets = true }
+        #endif
+        controller.addSplitViewItem(navigation); controller.addSplitViewItem(detail)
+        window.contentViewController = controller
+        controller.splitView.setPosition(width, ofDividerAt: 0)
+        return controller
+    }
+}
+
+/// Resolve semantic colors again when appearance or accessibility contrast changes.
+final class FormSurface: NSStackView {
+    override var wantsUpdateLayer: Bool { true }
+    override func updateLayer() {
+        layer?.borderColor = NSColor.separatorColor.cgColor
+        layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+    }
+}
+
 /// 折行标签：宽度由 Auto Layout 决定后回写 preferredMaxLayoutWidth，保证高度按实际宽度计算。
 final class WrapLabel: NSTextField {
     override func layout() {
@@ -222,7 +266,7 @@ final class SettingEditorRow: NSView, NSTextFieldDelegate {
                 nullable.target = self; nullable.action = #selector(changed); controls.addArrangedSubview(nullable)
             }
         }
-        let row = NSStackView(views: [labels, controls]); row.orientation = .horizontal; row.alignment = .top; row.spacing = 24
+        let row = NSStackView(views: [labels, controls]); row.orientation = .horizontal; row.distribution = .fill; row.alignment = .top; row.spacing = 24
         row.translatesAutoresizingMaskIntoConstraints = false; addSubview(row)
         labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
         labels.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -232,6 +276,7 @@ final class SettingEditorRow: NSView, NSTextFieldDelegate {
             row.leadingAnchor.constraint(equalTo: leadingAnchor), row.trailingAnchor.constraint(equalTo: trailingAnchor),
             row.topAnchor.constraint(equalTo: topAnchor, constant: 12), row.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12),
             labels.widthAnchor.constraint(greaterThanOrEqualToConstant: 220),
+            title.widthAnchor.constraint(equalTo: labels.widthAnchor), note.widthAnchor.constraint(equalTo: labels.widthAnchor),
         ])
         for control in [field, choice, toggle, date, nullable] as [NSControl] {
             control.setAccessibilityLabel(entry["label"] as? String ?? key)
@@ -247,10 +292,12 @@ final class SettingsPane: NSObject, NSWindowDelegate, NSSearchFieldDelegate {
     weak var owner: AppDelegate?
     let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 960, height: 700), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
     let sidebar = NSStackView()
+    var chrome: DesktopChrome?
+    var splitController: NSSplitViewController?
     let search = NSSearchField()
     let heading = NSTextField(labelWithString: "")
     let subtitle = WrapLabel(wrappingLabelWithString: "")
-    let body = NSStackView()
+    let body = FormSurface()
     let notice = WrapLabel(wrappingLabelWithString: "")
     let save = NSButton(title: "", target: nil, action: nil)
     let revert = NSButton(title: "", target: nil, action: nil)
@@ -279,20 +326,21 @@ final class SettingsPane: NSObject, NSWindowDelegate, NSSearchFieldDelegate {
         window.delegate = self; window.isReleasedWhenClosed = false
         window.minSize = NSSize(width: 880, height: 580); window.setFrameAutosaveName("WorldQuantSettings")
         window.title = "WorldQuant"; window.titleVisibility = .hidden; window.titlebarAppearsTransparent = true
-        guard let content = window.contentView else { return }
-        let side = NSVisualEffectView(); side.material = .sidebar; side.blendingMode = .behindWindow; side.state = .followsWindowActiveState
-        side.translatesAutoresizingMaskIntoConstraints = false; content.addSubview(side)
+        let side = NSView(); let content = NSView()
+        splitController = DesktopChrome.split(window: window, sidebar: side, content: content, width: 208)
         sidebar.orientation = .vertical; sidebar.alignment = .leading; sidebar.spacing = 5; sidebar.translatesAutoresizingMaskIntoConstraints = false; side.addSubview(sidebar)
         search.placeholderString = t("搜索设置", "Search settings"); search.delegate = self; search.sendsSearchStringImmediately = true
-        search.translatesAutoresizingMaskIntoConstraints = false; content.addSubview(search)
-        heading.font = .systemFont(ofSize: 22, weight: .semibold)
+        search.widthAnchor.constraint(equalToConstant: 240).isActive = true
+        chrome = DesktopChrome(window: window, name: "SettingsToolbar", items: [DesktopChrome.item("search", label: t("搜索设置", "Search settings"), view: search)])
+        heading.font = .systemFont(ofSize: 28, weight: .bold)
         subtitle.font = .systemFont(ofSize: 12); subtitle.textColor = .secondaryLabelColor
         let title = NSStackView(views: [heading, subtitle]); title.orientation = .vertical; title.alignment = .leading; title.spacing = 6
+        subtitle.widthAnchor.constraint(equalTo: title.widthAnchor).isActive = true
         title.translatesAutoresizingMaskIntoConstraints = false; content.addSubview(title)
         advanced.target = self; advanced.action = #selector(toggleAdvanced); advanced.translatesAutoresizingMaskIntoConstraints = false; content.addSubview(advanced)
         let scroll = NSScrollView(); scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.drawsBackground = false; scroll.translatesAutoresizingMaskIntoConstraints = false; content.addSubview(scroll)
         let document = FlippedView(); document.translatesAutoresizingMaskIntoConstraints = false; scroll.documentView = document
-        body.orientation = .vertical; body.alignment = .leading; body.spacing = 0; body.translatesAutoresizingMaskIntoConstraints = false; document.addSubview(body)
+        body.orientation = .vertical; body.alignment = .leading; body.spacing = 0; body.wantsLayer = true; body.layer?.cornerRadius = 12; body.layer?.borderWidth = 0.5; body.layer?.borderColor = NSColor.separatorColor.cgColor; body.edgeInsets = NSEdgeInsets(top: 4, left: 20, bottom: 4, right: 20); body.translatesAutoresizingMaskIntoConstraints = false; document.addSubview(body)
         let footer = NSView(); footer.translatesAutoresizingMaskIntoConstraints = false; content.addSubview(footer)
         let line = NSBox(); line.boxType = .separator; line.translatesAutoresizingMaskIntoConstraints = false; footer.addSubview(line)
         notice.font = .systemFont(ofSize: 11); notice.textColor = .secondaryLabelColor; notice.translatesAutoresizingMaskIntoConstraints = false; footer.addSubview(notice)
@@ -301,15 +349,13 @@ final class SettingsPane: NSObject, NSWindowDelegate, NSSearchFieldDelegate {
         cancelPending.bezelStyle = .rounded; cancelPending.target = self; cancelPending.action = #selector(cancelSaved)
         let buttons = NSStackView(views: [cancelPending, revert, save]); buttons.spacing = 8; buttons.translatesAutoresizingMaskIntoConstraints = false; footer.addSubview(buttons)
         NSLayoutConstraint.activate([
-            side.leadingAnchor.constraint(equalTo: content.leadingAnchor), side.topAnchor.constraint(equalTo: content.topAnchor), side.bottomAnchor.constraint(equalTo: content.bottomAnchor), side.widthAnchor.constraint(equalToConstant: 188),
-            sidebar.leadingAnchor.constraint(equalTo: side.leadingAnchor, constant: 12), sidebar.trailingAnchor.constraint(equalTo: side.trailingAnchor, constant: -12), sidebar.topAnchor.constraint(equalTo: side.topAnchor, constant: 22),
-            search.leadingAnchor.constraint(equalTo: side.trailingAnchor, constant: 28), search.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -28), search.topAnchor.constraint(equalTo: content.topAnchor, constant: 18),
-            title.topAnchor.constraint(equalTo: search.bottomAnchor, constant: 24), title.leadingAnchor.constraint(equalTo: search.leadingAnchor), title.trailingAnchor.constraint(equalTo: search.trailingAnchor),
+            sidebar.leadingAnchor.constraint(equalTo: side.leadingAnchor, constant: 12), sidebar.trailingAnchor.constraint(equalTo: side.trailingAnchor, constant: -12), sidebar.topAnchor.constraint(equalTo: side.safeAreaLayoutGuide.topAnchor, constant: 20),
+            title.topAnchor.constraint(equalTo: content.safeAreaLayoutGuide.topAnchor, constant: 28), title.leadingAnchor.constraint(equalTo: content.safeAreaLayoutGuide.leadingAnchor, constant: 36), title.trailingAnchor.constraint(equalTo: content.safeAreaLayoutGuide.trailingAnchor, constant: -36),
             advanced.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 14), advanced.leadingAnchor.constraint(equalTo: title.leadingAnchor),
             scroll.topAnchor.constraint(equalTo: advanced.bottomAnchor, constant: 10), scroll.leadingAnchor.constraint(equalTo: title.leadingAnchor), scroll.trailingAnchor.constraint(equalTo: title.trailingAnchor), scroll.bottomAnchor.constraint(equalTo: footer.topAnchor),
             document.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor), document.trailingAnchor.constraint(equalTo: scroll.contentView.trailingAnchor), document.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
             body.leadingAnchor.constraint(equalTo: document.leadingAnchor), body.trailingAnchor.constraint(equalTo: document.trailingAnchor), body.topAnchor.constraint(equalTo: document.topAnchor), body.bottomAnchor.constraint(equalTo: document.bottomAnchor),
-            footer.leadingAnchor.constraint(equalTo: side.trailingAnchor), footer.trailingAnchor.constraint(equalTo: content.trailingAnchor), footer.bottomAnchor.constraint(equalTo: content.bottomAnchor), footer.heightAnchor.constraint(equalToConstant: 100),
+            footer.leadingAnchor.constraint(equalTo: content.safeAreaLayoutGuide.leadingAnchor), footer.trailingAnchor.constraint(equalTo: content.safeAreaLayoutGuide.trailingAnchor), footer.bottomAnchor.constraint(equalTo: content.bottomAnchor), footer.heightAnchor.constraint(equalToConstant: 88),
             line.topAnchor.constraint(equalTo: footer.topAnchor), line.leadingAnchor.constraint(equalTo: footer.leadingAnchor), line.trailingAnchor.constraint(equalTo: footer.trailingAnchor),
             notice.leadingAnchor.constraint(equalTo: footer.leadingAnchor, constant: 28), notice.trailingAnchor.constraint(equalTo: footer.trailingAnchor, constant: -28), notice.topAnchor.constraint(equalTo: footer.topAnchor, constant: 10),
             buttons.trailingAnchor.constraint(equalTo: footer.trailingAnchor, constant: -24), buttons.bottomAnchor.constraint(equalTo: footer.bottomAnchor, constant: -16),
@@ -353,7 +399,8 @@ final class SettingsPane: NSObject, NSWindowDelegate, NSSearchFieldDelegate {
     }
     func open() { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
     func add(_ view: NSView) {
-        body.addArrangedSubview(view); view.widthAnchor.constraint(equalTo: body.widthAnchor).isActive = true
+        body.addArrangedSubview(view); view.widthAnchor.constraint(equalTo: body.widthAnchor, constant: -40).isActive = true
+        if view is NSBox { view.heightAnchor.constraint(equalToConstant: 1).isActive = true }
     }
     func text(_ value: String, title: Bool = false) {
         let label = WrapLabel(wrappingLabelWithString: value); label.font = .systemFont(ofSize: title ? 14 : 12, weight: title ? .semibold : .regular)
@@ -380,17 +427,29 @@ final class SettingsPane: NSObject, NSWindowDelegate, NSSearchFieldDelegate {
         let brand = NSTextField(labelWithString: "WorldQuant"); brand.font = .systemFont(ofSize: 16, weight: .semibold)
         sidebar.addArrangedSubview(brand)
         let caption = NSTextField(labelWithString: t("设置", "Settings")); caption.font = .systemFont(ofSize: 12); caption.textColor = .secondaryLabelColor; sidebar.addArrangedSubview(caption)
-        sidebar.setCustomSpacing(22, after: caption)
+        sidebar.setCustomSpacing(24, after: caption)
         for (key, title, icon) in groups {
             let button = NSButton(title: title, target: self, action: #selector(selectSection(_:)))
             button.bezelStyle = .recessed; button.setButtonType(.pushOnPushOff); button.state = section == key ? .on : .off
+            button.isBordered = section == key
+            button.contentTintColor = section == key ? .controlAccentColor : .secondaryLabelColor
             button.alignment = .left; button.image = NSImage(systemSymbolName: icon, accessibilityDescription: nil); button.imagePosition = .imageLeading
             button.identifier = NSUserInterfaceItemIdentifier(key); button.font = .systemFont(ofSize: 13)
-            sidebar.addArrangedSubview(button); button.widthAnchor.constraint(equalTo: sidebar.widthAnchor).isActive = true; button.heightAnchor.constraint(equalToConstant: 32).isActive = true
+            sidebar.addArrangedSubview(button); button.widthAnchor.constraint(equalTo: sidebar.widthAnchor).isActive = true; button.heightAnchor.constraint(equalToConstant: 36).isActive = true
         }
         let query = search.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         heading.stringValue = query.isEmpty ? (groups.first { $0.0 == section }?.1 ?? "") : t("搜索结果", "Search results")
-        subtitle.stringValue = t("保存前可修改多项；累计用量和授权边界始终保留。", "Edit multiple values before saving. Usage counters and authorization boundaries are preserved.")
+        let descriptions: [String: String] = [
+            "general": t("让 WorldQuant 适合你的工作方式。", "Make WorldQuant feel at home."),
+            "research": t("为持续研究设定清晰的目标与边界。", "Give ongoing research clear goals and limits."),
+            "scheduling": t("安排并行工作，掌握每条泳道的节奏。", "Coordinate parallel work and the pace of each lane."),
+            "models": t("选择后即保存；现有任务结束后应用路由修改。", "Selections save immediately. Route changes apply after active work finishes."),
+            "simulation": t("从模拟验证到提交，保持每一步可控。", "Stay in control, from simulation to submission."),
+            "providers": t("管理调用预算、等待时间与重试策略。", "Manage call budgets, timeouts and retries."),
+            "authorization": t("明确自动研究的有效期限与资源边界。", "Define the duration and resource limits of automated research."),
+            "support": t("查看运行环境，获取帮助与诊断信息。", "Inspect your environment and access diagnostics.")
+        ]
+        subtitle.stringValue = query.isEmpty ? descriptions[section] ?? "" : t("在全部设置中查找，包括高级参数。", "Search all settings, including advanced parameters.")
         search.placeholderString = t("搜索设置", "Search settings")
         advanced.title = t("显示高级参数", "Show advanced settings")
         advanced.isHidden = !query.isEmpty || ["models", "general", "authorization", "support"].contains(section)
@@ -402,11 +461,11 @@ final class SettingsPane: NSObject, NSWindowDelegate, NSSearchFieldDelegate {
         }
         if snapshot.isEmpty { text(t("正在读取设置…", "Loading settings…")) }
         else if filtered.isEmpty && !["models", "support"].contains(section) { text(t("没有匹配的设置。尝试其他关键词或展开高级参数。", "No matching settings. Try another term or show advanced settings.")) }
-        for entry in filtered {
+        for (index, entry) in filtered.enumerated() {
+            if index > 0 { let line = NSBox(); line.boxType = .separator; add(line) }
             let key = entry["key"] as? String ?? ""
             let row = SettingEditorRow(entry: entry, value: drafts[key] ?? originals[key] ?? raw(entry["value"]), pane: self)
             editors.append(row); add(row)
-            let line = NSBox(); line.boxType = .separator; add(line)
         }
         if query.isEmpty, let owner {
             if section == "general" {
@@ -503,16 +562,20 @@ final class SettingsPane: NSObject, NSWindowDelegate, NSSearchFieldDelegate {
     }
 }
 
-/// Research, history and results share one searchable, keyboard-accessible reader.
+/// A native research reader: glass navigation, compact records, calm editorial detail.
 final class ActivityPane: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
     weak var owner: AppDelegate?
-    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 700), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1080, height: 740), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
     let segments = NSSegmentedControl()
     let search = NSSearchField()
     let table = NSTableView()
-    let detail = NSTextView()
+    let detail = NSStackView()
+    let reader = NSScrollView()
     let status = NSTextField(labelWithString: "")
+    let listHeading = NSTextField(labelWithString: "")
     let refresh = NSButton(title: "", target: nil, action: nil)
+    var chrome: DesktopChrome?
+    var splitController: NSSplitViewController?
     var selected = "research"
     let kinds = ["research", "history", "submissions", "standby"]
     var responses: [String: [String: Any]] = [:]
@@ -520,34 +583,44 @@ final class ActivityPane: NSObject, NSTableViewDataSource, NSTableViewDelegate, 
     func t(_ zh: String, _ en: String) -> String { owner?.lang == "en" ? en : zh }
     init(owner: AppDelegate) {
         self.owner = owner; super.init()
-        window.isReleasedWhenClosed = false; window.minSize = NSSize(width: 840, height: 560)
-        window.setFrameAutosaveName("WorldQuantActivity"); window.title = "WorldQuant"; window.titlebarAppearsTransparent = true
-        guard let content = window.contentView else { return }
+        window.isReleasedWhenClosed = false; window.minSize = NSSize(width: 920, height: 600)
+        window.setFrameAutosaveName("WorldQuantReader"); window.title = "WorldQuant"; window.titlebarAppearsTransparent = true
+        let side = NSView(); let content = NSView()
+        splitController = DesktopChrome.split(window: window, sidebar: side, content: content, width: 290)
         segments.segmentCount = 4; segments.trackingMode = .selectOne; segments.selectedSegment = 0
-        segments.target = self; segments.action = #selector(selectKind)
-        search.delegate = self; search.sendsSearchStringImmediately = true
+        segments.segmentStyle = .automatic; segments.target = self; segments.action = #selector(selectKind)
         refresh.target = self; refresh.action = #selector(reload); refresh.bezelStyle = .rounded
-        let toolbar = NSStackView(views: [segments, search, refresh]); toolbar.spacing = 16; toolbar.translatesAutoresizingMaskIntoConstraints = false; content.addSubview(toolbar)
-        search.widthAnchor.constraint(greaterThanOrEqualToConstant: 180).isActive = true
-        let split = NSSplitView(); split.isVertical = true; split.dividerStyle = .thin; split.translatesAutoresizingMaskIntoConstraints = false; content.addSubview(split)
-        let list = NSScrollView(); list.hasVerticalScroller = true; list.autohidesScrollers = true
-        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("record")); column.resizingMask = .autoresizingMask
-        table.addTableColumn(column); table.headerView = nil; table.rowHeight = 58; table.usesAlternatingRowBackgroundColors = false
-        table.style = .sourceList; table.delegate = self; table.dataSource = self; table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
-        table.setAccessibilityLabel(t("记录列表", "Records")); list.documentView = table
-        let reader = NSScrollView(); reader.hasVerticalScroller = true; reader.autohidesScrollers = true
-        detail.isEditable = false; detail.isSelectable = true; detail.isRichText = true; detail.drawsBackground = false
-        detail.textContainerInset = NSSize(width: 28, height: 24); detail.autoresizingMask = [.width]; detail.isVerticallyResizable = true; detail.isHorizontallyResizable = false
-        detail.textContainer?.widthTracksTextView = true; detail.textContainer?.containerSize = NSSize(width: 640, height: CGFloat.greatestFiniteMagnitude)
-        reader.documentView = detail; split.addArrangedSubview(list); split.addArrangedSubview(reader)
-        status.font = .systemFont(ofSize: 11); status.textColor = .secondaryLabelColor; status.translatesAutoresizingMaskIntoConstraints = false; content.addSubview(status)
-        NSLayoutConstraint.activate([
-            toolbar.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20), toolbar.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20), toolbar.topAnchor.constraint(equalTo: content.topAnchor, constant: 16),
-            split.topAnchor.constraint(equalTo: toolbar.bottomAnchor, constant: 16), split.leadingAnchor.constraint(equalTo: content.leadingAnchor), split.trailingAnchor.constraint(equalTo: content.trailingAnchor), split.bottomAnchor.constraint(equalTo: status.topAnchor, constant: -10),
-            status.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20), status.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20), status.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -12),
-            list.widthAnchor.constraint(greaterThanOrEqualToConstant: 240), reader.widthAnchor.constraint(greaterThanOrEqualToConstant: 480),
+        refresh.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: t("刷新", "Refresh"))
+        refresh.imagePosition = .imageOnly; refresh.toolTip = t("刷新记录", "Refresh records")
+        chrome = DesktopChrome(window: window, name: "ResearchToolbar", items: [
+            DesktopChrome.item("sections", label: t("研究导航", "Research navigation"), view: segments),
+            DesktopChrome.item("refresh", label: t("刷新", "Refresh"), view: refresh)
         ])
-        split.setPosition(300, ofDividerAt: 0); window.center(); render()
+        listHeading.font = .systemFont(ofSize: 19, weight: .bold)
+        search.delegate = self; search.sendsSearchStringImmediately = true
+        let list = NSScrollView(); list.hasVerticalScroller = true; list.autohidesScrollers = true; list.drawsBackground = false
+        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("record")); column.resizingMask = .autoresizingMask
+        table.addTableColumn(column); table.headerView = nil; table.rowHeight = 68; table.intercellSpacing = NSSize(width: 0, height: 4)
+        table.style = .sourceList; table.backgroundColor = .clear; table.delegate = self; table.dataSource = self
+        table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
+        table.setAccessibilityLabel(t("记录列表", "Records")); list.documentView = table
+        status.font = .systemFont(ofSize: 11); status.textColor = .secondaryLabelColor; status.lineBreakMode = .byTruncatingTail
+        for view in [listHeading, search, list, status] { view.translatesAutoresizingMaskIntoConstraints = false; side.addSubview(view) }
+        reader.hasVerticalScroller = true; reader.autohidesScrollers = true; reader.drawsBackground = false
+        reader.translatesAutoresizingMaskIntoConstraints = false; content.addSubview(reader)
+        let document = FlippedView(); document.translatesAutoresizingMaskIntoConstraints = false; reader.documentView = document
+        detail.orientation = .vertical; detail.alignment = .leading; detail.spacing = 0
+        detail.translatesAutoresizingMaskIntoConstraints = false; document.addSubview(detail)
+        NSLayoutConstraint.activate([
+            listHeading.leadingAnchor.constraint(equalTo: side.leadingAnchor, constant: 22), listHeading.trailingAnchor.constraint(equalTo: side.trailingAnchor, constant: -20), listHeading.topAnchor.constraint(equalTo: side.safeAreaLayoutGuide.topAnchor, constant: 24),
+            search.leadingAnchor.constraint(equalTo: listHeading.leadingAnchor), search.trailingAnchor.constraint(equalTo: listHeading.trailingAnchor), search.topAnchor.constraint(equalTo: listHeading.bottomAnchor, constant: 16),
+            list.topAnchor.constraint(equalTo: search.bottomAnchor, constant: 18), list.leadingAnchor.constraint(equalTo: side.leadingAnchor, constant: 8), list.trailingAnchor.constraint(equalTo: side.trailingAnchor, constant: -8), list.bottomAnchor.constraint(equalTo: status.topAnchor, constant: -12),
+            status.leadingAnchor.constraint(equalTo: listHeading.leadingAnchor), status.trailingAnchor.constraint(equalTo: listHeading.trailingAnchor), status.bottomAnchor.constraint(equalTo: side.bottomAnchor, constant: -18),
+            reader.topAnchor.constraint(equalTo: content.safeAreaLayoutGuide.topAnchor), reader.bottomAnchor.constraint(equalTo: content.bottomAnchor), reader.leadingAnchor.constraint(equalTo: content.safeAreaLayoutGuide.leadingAnchor), reader.trailingAnchor.constraint(equalTo: content.safeAreaLayoutGuide.trailingAnchor),
+            document.leadingAnchor.constraint(equalTo: reader.contentView.leadingAnchor), document.trailingAnchor.constraint(equalTo: reader.contentView.trailingAnchor), document.topAnchor.constraint(equalTo: reader.contentView.topAnchor),
+            detail.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 40), detail.trailingAnchor.constraint(equalTo: document.trailingAnchor, constant: -40), detail.topAnchor.constraint(equalTo: document.topAnchor, constant: 36), detail.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -40)
+        ])
+        window.center(); render()
     }
     func open(_ kind: String) { selected = kind; search.stringValue = ""; render(); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); reload() }
     func receive(_ kind: String, _ response: [String: Any]) { responses[kind] = response; if kind == selected { render() } }
@@ -555,44 +628,108 @@ final class ActivityPane: NSObject, NSTableViewDataSource, NSTableViewDelegate, 
         let labels = [t("研究概览", "Research"), t("轮次历史", "History"), t("已提交", "Submitted"), t("备选", "Standby")]
         for (index, label) in labels.enumerated() { segments.setLabel(label, forSegment: index) }
         segments.selectedSegment = kinds.firstIndex(of: selected) ?? 0
-        window.title = "WorldQuant · " + labels[segments.selectedSegment]
-        refresh.title = t("刷新", "Refresh"); search.placeholderString = t("搜索记录", "Search records")
+        listHeading.stringValue = labels[segments.selectedSegment]; window.title = "WorldQuant · " + listHeading.stringValue
+        search.placeholderString = t("搜索记录", "Search records")
         let previous = table.selectedRow >= 0 && table.selectedRow < entries.count ? entries[table.selectedRow]["title"] as? String : nil
         let all = responses[selected]?["entries"] as? [[String: Any]] ?? []
-        let query = search.stringValue
+        let query = search.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         entries = all.filter { row in
             query.isEmpty || ([row["title"] as? String ?? ""] + (row["lines"] as? [String] ?? []) + (row["detail"] as? [String] ?? [])).joined(separator: " ").localizedCaseInsensitiveContains(query)
         }
         table.reloadData()
         let index = entries.firstIndex { $0["title"] as? String == previous } ?? 0
-        if !entries.isEmpty { table.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false) } else { showDetail() }
+        if !entries.isEmpty { table.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false) }
+        showDetail()
         status.textColor = .secondaryLabelColor
-        status.stringValue = responses[selected] == nil ? t("正在读取本地记录…", "Loading local records…") : t("\(entries.count) 条记录 · 数据来自本地账本", "\(entries.count) records · from the local ledger")
+        status.stringValue = responses[selected] == nil ? t("正在读取本地记录…", "Loading local records…") : t("\(entries.count) 条记录 · 本地账本", "\(entries.count) records · Local ledger")
+        status.toolTip = status.stringValue
     }
     func numberOfRows(in tableView: NSTableView) -> Int { entries.count }
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        let record = entries[row]
-        let cell = NSTableCellView()
-        let title = NSTextField(wrappingLabelWithString: record["title"] as? String ?? "")
-        title.font = .systemFont(ofSize: 12, weight: .medium); title.maximumNumberOfLines = 2
-        title.translatesAutoresizingMaskIntoConstraints = false; cell.addSubview(title); cell.textField = title
-        NSLayoutConstraint.activate([title.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 12), title.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -12), title.centerYAnchor.constraint(equalTo: cell.centerYAnchor)])
-        if let badge = record["badge"] as? String { title.textColor = UI.badgeColor(badge) ?? .labelColor }
+        let record = entries[row]; let cell = NSTableCellView()
+        let title = NSTextField(labelWithString: record["title"] as? String ?? "")
+        title.font = .systemFont(ofSize: 12, weight: .semibold); title.lineBreakMode = .byTruncatingTail
+        title.toolTip = title.stringValue
+        let summary = NSTextField(labelWithString: (record["lines"] as? [String] ?? []).first ?? "")
+        summary.font = .systemFont(ofSize: 11); summary.textColor = .secondaryLabelColor; summary.lineBreakMode = .byTruncatingTail
+        let symbol = NSImageView(image: NSImage(systemSymbolName: selected == "research" ? "waveform.path" : selected == "history" ? "clock" : selected == "submissions" ? "checkmark.circle" : "bookmark", accessibilityDescription: nil) ?? NSImage())
+        symbol.contentTintColor = UI.badgeColor(record["badge"] as? String ?? "") ?? .secondaryLabelColor
+        for view in [symbol, title, summary] { view.translatesAutoresizingMaskIntoConstraints = false; cell.addSubview(view) }
+        cell.textField = title
+        NSLayoutConstraint.activate([
+            symbol.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 12), symbol.topAnchor.constraint(equalTo: cell.topAnchor, constant: 15), symbol.widthAnchor.constraint(equalToConstant: 16), symbol.heightAnchor.constraint(equalToConstant: 16),
+            title.leadingAnchor.constraint(equalTo: symbol.trailingAnchor, constant: 10), title.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -12), title.topAnchor.constraint(equalTo: cell.topAnchor, constant: 12),
+            summary.leadingAnchor.constraint(equalTo: title.leadingAnchor), summary.trailingAnchor.constraint(equalTo: title.trailingAnchor), summary.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 7)
+        ])
         return cell
     }
     func tableViewSelectionDidChange(_ notification: Notification) { showDetail() }
-    func showDetail() {
-        let row = table.selectedRow
-        guard row >= 0, row < entries.count else { detail.string = t("暂无匹配记录。", "No matching records."); return }
-        let entry = entries[row]
-        let title = entry["title"] as? String ?? ""
-        let lines = entry["detail"] as? [String] ?? entry["lines"] as? [String] ?? []
-        let style = NSMutableParagraphStyle(); style.lineSpacing = 5; style.paragraphSpacing = 10
-        let result = NSMutableAttributedString(string: title + "\n\n", attributes: [.font: NSFont.systemFont(ofSize: 21, weight: .semibold), .foregroundColor: NSColor.labelColor])
-        result.append(NSAttributedString(string: lines.joined(separator: "\n"), attributes: [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.labelColor, .paragraphStyle: style]))
-        detail.textStorage?.setAttributedString(result); detail.scrollRangeToVisible(NSRange(location: 0, length: 0))
+    func addText(_ string: String, size: CGFloat, weight: NSFont.Weight = .regular, color: NSColor = .labelColor, gap: CGFloat = 12) {
+        let label = WrapLabel(wrappingLabelWithString: string); label.font = .systemFont(ofSize: size, weight: weight)
+        label.textColor = color; label.isSelectable = true
+        detail.addArrangedSubview(label); label.widthAnchor.constraint(equalTo: detail.widthAnchor).isActive = true
+        detail.setCustomSpacing(gap, after: label)
     }
-    func error(_ message: String) { status.stringValue = message; status.textColor = .systemRed }
+    func showDetail() {
+        for view in detail.arrangedSubviews { detail.removeArrangedSubview(view); view.removeFromSuperview() }
+        let row = table.selectedRow
+        guard row >= 0, row < entries.count else {
+            addText(responses[selected] == nil ? t("正在读取", "Loading") : t("暂无记录", "No records"), size: 28, weight: .bold, gap: 14)
+            addText(search.stringValue.isEmpty ? t("研究记录会在这里呈现。", "Research records will appear here.") : t("试试其他关键词，或清除搜索。", "Try another keyword or clear your search."), size: 14, color: .secondaryLabelColor)
+            return
+        }
+        let entry = entries[row]
+        let badge = entry["badge"] as? String ?? ""
+        let badgeNames = ["submitted": t("已提交", "Submitted"), "standby": t("备选", "Standby"), "failed": t("失败", "Failed"), "progress": t("进行中", "In progress")]
+        addText(badgeNames[badge] ?? listHeading.stringValue, size: 11, weight: .semibold, color: UI.badgeColor(badge) ?? .secondaryLabelColor, gap: 12)
+        let title = entry["title"] as? String ?? ""
+        let titleParts = title.components(separatedBy: " · ")
+        addText(titleParts.first ?? title, size: 27, weight: .bold, gap: titleParts.count > 1 ? 10 : 26)
+        if titleParts.count > 1 { addText(titleParts.dropFirst().joined(separator: " · "), size: 13, color: .secondaryLabelColor, gap: 26) }
+        let line = NSBox(); line.boxType = .separator; detail.addArrangedSubview(line); line.widthAnchor.constraint(equalTo: detail.widthAnchor).isActive = true
+        detail.setCustomSpacing(24, after: line)
+        let lines = entry["detail"] as? [String] ?? entry["lines"] as? [String] ?? []
+        for text in lines where !text.isEmpty {
+            // A short label before a colon is metadata; preserve values and all other prose verbatim.
+            if let colon = text.firstIndex(where: { $0 == "：" || $0 == ":" }), text.distance(from: text.startIndex, to: colon) <= 14, !text.hasPrefix("http") {
+                let key = String(text[..<colon]); let value = String(text[text.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
+                if !value.isEmpty {
+                    let names = ["region": t("市场", "Region"), "universe": t("股票池", "Universe"), "instrumentType": t("资产类型", "Instrument type"), "delay": t("延迟", "Delay"), "decay": t("衰减", "Decay"), "neutralization": t("中性化", "Neutralization"), "truncation": t("截断", "Truncation")]
+                    if key == "指标" || key.lowercased() == "metrics" {
+                        let metrics = value.components(separatedBy: " · ")
+                        if metrics.count >= 3 && metrics.allSatisfy({ $0.split(separator: " ").count == 2 }) {
+                            for start in stride(from: 0, to: metrics.count, by: 3) {
+                                let gridRow = NSStackView(); gridRow.orientation = .horizontal; gridRow.distribution = .fillEqually; gridRow.spacing = 20
+                                for metric in metrics[start..<min(start + 3, metrics.count)] {
+                                    let pair = metric.split(separator: " ", maxSplits: 1).map(String.init)
+                                    let label = NSTextField(labelWithString: pair[0].capitalized); label.font = .systemFont(ofSize: 11); label.textColor = .secondaryLabelColor
+                                    let number = NSTextField(labelWithString: pair[1]); number.font = .monospacedDigitSystemFont(ofSize: 21, weight: .medium); number.isSelectable = true
+                                    let group = NSStackView(views: [label, number]); group.orientation = .vertical; group.alignment = .leading; group.spacing = 6
+                                    gridRow.addArrangedSubview(group)
+                                }
+                                detail.addArrangedSubview(gridRow); gridRow.widthAnchor.constraint(equalTo: detail.widthAnchor).isActive = true
+                                detail.setCustomSpacing(22, after: gridRow)
+                            }
+                            continue
+                        }
+                    }
+                    let name = WrapLabel(wrappingLabelWithString: names[key] ?? key)
+                    name.font = .systemFont(ofSize: 12); name.textColor = .secondaryLabelColor
+                    let valueLabel = WrapLabel(wrappingLabelWithString: value)
+                    valueLabel.font = .systemFont(ofSize: 14); valueLabel.isSelectable = true
+                    let row = NSStackView(views: [name, valueLabel]); row.orientation = .horizontal; row.alignment = .firstBaseline; row.distribution = .fill; row.spacing = 20
+                    name.widthAnchor.constraint(equalToConstant: 100).isActive = true
+                    valueLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+                    detail.addArrangedSubview(row); row.widthAnchor.constraint(equalTo: detail.widthAnchor).isActive = true
+                    detail.setCustomSpacing(18, after: row)
+                    continue
+                }
+            }
+            addText(text, size: 14, gap: 18)
+        }
+        reader.contentView.scroll(to: .zero); reader.reflectScrolledClipView(reader.contentView)
+    }
+    func error(_ message: String) { status.stringValue = message; status.toolTip = message; status.textColor = .systemRed }
     @objc func selectKind() { selected = kinds[segments.selectedSegment]; search.stringValue = ""; render(); reload() }
     @objc func reload() { status.stringValue = t("正在更新…", "Updating…"); owner?.perform(selected) }
     func controlTextDidChange(_ notification: Notification) { render() }

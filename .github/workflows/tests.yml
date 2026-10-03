@@ -15,6 +15,9 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: PYTHONPATH=src python -m unittest discover -s tests
+      - name: Type-check native macOS interface
+        if: runner.os == 'macOS' && matrix.python == '3.12'
+        run: xcrun swiftc -typecheck macos/WorldQuantMenu.swift
       - run: python -m pip wheel --no-deps --wheel-dir /tmp/wheels .
   linux-container:
     runs-on: ubuntu-latest
