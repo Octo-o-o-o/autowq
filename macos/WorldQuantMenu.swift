@@ -1,4 +1,5 @@
 import AppKit
+import CoreFoundation
 import Darwin
 import UserNotifications
 
@@ -7,7 +8,7 @@ import UserNotifications
 /// 长文本一律折行（preferredMaxLayoutWidth），不截断。
 enum UI {
     // 菜单
-    static let menuWidth: CGFloat = 600      // 菜单统一宽度
+    static let menuWidth: CGFloat = 380      // 菜单统一宽度
     static let menuPadX: CGFloat = 16        // 菜单行水平内边距
     static let menuRowPadY: CGFloat = 6      // 状态行垂直内边距
     static let menuBlockPadY: CGFloat = 10   // 卡片式菜单行垂直内边距
@@ -162,6 +163,430 @@ final class CustomProviderForm: NSObject {
     }
 }
 
+/// A native form backed by the same setting descriptors as the execution gates.
+/// Drafts survive category changes and refreshes; a save submits one validated batch.
+final class SettingEditorRow: NSView, NSTextFieldDelegate {
+    let entry: [String: Any]
+    let field = NSTextField(string: "")
+    let choice = NSPopUpButton()
+    let toggle = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    let date = NSDatePicker()
+    let nullable = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    weak var pane: SettingsPane?
+    let kind: String
+    var key: String { entry["key"] as? String ?? "" }
+    var input: String {
+        if kind == "boolean" { return toggle.state == .on ? "true" : "false" }
+        if kind == "choice" { return choice.selectedItem?.representedObject as? String ?? "" }
+        if kind == "deadline" { return ISO8601DateFormatter().string(from: date.dateValue) }
+        if entry["nullable"] as? Bool == true && nullable.state == .on { return "none" }
+        return field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    init(entry: [String: Any], value: String, pane: SettingsPane) {
+        self.entry = entry; self.pane = pane; kind = entry["type"] as? String ?? "integer"
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        let title = WrapLabel(wrappingLabelWithString: entry["label"] as? String ?? "")
+        title.font = .systemFont(ofSize: 13, weight: .medium)
+        let note = WrapLabel(wrappingLabelWithString: pane.explanation(entry))
+        note.font = .systemFont(ofSize: 11); note.textColor = .secondaryLabelColor
+        let labels = NSStackView(views: [title, note]); labels.orientation = .vertical; labels.alignment = .leading; labels.spacing = 5
+        let controls = NSStackView(); controls.orientation = .vertical; controls.alignment = .trailing; controls.spacing = 6
+        switch kind {
+        case "boolean":
+            toggle.title = pane.t("开启", "Enabled"); toggle.state = value == "true" ? .on : .off
+            toggle.target = self; toggle.action = #selector(changed); controls.addArrangedSubview(toggle)
+        case "choice":
+            for option in entry["choices"] as? [[String: String]] ?? [] {
+                choice.addItem(withTitle: option["label"] ?? "")
+                choice.lastItem?.representedObject = option["value"]
+                if option["value"] == value { choice.select(choice.lastItem) }
+            }
+            choice.target = self; choice.action = #selector(changed); controls.addArrangedSubview(choice)
+        case "deadline":
+            date.datePickerStyle = .textFieldAndStepper; date.datePickerElements = [.yearMonthDay, .hourMinuteSecond]
+            date.timeZone = .current
+            date.dateValue = ISO8601DateFormatter().date(from: value) ?? Date()
+            date.target = self; date.action = #selector(changed); controls.addArrangedSubview(date)
+            let zone = NSTextField(labelWithString: TimeZone.current.identifier); zone.font = .systemFont(ofSize: 10); zone.textColor = .secondaryLabelColor
+            controls.addArrangedSubview(zone)
+        default:
+            field.stringValue = value == "none" ? "" : value
+            field.alignment = .right; field.font = .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
+            field.placeholderString = pane.t("输入数值", "Enter value")
+            field.delegate = self; field.widthAnchor.constraint(equalToConstant: 136).isActive = true
+            controls.addArrangedSubview(field)
+            if entry["nullable"] as? Bool == true {
+                nullable.title = entry["empty_label"] as? String ?? pane.t("不限", "No cap")
+                nullable.state = value == "none" ? .on : .off; field.isEnabled = nullable.state == .off
+                nullable.target = self; nullable.action = #selector(changed); controls.addArrangedSubview(nullable)
+            }
+        }
+        let row = NSStackView(views: [labels, controls]); row.orientation = .horizontal; row.alignment = .top; row.spacing = 24
+        row.translatesAutoresizingMaskIntoConstraints = false; addSubview(row)
+        labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        labels.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        controls.setContentHuggingPriority(.required, for: .horizontal)
+        controls.widthAnchor.constraint(greaterThanOrEqualToConstant: 160).isActive = true
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: leadingAnchor), row.trailingAnchor.constraint(equalTo: trailingAnchor),
+            row.topAnchor.constraint(equalTo: topAnchor, constant: 12), row.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12),
+            labels.widthAnchor.constraint(greaterThanOrEqualToConstant: 220),
+        ])
+        for control in [field, choice, toggle, date, nullable] as [NSControl] {
+            control.setAccessibilityLabel(entry["label"] as? String ?? key)
+            control.identifier = NSUserInterfaceItemIdentifier(key)
+        }
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    @objc func changed() { field.isEnabled = nullable.state == .off; pane?.changed(self) }
+    func controlTextDidChange(_ notification: Notification) { pane?.changed(self) }
+}
+
+final class SettingsPane: NSObject, NSWindowDelegate, NSSearchFieldDelegate {
+    weak var owner: AppDelegate?
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 960, height: 700), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+    let sidebar = NSStackView()
+    let search = NSSearchField()
+    let heading = NSTextField(labelWithString: "")
+    let subtitle = WrapLabel(wrappingLabelWithString: "")
+    let body = NSStackView()
+    let notice = WrapLabel(wrappingLabelWithString: "")
+    let save = NSButton(title: "", target: nil, action: nil)
+    let revert = NSButton(title: "", target: nil, action: nil)
+    let cancelPending = NSButton(title: "", target: nil, action: nil)
+    let advanced = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    var snapshot: [String: Any] = [:]
+    var drafts: [String: String] = [:]
+    var originals: [String: String] = [:]
+    var editors: [SettingEditorRow] = []
+    var section = "general"
+    var busy = false
+    var lang: String { owner?.lang ?? "zh" }
+    func t(_ zh: String, _ en: String) -> String { lang == "zh" ? zh : en }
+    var groups: [(String, String, String)] { [
+        ("general", t("通用", "General"), "gearshape"),
+        ("research", t("研究与额度", "Research & limits"), "chart.xyaxis.line"),
+        ("scheduling", t("运行与泳道", "Scheduling & lanes"), "square.stack.3d.up"),
+        ("models", t("模型与路由", "Models & routing"), "point.3.connected.trianglepath.dotted"),
+        ("simulation", t("模拟与提交", "Simulation & submission"), "arrow.up.doc"),
+        ("providers", t("调用与花费", "Calls & spending"), "gauge"),
+        ("authorization", t("授权期限", "Authorization"), "calendar.badge.clock"),
+        ("support", t("帮助与诊断", "Help & diagnostics"), "questionmark.circle")
+    ] }
+    init(owner: AppDelegate) {
+        self.owner = owner; super.init()
+        window.delegate = self; window.isReleasedWhenClosed = false
+        window.minSize = NSSize(width: 880, height: 580); window.setFrameAutosaveName("WorldQuantSettings")
+        window.title = "WorldQuant"; window.titleVisibility = .hidden; window.titlebarAppearsTransparent = true
+        guard let content = window.contentView else { return }
+        let side = NSVisualEffectView(); side.material = .sidebar; side.blendingMode = .behindWindow; side.state = .followsWindowActiveState
+        side.translatesAutoresizingMaskIntoConstraints = false; content.addSubview(side)
+        sidebar.orientation = .vertical; sidebar.alignment = .leading; sidebar.spacing = 5; sidebar.translatesAutoresizingMaskIntoConstraints = false; side.addSubview(sidebar)
+        search.placeholderString = t("搜索设置", "Search settings"); search.delegate = self; search.sendsSearchStringImmediately = true
+        search.translatesAutoresizingMaskIntoConstraints = false; content.addSubview(search)
+        heading.font = .systemFont(ofSize: 22, weight: .semibold)
+        subtitle.font = .systemFont(ofSize: 12); subtitle.textColor = .secondaryLabelColor
+        let title = NSStackView(views: [heading, subtitle]); title.orientation = .vertical; title.alignment = .leading; title.spacing = 6
+        title.translatesAutoresizingMaskIntoConstraints = false; content.addSubview(title)
+        advanced.target = self; advanced.action = #selector(toggleAdvanced); advanced.translatesAutoresizingMaskIntoConstraints = false; content.addSubview(advanced)
+        let scroll = NSScrollView(); scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.drawsBackground = false; scroll.translatesAutoresizingMaskIntoConstraints = false; content.addSubview(scroll)
+        let document = FlippedView(); document.translatesAutoresizingMaskIntoConstraints = false; scroll.documentView = document
+        body.orientation = .vertical; body.alignment = .leading; body.spacing = 0; body.translatesAutoresizingMaskIntoConstraints = false; document.addSubview(body)
+        let footer = NSView(); footer.translatesAutoresizingMaskIntoConstraints = false; content.addSubview(footer)
+        let line = NSBox(); line.boxType = .separator; line.translatesAutoresizingMaskIntoConstraints = false; footer.addSubview(line)
+        notice.font = .systemFont(ofSize: 11); notice.textColor = .secondaryLabelColor; notice.translatesAutoresizingMaskIntoConstraints = false; footer.addSubview(notice)
+        save.bezelStyle = .rounded; save.target = self; save.action = #selector(saveChanges); save.keyEquivalent = "s"; save.keyEquivalentModifierMask = [.command]
+        revert.bezelStyle = .rounded; revert.target = self; revert.action = #selector(revertChanges)
+        cancelPending.bezelStyle = .rounded; cancelPending.target = self; cancelPending.action = #selector(cancelSaved)
+        let buttons = NSStackView(views: [cancelPending, revert, save]); buttons.spacing = 8; buttons.translatesAutoresizingMaskIntoConstraints = false; footer.addSubview(buttons)
+        NSLayoutConstraint.activate([
+            side.leadingAnchor.constraint(equalTo: content.leadingAnchor), side.topAnchor.constraint(equalTo: content.topAnchor), side.bottomAnchor.constraint(equalTo: content.bottomAnchor), side.widthAnchor.constraint(equalToConstant: 188),
+            sidebar.leadingAnchor.constraint(equalTo: side.leadingAnchor, constant: 12), sidebar.trailingAnchor.constraint(equalTo: side.trailingAnchor, constant: -12), sidebar.topAnchor.constraint(equalTo: side.topAnchor, constant: 22),
+            search.leadingAnchor.constraint(equalTo: side.trailingAnchor, constant: 28), search.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -28), search.topAnchor.constraint(equalTo: content.topAnchor, constant: 18),
+            title.topAnchor.constraint(equalTo: search.bottomAnchor, constant: 24), title.leadingAnchor.constraint(equalTo: search.leadingAnchor), title.trailingAnchor.constraint(equalTo: search.trailingAnchor),
+            advanced.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 14), advanced.leadingAnchor.constraint(equalTo: title.leadingAnchor),
+            scroll.topAnchor.constraint(equalTo: advanced.bottomAnchor, constant: 10), scroll.leadingAnchor.constraint(equalTo: title.leadingAnchor), scroll.trailingAnchor.constraint(equalTo: title.trailingAnchor), scroll.bottomAnchor.constraint(equalTo: footer.topAnchor),
+            document.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor), document.trailingAnchor.constraint(equalTo: scroll.contentView.trailingAnchor), document.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
+            body.leadingAnchor.constraint(equalTo: document.leadingAnchor), body.trailingAnchor.constraint(equalTo: document.trailingAnchor), body.topAnchor.constraint(equalTo: document.topAnchor), body.bottomAnchor.constraint(equalTo: document.bottomAnchor),
+            footer.leadingAnchor.constraint(equalTo: side.trailingAnchor), footer.trailingAnchor.constraint(equalTo: content.trailingAnchor), footer.bottomAnchor.constraint(equalTo: content.bottomAnchor), footer.heightAnchor.constraint(equalToConstant: 100),
+            line.topAnchor.constraint(equalTo: footer.topAnchor), line.leadingAnchor.constraint(equalTo: footer.leadingAnchor), line.trailingAnchor.constraint(equalTo: footer.trailingAnchor),
+            notice.leadingAnchor.constraint(equalTo: footer.leadingAnchor, constant: 28), notice.trailingAnchor.constraint(equalTo: footer.trailingAnchor, constant: -28), notice.topAnchor.constraint(equalTo: footer.topAnchor, constant: 10),
+            buttons.trailingAnchor.constraint(equalTo: footer.trailingAnchor, constant: -24), buttons.bottomAnchor.constraint(equalTo: footer.bottomAnchor, constant: -16),
+        ])
+        window.center(); render()
+    }
+    func raw(_ value: Any?) -> String {
+        guard let value, !(value is NSNull) else { return "none" }
+        if let number = value as? NSNumber {
+            if CFGetTypeID(number) == CFBooleanGetTypeID() { return number.boolValue ? "true" : "false" }
+            return number.stringValue
+        }
+        return String(describing: value)
+    }
+    func shown(_ value: Any?) -> String {
+        guard let value, !(value is NSNull) else { return t("未设置", "Not set") }
+        if let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() {
+            let formatter = NumberFormatter(); formatter.maximumFractionDigits = 4
+            return formatter.string(from: number) ?? number.stringValue
+        }
+        return raw(value)
+    }
+    func explanation(_ entry: [String: Any]) -> String {
+        var pieces: [String] = []
+        if let used = entry["used"], !(used is NSNull) { pieces.append(t("已用 ", "Used ") + shown(used)) }
+        if entry["has_pending"] as? Bool == true { pieces.append(t("当前 ", "Current ") + shown(entry["value"]) + t("；待应用 ", "; pending ") + shown(entry["pending"])) }
+        if entry["active"] as? Bool == false { pieces.append(t("当前模式不使用此项", "Inactive in the current mode")) }
+        if let min = entry["min"], let max = entry["max"] { pieces.append(shown(min) + "–" + shown(max)) }
+        if let rule = entry["application"] as? String { pieces.append(rule) }
+        if let note = entry["note"] as? String, !note.isEmpty { pieces.append(note) }
+        return pieces.joined(separator: " · ")
+    }
+    func receive(_ response: [String: Any]) {
+        snapshot = response
+        let entries = (response["operating"] as? [String: Any])?["entries"] as? [[String: Any]] ?? []
+        for entry in entries {
+            let key = entry["key"] as? String ?? ""
+            if drafts[key] == nil { originals[key] = raw(entry[entry["has_pending"] as? Bool == true ? "pending" : "value"]) }
+        }
+        render()
+    }
+    func open() { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
+    func add(_ view: NSView) {
+        body.addArrangedSubview(view); view.widthAnchor.constraint(equalTo: body.widthAnchor).isActive = true
+    }
+    func text(_ value: String, title: Bool = false) {
+        let label = WrapLabel(wrappingLabelWithString: value); label.font = .systemFont(ofSize: title ? 14 : 12, weight: title ? .semibold : .regular)
+        label.textColor = title ? .labelColor : .secondaryLabelColor
+        let spacer = NSStackView(views: [label]); spacer.edgeInsets = NSEdgeInsets(top: 12, left: 0, bottom: 12, right: 0); add(spacer)
+    }
+    func command(_ label: String, code: String) {
+        let button = NSButton(title: label, target: self, action: #selector(commandClicked(_:)))
+        button.bezelStyle = .rounded; button.identifier = NSUserInterfaceItemIdentifier(code)
+        let row = NSStackView(views: [button]); row.edgeInsets = NSEdgeInsets(top: 6, left: 0, bottom: 6, right: 0); add(row)
+    }
+    func menuControl(_ label: String, menu: NSMenu) {
+        let name = NSTextField(labelWithString: label); name.font = .systemFont(ofSize: 13)
+        let button = NSPopUpButton(frame: .zero, pullsDown: true)
+        let copy = menu.copy() as! NSMenu
+        copy.insertItem(withTitle: t("选择…", "Choose…"), action: nil, keyEquivalent: "", at: 0)
+        button.menu = copy; button.widthAnchor.constraint(equalToConstant: 270).isActive = true
+        let row = NSStackView(views: [name, button]); row.distribution = .equalSpacing
+        row.edgeInsets = NSEdgeInsets(top: 8, left: 0, bottom: 8, right: 0); add(row)
+    }
+    func render() {
+        for stack in [sidebar, body] { for view in stack.arrangedSubviews { stack.removeArrangedSubview(view); view.removeFromSuperview() } }
+        editors = []
+        let brand = NSTextField(labelWithString: "WorldQuant"); brand.font = .systemFont(ofSize: 16, weight: .semibold)
+        sidebar.addArrangedSubview(brand)
+        let caption = NSTextField(labelWithString: t("设置", "Settings")); caption.font = .systemFont(ofSize: 12); caption.textColor = .secondaryLabelColor; sidebar.addArrangedSubview(caption)
+        sidebar.setCustomSpacing(22, after: caption)
+        for (key, title, icon) in groups {
+            let button = NSButton(title: title, target: self, action: #selector(selectSection(_:)))
+            button.bezelStyle = .recessed; button.setButtonType(.pushOnPushOff); button.state = section == key ? .on : .off
+            button.alignment = .left; button.image = NSImage(systemSymbolName: icon, accessibilityDescription: nil); button.imagePosition = .imageLeading
+            button.identifier = NSUserInterfaceItemIdentifier(key); button.font = .systemFont(ofSize: 13)
+            sidebar.addArrangedSubview(button); button.widthAnchor.constraint(equalTo: sidebar.widthAnchor).isActive = true; button.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        }
+        let query = search.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        heading.stringValue = query.isEmpty ? (groups.first { $0.0 == section }?.1 ?? "") : t("搜索结果", "Search results")
+        subtitle.stringValue = t("保存前可修改多项；累计用量和授权边界始终保留。", "Edit multiple values before saving. Usage counters and authorization boundaries are preserved.")
+        search.placeholderString = t("搜索设置", "Search settings")
+        advanced.title = t("显示高级参数", "Show advanced settings")
+        advanced.isHidden = !query.isEmpty || ["models", "general", "authorization", "support"].contains(section)
+        let data = snapshot["operating"] as? [String: Any] ?? [:]
+        let entries = data["entries"] as? [[String: Any]] ?? []
+        let filtered = entries.filter { entry in
+            if !query.isEmpty { return [entry["label"], entry["key"], entry["note"]].compactMap { $0 as? String }.joined(separator: " ").localizedCaseInsensitiveContains(query) }
+            return entry["group_id"] as? String == section && (entry["advanced"] as? Bool != true || advanced.state == .on)
+        }
+        if snapshot.isEmpty { text(t("正在读取设置…", "Loading settings…")) }
+        else if filtered.isEmpty && !["models", "support"].contains(section) { text(t("没有匹配的设置。尝试其他关键词或展开高级参数。", "No matching settings. Try another term or show advanced settings.")) }
+        for entry in filtered {
+            let key = entry["key"] as? String ?? ""
+            let row = SettingEditorRow(entry: entry, value: drafts[key] ?? originals[key] ?? raw(entry["value"]), pane: self)
+            editors.append(row); add(row)
+            let line = NSBox(); line.boxType = .separator; add(line)
+        }
+        if query.isEmpty, let owner {
+            if section == "general" {
+                text(t("账户", "Account"), title: true)
+                command(t("刷新账号信息", "Refresh account"), code: "identity-refresh=manual")
+                command(t("登录或重新登录 BRAIN…", "Sign in to BRAIN…"), code: "brain-login")
+            }
+            if section == "models" {
+                text(t("固定泳道优先于默认模型。路由切换只影响新任务；已开始的工作保留原选择。", "Pinned lanes take priority over defaults. Route changes affect new work; active work retains its selection."))
+                menuControl(t("默认研究与审查", "Default research & review"), menu: owner.modelMenu)
+                menuControl(t("路由预设", "Routing preset"), menu: owner.presetMenu)
+                menuControl(t("渠道开关", "Provider availability"), menu: owner.providerMenu)
+                command(t("添加自定义模型…", "Add custom model…"), code: "add-model")
+                text(t("额度、超时与重试位于“调用与花费”。", "Budgets, timeouts and retries are under Calls & spending."))
+            }
+            if section == "scheduling" { menuControl(t("泳道模型分配", "Models per lane"), menu: owner.laneMenu) }
+            if section == "support" {
+                text("WorldQuant " + (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""), title: true)
+                text(t("工作区：", "Workspace: ") + owner.root)
+                command(t("设置后台运行…", "Set up background running…"), code: "activate")
+                command(t("打开运行日志", "Open run log"), code: "logs")
+                command(t("检查更新", "Check for updates"), code: "update")
+                command(t("检查 BRAIN 会话", "Check BRAIN session"), code: "brain-check")
+                command(t("刷新设置", "Refresh settings"), code: "settings")
+                text(t("关闭托盘不等于停止研究。停止研究会等待现有泳道完成；退出时可以选择是否继续后台运行。", "Closing the tray does not stop research. Stop waits for active lanes to finish; quitting lets you choose whether background work continues."))
+            }
+        }
+        updateFooter()
+    }
+    func changed(_ row: SettingEditorRow) {
+        guard !busy else { return }
+        if row.input == originals[row.key] { drafts.removeValue(forKey: row.key) } else { drafts[row.key] = row.input }
+        updateFooter()
+    }
+    func updateFooter() {
+        save.title = t("保存更改", "Save changes"); revert.title = t("撤销编辑", "Revert edits")
+        cancelPending.title = t("取消待应用修改", "Cancel pending changes")
+        let operating = snapshot["operating"] as? [String: Any] ?? [:]
+        cancelPending.isHidden = operating["pending"] as? Bool != true
+        cancelPending.isEnabled = !busy && drafts.isEmpty
+        save.isEnabled = !busy && !drafts.isEmpty; revert.isEnabled = !busy && !drafts.isEmpty
+        if busy { notice.stringValue = t("正在保存…", "Saving…") }
+        else if !drafts.isEmpty { notice.stringValue = t("\(drafts.count) 项尚未保存", "\(drafts.count) unsaved changes") }
+        else if operating["pending"] as? Bool == true { notice.stringValue = t("修改已保存，等待现有任务结束后应用。", "Changes saved. Waiting for existing work to finish.") }
+        else if let last = operating["last"] as? [String: Any], last["state"] as? String == "failed" { notice.stringValue = last["error"] as? String ?? "" }
+        else { notice.stringValue = t("设置已同步", "Settings are up to date") }
+        notice.textColor = .secondaryLabelColor
+        for row in editors {
+            row.field.isEnabled = !busy && row.nullable.state == .off
+            for control in [row.choice, row.toggle, row.date, row.nullable] as [NSControl] { control.isEnabled = !busy }
+        }
+    }
+    func result(_ message: String, success: Bool) {
+        busy = false
+        if success { drafts.removeAll(); originals.removeAll() }
+        updateFooter(); notice.stringValue = message; notice.textColor = success ? .secondaryLabelColor : .systemRed
+    }
+    @objc func selectSection(_ sender: NSButton) { section = sender.identifier?.rawValue ?? "general"; search.stringValue = ""; render() }
+    @objc func toggleAdvanced() { render() }
+    func controlTextDidChange(_ notification: Notification) { render() }
+    @objc func revertChanges() { drafts.removeAll(); originals.removeAll(); receive(snapshot) }
+    @objc func cancelSaved() { owner?.perform("operating-cancel") }
+    @objc func saveChanges() {
+        guard owner?.actionBusy != true else { notice.stringValue = t("请等待当前操作完成。", "Wait for the current action to finish."); return }
+        guard !busy, !drafts.isEmpty, let data = try? JSONSerialization.data(withJSONObject: ["values": drafts, "revision": (snapshot["operating"] as? [String: Any])?["revision"] as? String ?? ""]), let value = String(data: data, encoding: .utf8) else { return }
+        busy = true; updateFooter(); owner?.perform("settings-save", value)
+    }
+    @objc func commandClicked(_ sender: NSButton) {
+        if !drafts.isEmpty { notice.stringValue = t("请先保存或撤销当前编辑。", "Save or revert your edits first."); return }
+        let code = sender.identifier?.rawValue ?? ""
+        if code == "add-model" { owner?.addCustomProvider(); return }
+        if code == "logs" { owner?.logs(); return }
+        if code == "activate" { owner?.activate(); return }
+        let parts = code.split(separator: "=", maxSplits: 1).map(String.init)
+        owner?.perform(parts[0], parts.count > 1 ? parts[1] : nil)
+    }
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        if drafts.isEmpty { return true }
+        let alert = NSAlert(); alert.messageText = t("保留尚未保存的更改？", "Keep your unsaved changes?")
+        alert.informativeText = t("关闭窗口会保留编辑，下次打开可继续。", "Closing keeps your edits so you can continue next time.")
+        alert.addButton(withTitle: t("关闭并保留", "Close and keep")); alert.addButton(withTitle: t("继续编辑", "Keep editing"))
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+}
+
+/// Research, history and results share one searchable, keyboard-accessible reader.
+final class ActivityPane: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
+    weak var owner: AppDelegate?
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 700), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+    let segments = NSSegmentedControl()
+    let search = NSSearchField()
+    let table = NSTableView()
+    let detail = NSTextView()
+    let status = NSTextField(labelWithString: "")
+    let refresh = NSButton(title: "", target: nil, action: nil)
+    var selected = "research"
+    let kinds = ["research", "history", "submissions", "standby"]
+    var responses: [String: [String: Any]] = [:]
+    var entries: [[String: Any]] = []
+    func t(_ zh: String, _ en: String) -> String { owner?.lang == "en" ? en : zh }
+    init(owner: AppDelegate) {
+        self.owner = owner; super.init()
+        window.isReleasedWhenClosed = false; window.minSize = NSSize(width: 840, height: 560)
+        window.setFrameAutosaveName("WorldQuantActivity"); window.title = "WorldQuant"; window.titlebarAppearsTransparent = true
+        guard let content = window.contentView else { return }
+        segments.segmentCount = 4; segments.trackingMode = .selectOne; segments.selectedSegment = 0
+        segments.target = self; segments.action = #selector(selectKind)
+        search.delegate = self; search.sendsSearchStringImmediately = true
+        refresh.target = self; refresh.action = #selector(reload); refresh.bezelStyle = .rounded
+        let toolbar = NSStackView(views: [segments, search, refresh]); toolbar.spacing = 16; toolbar.translatesAutoresizingMaskIntoConstraints = false; content.addSubview(toolbar)
+        search.widthAnchor.constraint(greaterThanOrEqualToConstant: 180).isActive = true
+        let split = NSSplitView(); split.isVertical = true; split.dividerStyle = .thin; split.translatesAutoresizingMaskIntoConstraints = false; content.addSubview(split)
+        let list = NSScrollView(); list.hasVerticalScroller = true; list.autohidesScrollers = true
+        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("record")); column.resizingMask = .autoresizingMask
+        table.addTableColumn(column); table.headerView = nil; table.rowHeight = 58; table.usesAlternatingRowBackgroundColors = false
+        table.style = .sourceList; table.delegate = self; table.dataSource = self; table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
+        table.setAccessibilityLabel(t("记录列表", "Records")); list.documentView = table
+        let reader = NSScrollView(); reader.hasVerticalScroller = true; reader.autohidesScrollers = true
+        detail.isEditable = false; detail.isSelectable = true; detail.isRichText = true; detail.drawsBackground = false
+        detail.textContainerInset = NSSize(width: 28, height: 24); detail.autoresizingMask = [.width]; detail.isVerticallyResizable = true; detail.isHorizontallyResizable = false
+        detail.textContainer?.widthTracksTextView = true; detail.textContainer?.containerSize = NSSize(width: 640, height: CGFloat.greatestFiniteMagnitude)
+        reader.documentView = detail; split.addArrangedSubview(list); split.addArrangedSubview(reader)
+        status.font = .systemFont(ofSize: 11); status.textColor = .secondaryLabelColor; status.translatesAutoresizingMaskIntoConstraints = false; content.addSubview(status)
+        NSLayoutConstraint.activate([
+            toolbar.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20), toolbar.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20), toolbar.topAnchor.constraint(equalTo: content.topAnchor, constant: 16),
+            split.topAnchor.constraint(equalTo: toolbar.bottomAnchor, constant: 16), split.leadingAnchor.constraint(equalTo: content.leadingAnchor), split.trailingAnchor.constraint(equalTo: content.trailingAnchor), split.bottomAnchor.constraint(equalTo: status.topAnchor, constant: -10),
+            status.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20), status.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20), status.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -12),
+            list.widthAnchor.constraint(greaterThanOrEqualToConstant: 240), reader.widthAnchor.constraint(greaterThanOrEqualToConstant: 480),
+        ])
+        split.setPosition(300, ofDividerAt: 0); window.center(); render()
+    }
+    func open(_ kind: String) { selected = kind; search.stringValue = ""; render(); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); reload() }
+    func receive(_ kind: String, _ response: [String: Any]) { responses[kind] = response; if kind == selected { render() } }
+    func render() {
+        let labels = [t("研究概览", "Research"), t("轮次历史", "History"), t("已提交", "Submitted"), t("备选", "Standby")]
+        for (index, label) in labels.enumerated() { segments.setLabel(label, forSegment: index) }
+        segments.selectedSegment = kinds.firstIndex(of: selected) ?? 0
+        window.title = "WorldQuant · " + labels[segments.selectedSegment]
+        refresh.title = t("刷新", "Refresh"); search.placeholderString = t("搜索记录", "Search records")
+        let previous = table.selectedRow >= 0 && table.selectedRow < entries.count ? entries[table.selectedRow]["title"] as? String : nil
+        let all = responses[selected]?["entries"] as? [[String: Any]] ?? []
+        let query = search.stringValue
+        entries = all.filter { row in
+            query.isEmpty || ([row["title"] as? String ?? ""] + (row["lines"] as? [String] ?? []) + (row["detail"] as? [String] ?? [])).joined(separator: " ").localizedCaseInsensitiveContains(query)
+        }
+        table.reloadData()
+        let index = entries.firstIndex { $0["title"] as? String == previous } ?? 0
+        if !entries.isEmpty { table.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false) } else { showDetail() }
+        status.textColor = .secondaryLabelColor
+        status.stringValue = responses[selected] == nil ? t("正在读取本地记录…", "Loading local records…") : t("\(entries.count) 条记录 · 数据来自本地账本", "\(entries.count) records · from the local ledger")
+    }
+    func numberOfRows(in tableView: NSTableView) -> Int { entries.count }
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        let record = entries[row]
+        let cell = NSTableCellView()
+        let title = NSTextField(wrappingLabelWithString: record["title"] as? String ?? "")
+        title.font = .systemFont(ofSize: 12, weight: .medium); title.maximumNumberOfLines = 2
+        title.translatesAutoresizingMaskIntoConstraints = false; cell.addSubview(title); cell.textField = title
+        NSLayoutConstraint.activate([title.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 12), title.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -12), title.centerYAnchor.constraint(equalTo: cell.centerYAnchor)])
+        if let badge = record["badge"] as? String { title.textColor = UI.badgeColor(badge) ?? .labelColor }
+        return cell
+    }
+    func tableViewSelectionDidChange(_ notification: Notification) { showDetail() }
+    func showDetail() {
+        let row = table.selectedRow
+        guard row >= 0, row < entries.count else { detail.string = t("暂无匹配记录。", "No matching records."); return }
+        let entry = entries[row]
+        let title = entry["title"] as? String ?? ""
+        let lines = entry["detail"] as? [String] ?? entry["lines"] as? [String] ?? []
+        let style = NSMutableParagraphStyle(); style.lineSpacing = 5; style.paragraphSpacing = 10
+        let result = NSMutableAttributedString(string: title + "\n\n", attributes: [.font: NSFont.systemFont(ofSize: 21, weight: .semibold), .foregroundColor: NSColor.labelColor])
+        result.append(NSAttributedString(string: lines.joined(separator: "\n"), attributes: [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.labelColor, .paragraphStyle: style]))
+        detail.textStorage?.setAttributedString(result); detail.scrollRangeToVisible(NSRange(location: 0, length: 0))
+    }
+    func error(_ message: String) { status.stringValue = message; status.textColor = .systemRed }
+    @objc func selectKind() { selected = kinds[segments.selectedSegment]; search.stringValue = ""; render(); reload() }
+    @objc func reload() { status.stringValue = t("正在更新…", "Updating…"); owner?.perform(selected) }
+    func controlTextDidChange(_ notification: Notification) { render() }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var item: NSStatusItem!
     let menu = NSMenu()
@@ -174,14 +599,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var presetMenu = NSMenu()
     var providerMenu = NSMenu()
     var modelMenu = NSMenu()
-    var intervalMenu = NSMenu()
     var laneMenu = NSMenu()
-    var dailyMenu = NSMenu()
-    var experimentMenu = NSMenu()
-    var totalMenu = NSMenu()
-    var languageMenu = NSMenu()
-    var spendMenu = NSMenu()
-    var operatingMenu = NSMenu()
     var timer: Timer?
     var notifyTimer: Timer?
     var actionBusy = false
@@ -215,12 +633,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var standbyMenu = NSMenu()
     let research = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     var researchMenu = NSMenu()
-    var researchWindow: NSWindow?
-    var researchHeaderTitle: NSTextField?
-    var researchScroll: NSScrollView?
-    var researchStack: NSStackView?
-    var researchRefreshButton: NSButton?
-    var researchMenuButton: NSButton?
+    var settingsPane: SettingsPane?
+    var activityPane: ActivityPane?
+    var activityResponses: [String: [String: Any]] = [:]
     var researchResponse: [String: Any] = [:]
 
     let tick = NSMenuItem(title: "", action: nil, keyEquivalent: "")
@@ -231,13 +646,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let lanesRow = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     let accountRow = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     let brainRow = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-    let notifyRow = NSMenuItem(title: "", action: #selector(apply(_:)), keyEquivalent: "")
-    let autoSubmitRow = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-    let submissionRow = NSMenuItem(title: "", action: #selector(apply(_:)), keyEquivalent: "")
-    let launchRow = NSMenuItem(title: "", action: #selector(apply(_:)), keyEquivalent: "")
     let cycleRow = NSMenuItem(title: "", action: #selector(cycleAction), keyEquivalent: "")
     let powerRow = NSMenuItem(title: "", action: #selector(powerAction), keyEquivalent: "")
-    var languageItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     var cycleCancels = false
     var powerStops = false
     var controls: [NSMenuItem] = []
@@ -366,170 +776,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     /// 研究进展窗口：工具行（标题左 + 按钮右）+ 分隔线 + 卡片式分节列表，全部 Auto Layout。
     @objc func showResearch() {
-        if researchWindow == nil {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 720, height: 640),
-                                  styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-            window.isReleasedWhenClosed = false
-            window.minSize = NSSize(width: 560, height: 420)
-            let content = window.contentView!
-
-            let headerTitle = NSTextField(labelWithString: t("研究进展", "Research progress"))
-            headerTitle.font = UI.fontWindowTitle
-            headerTitle.translatesAutoresizingMaskIntoConstraints = false
-            content.addSubview(headerTitle)
-            researchHeaderTitle = headerTitle
-
-            let refreshButton = NSButton(title: t("刷新", "Refresh"), target: self, action: #selector(refreshResearch))
-            let menuButton = NSButton(title: t("托盘菜单", "Tray menu"), target: self, action: #selector(openTrayMenu))
-            let actions = NSStackView(views: [menuButton, refreshButton])
-            actions.orientation = .horizontal
-            actions.spacing = UI.controlGap
-            actions.translatesAutoresizingMaskIntoConstraints = false
-            content.addSubview(actions)
-            researchRefreshButton = refreshButton
-            researchMenuButton = menuButton
-
-            let divider = NSBox()
-            divider.boxType = .separator
-            divider.translatesAutoresizingMaskIntoConstraints = false
-            content.addSubview(divider)
-
-            let scroll = NSScrollView()
-            scroll.hasVerticalScroller = true
-            scroll.drawsBackground = false
-            scroll.borderType = .noBorder
-            scroll.translatesAutoresizingMaskIntoConstraints = false
-            content.addSubview(scroll)
-            researchScroll = scroll
-
-            NSLayoutConstraint.activate([
-                actions.topAnchor.constraint(equalTo: content.topAnchor, constant: UI.headerPadY),
-                actions.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -UI.windowPad),
-                headerTitle.centerYAnchor.constraint(equalTo: actions.centerYAnchor),
-                headerTitle.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: UI.windowPad),
-                headerTitle.trailingAnchor.constraint(lessThanOrEqualTo: actions.leadingAnchor, constant: -UI.controlGap),
-                divider.topAnchor.constraint(equalTo: actions.bottomAnchor, constant: UI.headerPadY),
-                divider.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-                divider.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-                scroll.topAnchor.constraint(equalTo: divider.bottomAnchor),
-                scroll.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-                scroll.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-                scroll.bottomAnchor.constraint(equalTo: content.bottomAnchor),
-            ])
-
-            // 文档容器钉住滚动区宽度、高度至少一屏；卡片栈钉住容器四边，超出后向下延伸滚动。
-            let container = FlippedView()
-            container.translatesAutoresizingMaskIntoConstraints = false
-            scroll.documentView = container
-            let stack = NSStackView()
-            stack.orientation = .vertical
-            stack.spacing = UI.cardGap
-            stack.edgeInsets = NSEdgeInsets(top: UI.windowPad, left: 0, bottom: UI.windowPad, right: 0)
-            stack.translatesAutoresizingMaskIntoConstraints = false
-            container.addSubview(stack)
-            NSLayoutConstraint.activate([
-                container.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
-                container.trailingAnchor.constraint(equalTo: scroll.contentView.trailingAnchor),
-                container.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
-                container.heightAnchor.constraint(greaterThanOrEqualTo: scroll.contentView.heightAnchor),
-                stack.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-                stack.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-                stack.topAnchor.constraint(equalTo: container.topAnchor),
-                stack.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            ])
-            researchStack = stack
-            researchWindow = window
-            window.center()
-        }
-        researchUpdating = !researchResponse.isEmpty
-        updateResearchWindow()
-        researchWindow?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-        refreshResearchIfNeeded(force: true)
+        if activityPane == nil { activityPane = ActivityPane(owner: self) }
+        for (kind, response) in activityResponses { activityPane?.receive(kind, response) }
+        activityPane?.open("research")
     }
-    /// 单个分节卡片：圆角底板 + 标题（13 semibold）+ 正文（13 regular，行距 3pt）。
-    func researchCard(title: String, lines: [String], meta: Bool = false) -> NSView {
-        let card = NSView()
-        card.wantsLayer = true
-        card.layer?.cornerRadius = UI.cardRadius
-        // 深浅色通用的浅色底板 + 细描边：labelColor 随外观自动反色
-        card.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.06).cgColor
-        card.layer?.borderWidth = 1
-        card.layer?.borderColor = NSColor.labelColor.withAlphaComponent(0.08).cgColor
-        let titleLabel = WrapLabel(wrappingLabelWithString: title)
-        titleLabel.font = meta ? UI.fontMeta : UI.fontTitle
-        titleLabel.textColor = meta ? .secondaryLabelColor : .labelColor
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        card.addSubview(titleLabel)
-        NSLayoutConstraint.activate([
-            titleLabel.topAnchor.constraint(equalTo: card.topAnchor, constant: UI.cardPad),
-            titleLabel.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: UI.cardPad),
-            titleLabel.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -UI.cardPad),
-        ])
-        if lines.isEmpty {
-            titleLabel.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -UI.cardPad).isActive = true
-        } else {
-            let style = NSMutableParagraphStyle()
-            style.lineSpacing = 3
-            let bodyLabel = WrapLabel(wrappingLabelWithString: "")
-            bodyLabel.attributedStringValue = NSAttributedString(string: lines.joined(separator: "\n"), attributes: [
-                .font: UI.fontBody, .foregroundColor: NSColor.labelColor, .paragraphStyle: style])
-            bodyLabel.translatesAutoresizingMaskIntoConstraints = false
-            card.addSubview(bodyLabel)
-            NSLayoutConstraint.activate([
-                bodyLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: UI.cardTitleGap),
-                bodyLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
-                bodyLabel.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
-                bodyLabel.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -UI.cardPad),
-            ])
-        }
-        card.setAccessibilityElement(true)
-        card.setAccessibilityLabel(([title] + lines).joined(separator: "，"))
-        return card
+    @objc func showActivity(_ sender: NSMenuItem) {
+        if activityPane == nil { activityPane = ActivityPane(owner: self) }
+        for (kind, response) in activityResponses { activityPane?.receive(kind, response) }
+        activityPane?.open(sender.representedObject as? String ?? "research")
     }
-    func updateResearchWindow() {
-        researchRefreshButton?.title = t("刷新", "Refresh")
-        researchMenuButton?.title = t("托盘菜单", "Tray menu")
-        researchHeaderTitle?.stringValue = t("研究进展", "Research progress")
-        researchWindow?.title = "WorldQuant " + (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "") + " · " + t("研究进展", "Research progress")
-        guard let stack = researchStack else { return }
-        for view in stack.arrangedSubviews {
-            stack.removeArrangedSubview(view)
-            view.removeFromSuperview()
-        }
-        let entries = researchResponse["entries"] as? [[String: Any]] ?? []
-        var cards: [NSView] = []
-        if researchUpdating && !entries.isEmpty {
-            cards.append(researchCard(title: t("正在更新…", "Updating…"), lines: [], meta: true))
-        }
-        if entries.isEmpty {
-            cards.append(researchCard(title: t("正在读取本地账本…", "Reading the local ledger…"), lines: [], meta: true))
-        } else {
-            for entry in entries {
-                cards.append(researchCard(title: entry["title"] as? String ?? "",
-                                          lines: entry["lines"] as? [String] ?? []))
-            }
-        }
-        for card in cards {
-            stack.addArrangedSubview(card)
-            // NSStackView 垂直方向的横向对齐不负责拉伸宽度，这里显式钉住卡片左右边距。
-            NSLayoutConstraint.activate([
-                card.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: UI.windowPad),
-                card.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: -UI.windowPad),
-            ])
-        }
-        // 末位弹性占位：内容不足一屏时吃掉多余高度，卡片保持自然高度顶端对齐。
-        let spacer = NSView()
-        spacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .vertical)
-        spacer.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .vertical)
-        stack.addArrangedSubview(spacer)
-        researchScroll?.contentView.scroll(to: NSPoint(x: 0, y: 0))
-    }
+    func updateResearchWindow() { activityPane?.receive("research", researchResponse) }
     @objc func refreshResearch() { refreshResearchIfNeeded(always: true) }
-    @objc func openTrayMenu() {
-        guard let content = researchWindow?.contentView, let button = researchMenuButton else { return }
-        menu.popUp(positioning: nil, at: NSPoint(x: button.frame.minX, y: button.frame.minY), in: content)
-    }
+    @objc func openTrayMenu() { item.button?.performClick(nil) }
     func buildFirstRunMenu() {
         menu.removeAllItems()
         menu.addItem(info(t("尚未配置工作区", "No workspace configured")))
@@ -771,7 +1029,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func buildMainMenu() {
         // 语言切换后整棵静态菜单按当前 lang 重建；动态数据由后续 fill* 回填。
         for row in [accountRow, brainRow, headline, detail, tick, nextAt, researchModel, reviewModel,
-                    lanesRow, cycles, submissions, standby, research, launchRow, notifyRow, autoSubmitRow, submissionRow,
+                    lanesRow, cycles, submissions, standby, research,
                     activateRow, activateSep, cycleRow, powerRow] {
             detach(row)
         }
@@ -805,101 +1063,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // 状态区：标题 13 semibold + 说明/调度/模型 12 辅助色，全部折行，等状态回填。
         wrapRow(headline, t("正在读取状态…", "Reading status…"), font: UI.fontTitle, color: .labelColor)
         for row in [detail, tick, nextAt, experimentRow, researchModel, reviewModel, lanesRow] { wrapRow(row, " ") }
-        for row in [headline, detail, tick, nextAt, experimentRow, researchModel, reviewModel, lanesRow] { menu.addItem(row) }
+        for row in [headline, detail, nextAt] { menu.addItem(row) }
+        let runDetails = NSMenu(); runDetails.autoenablesItems = false
+        for row in [tick, experimentRow, researchModel, reviewModel, lanesRow] { runDetails.addItem(row) }
+        let detailsRow = NSMenuItem(title: t("运行详情", "Run details"), action: nil, keyEquivalent: "")
+        detailsRow.submenu = runDetails; menu.addItem(detailsRow)
+        powerRow.target = self; cycleRow.target = self
+        applyRunState(paused: true, enabled: false, cycleOpen: false)
+        for row in [powerRow, cycleRow] { menu.addItem(row); controls.append(row) }
+
         menu.addItem(.separator())
         historyMenu = NSMenu(title: t("轮次历史", "Cycle history"))
         submissionsMenu = NSMenu(title: t("已提交 Alpha", "Submitted Alphas"))
         standbyMenu = NSMenu(title: t("备选 Alpha", "Standby Alphas"))
         researchMenu = NSMenu(title: t("研究进展", "Research progress"))
-        research.title = t("研究进展", "Research progress")
+        research.title = t("研究概览…", "Research overview…")
+        cycles.title = t("轮次历史…", "Cycle history…")
+        submissions.title = t("已提交 Alpha…", "Submitted Alphas…")
+        standby.title = t("备选 Alpha…", "Standby Alphas…")
         for (row, submenu) in [(research, researchMenu), (cycles, historyMenu), (submissions, submissionsMenu), (standby, standbyMenu)] {
             submenu.autoenablesItems = false; submenu.delegate = self
             submenu.addItem(info(t("正在读取本地账本…", "Reading the local ledger…")))
-            row.submenu = submenu; row.isEnabled = true; menu.addItem(row)
+            row.submenu = nil; row.action = #selector(showActivity(_:)); row.target = self
+            row.representedObject = row === research ? "research" : (row === cycles ? "history" : (row === submissions ? "submissions" : "standby"))
+            row.isEnabled = true; menu.addItem(row)
         }
         menu.addItem(.separator())
         settingsMenu = NSMenu(title: t("设置", "Settings"))
-        presetMenu = NSMenu(title: t("路由预设", "Routing presets"))
-        providerMenu = NSMenu(title: t("渠道", "Providers"))
-        intervalMenu = NSMenu(title: t("运行间隔", "Run interval"))
-        laneMenu = NSMenu(title: t("并行泳道", "Parallel lanes"))
-        dailyMenu = NSMenu(title: t("每日轮数上限", "Daily cycle limit"))
-        experimentMenu = NSMenu(title: t("实验轮数上限", "Experiment cycle limit"))
-        totalMenu = NSMenu(title: t("累计轮数上限", "Total cycle limit"))
-        languageMenu = NSMenu(title: t("界面语言", "Interface language"))
-        operatingMenu = NSMenu(title: t("运行额度与权限", "Operating limits and permissions"))
-        spendMenu = NSMenu(title: t("模型花费上限", "Model spend cap"))
-        settingsMenu.autoenablesItems = false; settingsMenu.delegate = self
-        launchRow.target = self
-        launchRow.title = t("启动时开始自动研究", "Start automatic research on launch")
-        launchRow.toolTip = t("打开菜单栏时，如果没有被你手动停止，就开始自动研究。点过停止，或退出时选择了停止，会保持到你再点开始。",
-                              "On open, start automatic research unless you stopped it. Stop, or a quit option that stops tasks, stays off until you press Start.")
-        launchRow.representedObject = "config=launch_research=off"
-        launchRow.state = .on
-        settingsMenu.addItem(launchRow)
-        settingsMenu.addItem(notifyRow)
-        submissionRow.toolTip = t("打开后，内部通过且授权仍有效的 Alpha 会自动入队；24 小时名额满了就进备选。真正提交前仍会重新做官方检查。",
-                                  "When on, an Alpha that passes internal gates is queued automatically while authorization is valid. A full 24-hour cap becomes standby. The official check still runs again before any POST.")
-        settingsMenu.addItem(submissionRow)
-        settingsMenu.addItem(.separator())
-        modelMenu = NSMenu(title: t("模型", "Models"))
-        for (title, submenu, tip) in [
-            (t("界面语言", "Interface language"), languageMenu,
-             t("自动跟随系统：中文环境用中文，其余用英文；也可固定中文或英文。",
-               "Automatic follows the system locale (Chinese for zh*, English otherwise); or fix Chinese / English.")),
-            (t("模型", "Models"), modelMenu,
-             t("保存多个自建模型，再分别指定下一轮的研究和审查。这两个位置必须不同。",
-               "Save several self-hosted models, then choose the next cycle’s research and review models. Those two slots must differ.")),
-            (t("路由预设", "Routing presets"), presetMenu,
-             t("切换整套餐路：研究与审查的渠道顺序；下一项任务领取时生效，在途任务保持原路由。",
-               "Switch the whole route set: provider order for research and review; applies to the next claimed task. In-flight tasks keep their routes.")),
-            (t("渠道", "Providers"), providerMenu,
-             t("临时停用或恢复单个渠道；不打断在途调用，预算闸门保留。",
-               "Temporarily disable or re-enable one provider; in-flight calls are unaffected, budget gates remain.")),
-            (t("运行额度与权限", "Operating limits and permissions"), operatingMenu,
-             t("显示当前生效值、累计用量及待应用值；现有任务结束后切换。", "Shows effective values, usage and pending changes; applies after existing work finishes.")),
-            (t("模型花费上限", "Model spend cap"), spendMenu,
-             t("已知模型花费达到该美元数后，停止新的模型调用。未知金额不记成 $0。",
-               "Stops new model calls once known spend reaches this dollar amount. Unknown prices are not counted as $0.")),
-            (t("运行间隔", "Run interval"), intervalMenu,
-             t("两轮研究之间的等待时长；下一次调度起采用。",
-               "Wait between research cycles; applies from the next scheduling tick.")),
-            (t("并行泳道", "Parallel lanes"), laneMenu,
-             t("同时开放的研究轮数。每条泳道是一轮完整的研究→审查→模拟；研究与审查必须不同渠道，同一渠道同一时刻只有一个调用，模拟与提交仍串行。",
-               "How many research cycles may run at once. Each lane is a full research→review→simulate cycle; research and review must use different channels, one call per channel at a time, and simulation/submission stay serial.")),
-            (t("每日轮数上限", "Daily cycle limit"), dailyMenu,
-             t("每个 UTC 日最多启动的研究轮数。", "Research cycles started at most per UTC day.")),
-            (t("实验轮数上限", "Experiment cycle limit"), experimentMenu,
-             t("这一段实验总共能跑多少轮。可以提前跑完，不必摊到授权最后一天。",
-               "How many cycles this experiment may run in total. It can finish early; it is not spread to the last day of authorization.")),
-            (t("累计轮数上限", "Total cycle limit"), totalMenu,
-             t("累计研究轮数达到上限后停止启动新轮次。", "No new cycles once the total reaches this limit."))
-        ] {
-            submenu.autoenablesItems = false
-            submenu.addItem(info(t("正在读取…", "Loading…")))
-            let row = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-            row.submenu = submenu; row.toolTip = tip; row.isEnabled = true
-            if submenu === languageMenu { languageItem = row }
-            settingsMenu.addItem(row)
-        }
-        for (title, selector, tip) in [
-            (t("检查更新", "Check for updates"), #selector(checkUpdate),
-             t("对照官网版本。有新版本时打开下载页，不自动安装。",
-               "Compares with the website version. Opens the download page when a newer build exists; nothing is installed automatically.")),
-            (t("打开运行日志", "Open run log"), #selector(logs),
-             t("查看本机调度日志。", "View the local scheduler log."))
-        ] {
-            let row = NSMenuItem(title: title, action: selector, keyEquivalent: "")
-            row.target = self; row.toolTip = tip; settingsMenu.addItem(row); controls.append(row)
-        }
-        let settingsRow = NSMenuItem(title: t("设置", "Settings"), action: nil, keyEquivalent: "")
-        settingsRow.submenu = settingsMenu; settingsRow.isEnabled = true
+        for submenu in [settingsMenu, presetMenu, providerMenu, modelMenu, laneMenu] { submenu.removeAllItems(); submenu.autoenablesItems = false }
+        let settingsRow = NSMenuItem(title: t("设置…", "Settings…"), action: nil, keyEquivalent: "")
+        settingsRow.action = #selector(showSettings); settingsRow.target = self; settingsRow.keyEquivalent = ","; settingsRow.isEnabled = true
         menu.addItem(settingsRow)
         menu.addItem(.separator())
         cycleRow.target = self
         powerRow.target = self
         applyRunState(paused: true, enabled: false, cycleOpen: false)
-        for row in [cycleRow, powerRow] { menu.addItem(row); controls.append(row) }
+
         for (title, selector, tip) in [
             (t("退出…", "Quit…"), #selector(quit),
              t("选择只关菜单、本轮结束后停止，或立刻结束本地任务。研究调度不依赖菜单是否开着。",
@@ -908,19 +1107,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let row = NSMenuItem(title: title, action: selector, keyEquivalent: "")
             row.target = self; row.toolTip = tip; menu.addItem(row); controls.append(row)
         }
-        notifyRow.title = t("系统通知", "System notifications")
-        notifyRow.target = self
-        notifyRow.toolTip = t("Alpha 提交成功或任务失败时发送 macOS 系统通知；需在系统设置中允许本应用通知。",
-                              "Sends macOS notifications when an Alpha is accepted or a task fails; allow notifications for this app in System Settings.")
-        notifyRow.representedObject = "config=notifications=off"   // 默认开启，点击即关闭；fillSettings 会按实际状态刷新
-        autoSubmitRow.isEnabled = false
-        autoSubmitRow.title = t("自动入队说明：打开下方提交队列后，内部通过且授权仍有效的 Alpha 会自动入队；满额则成为备选。这里没有第二个开关。",
-                                "Queue note: with the submission queue below on, an Alpha that passes internal gates is queued automatically while authorization is valid; a full cap becomes standby. There is no second switch.")
-        submissionRow.title = t("提交队列", "Submission queue")
-        submissionRow.target = self
-        submissionRow.toolTip = t("打开后才允许 wq brain submit 入队。达标不会自动 POST，每个 Alpha 仍须单独验收。",
-                                  "Arms wq brain submit. A passing Alpha is not posted automatically; each one still needs its own review.")
-        submissionRow.representedObject = "config=submission=on"
         updateActivateRow()
     }
     func menuWillOpen(_ opened: NSMenu) {
@@ -1022,8 +1208,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         powerStops = running
         powerRow.title = running ? t("停止自动研究", "Stop automatic research") : t("开始自动研究", "Start automatic research")
         powerRow.toolTip = running
-            ? t("不再领取新任务；当前这一轮允许收尾。要立刻结束这一轮，用「取消当前轮次」。",
-               "Stops claiming new tasks; the current cycle may finish. Use “Cancel current cycle” to end that cycle now.")
+            ? t("不再创建新轮次；所有在途泳道允许收尾。要立刻结束这一轮，用「取消当前轮次」。",
+               "Stops creating new cycles; all active lanes may finish. Use “Cancel current cycle” to end that cycle now.")
             : t("恢复队列，按既有间隔持续研究。", "Resumes the queue and keeps researching at the configured interval.")
         cycleRow.submenu = nil
         cycleCancels = cycleOpen
@@ -1104,6 +1290,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc func logs() { NSWorkspace.shared.open(URL(fileURLWithPath: root + "/var/run/launchd.out.log")) }
     @objc func checkUpdate() { perform("update") }
     @objc func apply(_ sender: NSMenuItem) {
+        if settingsPane?.drafts.isEmpty == false { settingsPane?.result(t("请先保存或撤销表单中的更改。", "Save or revert your form edits first."), success: false); return }
         guard let code = sender.representedObject as? String else { return }
         let parts = code.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
         if parts[0] == "preset", parts.count > 1 {
@@ -1143,66 +1330,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func fill(_ kind: String, _ response: [String: Any]) {
-        let target = kind == "research" ? researchMenu : (kind == "history" ? historyMenu : (kind == "standby" ? standbyMenu : submissionsMenu))
-        target.removeAllItems()
-        let entries = response["entries"] as? [[String: Any]] ?? []
-        if kind == "research" {
-            researchUpdating = false
-            researchResponse = response; updateResearchWindow()
-            let row = NSMenuItem(title: t("打开研究进展窗口…", "Open research progress window…"), action: #selector(showResearch), keyEquivalent: "")
-            row.target = self; row.isEnabled = true; target.addItem(row); target.addItem(.separator())
-        }
-        if entries.isEmpty { target.addItem(info(t("暂无记录", "No records"))) }
-        if kind == "history" {
-            target.addItem(info(t("共 \(entries.count) 轮 · 北京时间", "\(entries.count) cycles · Beijing time")))
-            target.addItem(.separator())
-            for entry in entries {
-                let lines = entry["lines"] as? [String] ?? []
-                let title = entry["title"] as? String ?? ""
-                let badge = entry["badge"] as? String ?? ""
-                let color = UI.badgeColor(badge)
-                let mark = badge == "submitted" ? "★ " : (badge == "standby" ? "◇ " : "")
-                let row = block([mark + title] + lines, titleColor: color)
-                row.toolTip = (entry["detail"] as? [String] ?? lines).joined(separator: "\n")
-                row.view?.toolTip = row.toolTip
-                target.addItem(row)
-                target.addItem(.separator())
-            }
-        } else {
-            if kind == "standby" {
-                standby.title = t("备选 Alpha（\(entries.count)）", "Standby Alphas (\(entries.count))")
-            } else if kind == "submissions" {
-                submissions.title = t("已提交 Alpha（\(entries.count)）", "Submitted Alphas (\(entries.count))")
-            }
-            for entry in entries {
-                let badge = entry["badge"] as? String ?? ""
-                let title = (badge == "submitted" ? "★ " : (badge == "standby" ? "◇ " : "")) + (entry["title"] as? String ?? "")
-                let row = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-                if badge == "standby" {
-                    row.attributedTitle = NSAttributedString(string: title, attributes: [
-                        .foregroundColor: NSColor.systemOrange,
-                        .font: UI.fontTitle])
-                } else if badge == "submitted" {
-                    row.attributedTitle = NSAttributedString(string: title, attributes: [
-                        .foregroundColor: NSColor.systemGreen,
-                        .font: UI.fontTitle])
-                }
-                let submenu = NSMenu(); submenu.autoenablesItems = false
-                let lines = entry["lines"] as? [String] ?? []
-                // 详情面板没有天然标题：整组按正文样式渲染成一张卡
-                if !lines.isEmpty { submenu.addItem(block(lines, heading: false)) }
-                row.submenu = submenu; row.isEnabled = true; target.addItem(row)
-            }
-        }
+        activityResponses[kind] = response
+        activityPane?.receive(kind, response)
+        if kind == "research" { researchUpdating = false; researchResponse = response }
+        if kind == "history" { displayedHistoryToken = historyRequestToken }
+        if kind == "research" { displayedResearchToken = researchRequestToken }
+        let count = (response["entries"] as? [[String: Any]] ?? []).count
+        if kind == "submissions" { submissions.title = t("已提交 Alpha（\(count)）…", "Submitted Alphas (\(count))…") }
+        if kind == "standby" { standby.title = t("备选 Alpha（\(count)）…", "Standby Alphas (\(count))…") }
         fetched[kind] = Date()
-        if kind == "history" {
-            displayedHistoryToken = historyRequestToken
-        }
-        if kind == "research" {
-            displayedResearchToken = researchRequestToken
-        }
     }
-
     func fillSettings(_ response: [String: Any]) {
         let responseLang = response["language"] as? String ?? "zh"
         // 先按新语言重建，再重拉所有列表数据（不靠 fetched 判定：launch 等非只读动作会清空 fetched，
@@ -1213,28 +1350,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             updateResearchWindow()
             fetched.removeAll()
             for kind in ["history", "submissions", "standby", "research"] { perform(kind) }
-        }
-        let notifications = response["notifications"] as? Bool ?? true
-        notifyRow.state = notifications ? .on : .off
-        notifyRow.representedObject = "config=notifications=" + (notifications ? "off" : "on")
-        autoSubmitRow.title = t("自动入队说明：打开下方提交队列后，内部通过且授权仍有效的 Alpha 会自动入队；满额则成为备选。这里没有第二个开关。",
-                                "Queue note: with the submission queue below on, an Alpha that passes internal gates is queued automatically while authorization is valid; a full cap becomes standby. There is no second switch.")
-        let submissionOn = response["submission_enabled"] as? Bool ?? false
-        submissionRow.state = submissionOn ? .on : .off
-        submissionRow.representedObject = "config=submission=" + (submissionOn ? "off" : "on")
-        let launchOn = response["launch_research"] as? Bool ?? true
-        launchRow.state = launchOn ? .on : .off
-        launchRow.representedObject = "config=launch_research=" + (launchOn ? "off" : "on")
-        launchRow.title = t("启动时开始自动研究", "Start automatic research on launch")
-        let setting = response["language_setting"] as? String ?? "auto"
-        let languageName = setting == "zh" ? "中文" : (setting == "en" ? "English" : t("跟随系统", "Follow system"))
-        languageItem.title = t("界面语言", "Interface language") + " · " + languageName
-        languageMenu.removeAllItems()
-        for (value, title) in [("auto", t("跟随系统（自动）", "Follow system (auto)")),
-                               ("zh", "中文"), ("en", "English")] {
-            pickRow(title, "config=language=\(value)", on: setting == value,
-                    tip: t("写入 config.json 的 ui.language；auto 表示跟随系统。",
-                           "Writes ui.language in config.json; auto follows the system."), in: languageMenu)
         }
         presetMenu.removeAllItems()
         presetClosed = [:]
@@ -1290,9 +1405,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         addProvider.toolTip = t("保存一个 OpenAI 或 Anthropic 兼容接口。添加后在下面的研究和审查里选用。",
                                 "Save an OpenAI- or Anthropic-compatible endpoint. Then choose it for research or review below.")
         modelMenu.addItem(addProvider)
-        modelMenu.addItem(info(t("研究和审查必须不同，从下一轮生效。", "Research and review must differ. The choice applies from the next cycle.")))
-        let researchHead = response["research_provider"] as? String ?? ""
-        let reviewHead = response["review_provider"] as? String ?? ""
+        modelMenu.addItem(info(t("编辑永久预设：", "Editing permanent preset: ") + (response["editable_preset"] as? String ?? "") + t("。在途工作完成后应用；固定泳道优先。", ". Applies after active work; lane pins take priority.")))
+        let researchHead = response["editable_research_provider"] as? String ?? response["research_provider"] as? String ?? ""
+        let reviewHead = response["editable_review_provider"] as? String ?? response["review_provider"] as? String ?? ""
         let models = response["providers"] as? [[String: Any]] ?? []
         for (role, head, title) in [("research", researchHead, t("研究模型", "Research model")),
                                     ("review", reviewHead, t("审查模型", "Review model"))] {
@@ -1314,35 +1429,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     tip: (provider["label"] as? String ?? "") + (reason.isEmpty ? t("；当前可用", "; available") : "；" + reason),
                     in: providerMenu)
         }
-        let intervals: [(Int, String, String)] = [(300, "5 分钟", "5 min"), (900, "15 分钟", "15 min"), (1800, "30 分钟", "30 min"),
-                                                   (3600, "1 小时", "1 hour"), (7200, "2 小时", "2 hours"), (21600, "6 小时", "6 hours")]
-        let currentInterval = response["interval_s"] as? Int ?? 0
-        intervalMenu.removeAllItems()
-        for (seconds, zh, en) in intervals {
-            pickRow(t(zh, en), "config=interval_s=\(seconds)", on: seconds == currentInterval,
-                    tip: t("两轮研究之间的等待时长", "Wait between research cycles"), in: intervalMenu)
-        }
-        if currentInterval > 0 && !intervals.contains(where: { $0.0 == currentInterval }) {
-            intervalMenu.addItem(info(t("当前值 \(currentInterval) 秒", "Current: \(currentInterval) s")))
-        }
         laneMenu.removeAllItems()
         laneMenu.addItem(info(t("每条泳道是一轮完整的研究→审查→模拟；对在途轮次不打断，下一轮起生效。",
                                 "Each lane is a full research→review→simulate cycle; in-flight cycles are not interrupted.")))
         let currentLanes = response["concurrent_lanes"] as? Int ?? 1
-        let laneChoices = (response["lane_presets"] as? [NSNumber])?.map { $0.intValue } ?? [1, 2, 3, 4]
-        for value in laneChoices {
-            pickRow(value == 1 ? t("1 条（串行）", "1 (serial)") : t("\(value) 条", "\(value) lanes"),
-                    "config=concurrent_lanes=\(value)", on: value == currentLanes,
-                    tip: t("研究与审查必须不同渠道；同一渠道同一时刻只有一个调用，模拟与提交仍串行，额度/授权/UNKNOWN 门禁不变。",
-                           "Research and review must use different channels; one call per channel at a time, simulation and submission stay serial, quota/authorization/UNKNOWN gates unchanged."),
-                    in: laneMenu)
-        }
-        if currentLanes > 0 && !laneChoices.contains(currentLanes) {
-            laneMenu.addItem(info(t("当前值 \(currentLanes) 条", "Current: \(currentLanes) lanes")))
-        }
         let pairOptions = response["lane_pair_options"] as? [[String: Any]] ?? []
         let pins = response["lane_pins"] as? [String: [String: String]] ?? [:]
-        if currentLanes > 1 && !pairOptions.isEmpty {
+        if currentLanes >= 1 && !pairOptions.isEmpty {
             laneMenu.addItem(.separator())
             laneMenu.addItem(info(t("泳道固定：某条泳道每轮都用选定的研究→审查对；渠道不可用时该泳道等待，不自动换对。",
                                     "Lane pinning: a pinned lane always uses that research→review pair; when a provider is unavailable the lane waits instead of substituting.")))
@@ -1366,136 +1459,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 laneMenu.addItem(row)
             }
         }
-        let dailies: [(Int, String, String)] = [(10, "10 轮", "10 cycles"), (20, "20 轮", "20 cycles"),
-                                                 (40, "40 轮", "40 cycles"), (80, "80 轮", "80 cycles")]
-        let currentDaily = response["max_cycles_per_day"] as? Int ?? 0
-        dailyMenu.removeAllItems()
-        for (value, zh, en) in dailies {
-            pickRow(t(zh, en), "config=max_cycles_per_day=\(value)", on: value == currentDaily,
-                    tip: t("每个 UTC 日最多启动的研究轮数", "Research cycles started at most per UTC day"), in: dailyMenu)
-        }
-        if currentDaily > 0 && !dailies.contains(where: { $0.0 == currentDaily }) {
-            dailyMenu.addItem(info(t("当前值 \(currentDaily) 轮", "Current: \(currentDaily) cycles")))
-        }
-        experimentMenu.removeAllItems()
-        let experiment = response["experiment"] as? [String: Any]
-        let experimentLimit = experiment?["limit"] as? Int
-        let experimentUsed = experiment?["used"] as? Int ?? 0
-        let experimentLeft = experiment?["remaining"] as? Int ?? 0
-        if experiment == nil {
-            experimentMenu.addItem(info(t("当前没有实验轮数上限", "No experiment cycle limit is active")))
-        } else {
-            experimentMenu.addItem(info(t("已用 \(experimentUsed) / 上限 \(experimentLimit ?? 0)，还剩 \(experimentLeft)",
-                                        "Used \(experimentUsed) / limit \(experimentLimit ?? 0), \(experimentLeft) left")))
-            let experimentPresets = (response["experiment_presets"] as? [NSNumber])?.map { $0.intValue } ?? [40, 80, 160, 320]
-            for value in experimentPresets {
-                pickRow(t("\(value) 轮", "\(value) cycles"), "config=experiment_cycles=\(value)", on: value == experimentLimit,
-                        tip: t("把这一段实验的总轮数设为 \(value)。不能低于已经用掉的 \(experimentUsed) 轮。",
-                               "Set this experiment’s total cycles to \(value). It cannot be lower than the \(experimentUsed) already used."),
-                        in: experimentMenu)
-            }
-            if let experimentLimit, !experimentPresets.contains(experimentLimit) {
-                experimentMenu.addItem(info(t("当前上限 \(experimentLimit) 轮", "Current limit: \(experimentLimit) cycles")))
-            }
-        }
-        let totals: [(Int, String, String)] = [(50, "50 轮", "50 cycles"), (100, "100 轮", "100 cycles"),
-                                                (150, "150 轮", "150 cycles"), (300, "300 轮", "300 cycles")]
-        let currentTotal = response["max_cycles_total"] as? Int
-        totalMenu.removeAllItems()
-        for (value, zh, en) in totals {
-            pickRow(t(zh, en), "config=max_cycles_total=\(value)", on: value == currentTotal,
-                    tip: t("累计研究轮数达到上限后停止启动新轮次", "No new cycles once the total reaches this limit"), in: totalMenu)
-        }
-        pickRow(t("不限", "Unlimited"), "config=max_cycles_total=none", on: currentTotal == nil,
-                tip: t("不设累计上限，由预算与授权窗口约束", "No total cap; bounded by budget and the authorization window"), in: totalMenu)
-        if let current = currentTotal, !totals.contains(where: { $0.0 == current }) {
-            totalMenu.addItem(info(t("当前值 \(current) 轮", "Current: \(current) cycles")))
-        }
-        spendMenu.removeAllItems()
-        let known = response["spend_known_usd"] as? Double ?? 0
-        let unknown = response["spend_unknown_calls"] as? Int ?? 0
-        let capNumber = response["spend_cap_usd"] as? Double
-        spendMenu.addItem(info(String(format: t("自计数起点已知花费 $%.4f", "Known spend since the counting origin: $%.4f"), known)))
-        if unknown > 0 {
-            spendMenu.addItem(info(t("另有 \(unknown) 次调用金额未知，未计入，也不记成 $0",
-                                    "\(unknown) calls have an unknown price; they are omitted and not treated as $0")))
-        }
-        pickRow(t("不限", "No cap"), "config=model_spend_cap_usd=none", on: capNumber == nil,
-                tip: t("不按美元合计拦截模型调用", "Do not block model calls by a dollar total"), in: spendMenu)
-        let presets = (response["spend_presets"] as? [NSNumber])?.map { $0.intValue } ?? [5, 10, 20, 50, 100]
-        for value in presets {
-            let matched = capNumber != nil && abs(capNumber! - Double(value)) < 0.001
-            pickRow("$\(value)", "config=model_spend_cap_usd=\(value)", on: matched,
-                    tip: t("保留原计数起点，已知花费达到 $\(value) 后停止新的模型调用",
-                           "Preserve the counting origin; stop new model calls once known spend reaches $\(value)"), in: spendMenu)
-        }
-        if let capNumber, !presets.contains(where: { abs(capNumber - Double($0)) < 0.001 }) {
-            spendMenu.addItem(info(String(format: t("当前上限 $%.4f", "Current cap $%.4f"), capNumber)))
-        }
-        fillOperating(response["operating"] as? [String: Any] ?? [:])
+        settingsPane?.receive(response)
         fetched["settings"] = Date()
     }
 
-    func settingValue(_ value: Any?) -> String {
-        guard let value, !(value is NSNull) else { return "none" }
-        return String(describing: value)
+    @objc func showSettings() {
+        if settingsPane == nil { settingsPane = SettingsPane(owner: self) }
+        settingsPane?.open(); perform("settings")
     }
-    func fillOperating(_ response: [String: Any]) {
-        operatingMenu.removeAllItems()
-        operatingMenu.addItem(info(t("点击参数输入值；累计用量不会清零。", "Click a setting to edit it; usage counters are preserved.")))
-        if response["pending"] as? Bool == true {
-            operatingMenu.addItem(info(t("有待应用修改：现有任务结束后切换", "Pending changes apply after existing work finishes")))
-            let cancel = NSMenuItem(title: t("取消待应用修改", "Cancel pending changes"), action: #selector(cancelOperatingChanges), keyEquivalent: "")
-            cancel.target = self; operatingMenu.addItem(cancel)
-        }
-        if let last = response["last"] as? [String: Any], last["state"] as? String == "failed" {
-            operatingMenu.addItem(info(t("上次应用失败：", "Last apply failed: ") + (last["error"] as? String ?? "")))
-        }
-        var groups: [String: NSMenu] = [:]
-        for entry in response["entries"] as? [[String: Any]] ?? [] {
-            let group = entry["group"] as? String ?? ""
-            if groups[group] == nil {
-                let submenu = NSMenu(title: group); submenu.autoenablesItems = false
-                let row = NSMenuItem(title: group, action: nil, keyEquivalent: "")
-                row.submenu = submenu; operatingMenu.addItem(row); groups[group] = submenu
-            }
-            let label = entry["label"] as? String ?? ""
-            var title = label + ": " + settingValue(entry["value"])
-            if let used = entry["used"], !(used is NSNull) { title += t("（已用 \(settingValue(used))）", " (used \(settingValue(used)))") }
-            if entry["has_pending"] as? Bool == true { title += t(" → 待应用 ", " → pending ") + settingValue(entry["pending"]) }
-            if entry["active"] as? Bool == false { title += t("（当前不生效）", " (inactive)") }
-            let row = NSMenuItem(title: title, action: #selector(editOperatingSetting(_:)), keyEquivalent: "")
-            row.target = self; row.representedObject = entry
-            row.toolTip = entry["note"] as? String
-            groups[group]?.addItem(row)
-        }
-        for line in response["fixed"] as? [String] ?? [] { operatingMenu.addItem(info(line)) }
-    }
-    @objc func cancelOperatingChanges() { perform("operating-cancel") }
-    @objc func editOperatingSetting(_ sender: NSMenuItem) {
-        guard let entry = sender.representedObject as? [String: Any], let key = entry["key"] as? String else { return }
-        let box = NSAlert(); box.messageText = entry["label"] as? String ?? key
-        var detail = t("当前生效：", "Effective: ") + settingValue(entry["value"])
-        if let effective = entry["effective"], settingValue(effective) != settingValue(entry["value"]) {
-            detail += t("，实际采用 ", ", resolved to ") + settingValue(effective)
-        }
-        if entry["type"] as? String == "deadline" {
-            detail += t("\n填写带时区的日期，例如 2026-10-10T00:00:00+08:00。只修改这一项授权。", "\nEnter a date with timezone, e.g. 2026-10-10T00:00:00+08:00. Only this authorization changes.")
-        } else {
-            detail += t("\n范围：", "\nRange: ") + settingValue(entry["min"]) + "–" + settingValue(entry["max"])
-            if entry["nullable"] as? Bool == true { detail += t("；none 使用自动值／取消该上限", "; none selects automatic / removes this cap") }
-        }
-        detail += "\n" + (entry["note"] as? String ?? "")
-        detail += t("\n现有任务完成后应用；累计用量保持不变。", "\nApplies after existing work finishes; usage is preserved.")
-        box.informativeText = detail
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 26))
-        field.stringValue = settingValue(entry["has_pending"] as? Bool == true ? entry["pending"] : entry["value"])
-        box.accessoryView = field; box.addButton(withTitle: t("保存", "Save")); box.addButton(withTitle: t("取消", "Cancel"))
-        box.window.initialFirstResponder = field
-        guard runAlert(box) == .alertFirstButtonReturn else { return }
-        perform("operating-setting", key + "=" + field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines))
-    }
-
     @objc func addCustomProvider() {
         let box = NSAlert()
         box.messageText = t("添加自定义模型", "Add a custom model")
@@ -1571,18 +1542,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                         return
                     }
                     if action == "history" || action == "submissions" || action == "standby" || action == "research" {
+                        self.activityPane?.error(error)
                         let target = action == "research" ? self.researchMenu : (action == "history" ? self.historyMenu : (action == "standby" ? self.standbyMenu : self.submissionsMenu))
                         target.removeAllItems(); target.addItem(self.block([error]))
                         self.settleRead(action)
                         return
                     }
+                    if action == "settings-save" || action == "settings" || action == "operating-cancel" { self.settingsPane?.result(error, success: false) }
                     self.fetched["settings"] = nil
                     self.wrapRow(self.headline, self.t("读取失败", "Read failed"), font: UI.fontTitle, color: .labelColor)
                     self.wrapRow(self.detail, error)
                     self.item.button?.toolTip = error
                     if action == "launch" {
                         self.refresh()
-                    } else if !readOnly {
+                    } else if !readOnly && action != "settings-save" {
                         let alert = NSAlert(); alert.messageText = self.t("操作未完成", "Action failed"); alert.informativeText = error; self.runAlert(alert)
                     }
                     self.settleRead(action)
@@ -1666,6 +1639,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     let enabled = response["enabled"] as? Bool == true
                     let cycleOpen = response["cycle_open"] as? Bool == true
                     self.applyRunState(paused: paused, enabled: enabled, cycleOpen: cycleOpen, lanes: lanes)
+                    if response["stop_after_cycle"] as? Bool == true {
+                        self.powerRow.title = self.t("正在收尾…", "Finishing active lanes…")
+                        self.powerRow.isEnabled = false
+                    } else { self.powerRow.isEnabled = !self.actionBusy }
                     self.applyIcon(active: !paused && enabled)
                     self.item.button?.toolTip = self.headline.title + "\n" + self.detail.title
                     self.settleRead(action)
@@ -1675,7 +1652,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     }
                     self.refresh()
                 } else {
-                    let quiet = ["start", "pause", "run-next", "cancel-cycle", "config", "launch",
+                    if action == "settings-save" || action == "operating-cancel" { self.settingsPane?.result(response["message"] as? String ?? "", success: true) }
+                    let quiet = ["settings-save", "operating-cancel", "start", "pause", "run-next", "cancel-cycle", "config", "launch",
                                  "quit-after-cycle", "quit-now", "provider-add", "provider-role",
                                  "preset", "preset-once", "preset-cancel", "provider"].contains(action)
                     if let message = response["message"] as? String, !message.isEmpty {

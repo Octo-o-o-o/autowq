@@ -5,6 +5,7 @@ A saved request is distinct from an applied configuration; old work drains first
 """
 import copy
 import json
+import math
 import os
 
 from . import store, util
@@ -57,6 +58,70 @@ PENDING = 'runtime_settings_pending'
 LAST = 'runtime_settings_last'
 
 
+PREFERENCES = {'ui.language', 'desktop.notifications', 'desktop.launch_research'}
+TOGGLES = {
+    'desktop.notifications': ('general', '系统通知', 'System notifications', True),
+    'desktop.launch_research': ('general', '打开应用时开始研究', 'Start research when the app opens', True),
+    'brain_submission.enabled': ('simulation', '自动提交通过验收的 Alpha', 'Automatically submit eligible Alphas', False),
+    'research_learning.maintenance_enabled': ('research', '研究维护', 'Research maintenance', False),
+    'research_learning.refresh_enabled': ('research', '历史反馈刷新', 'Refresh historical feedback', False),
+    'history_research.enabled': ('research', '历史复盘', 'Historical review', False),
+}
+EXPERIMENT = {'experiment_cycles', 'experiment_requests_per_arm'}
+GROUPS['general'] = ('通用', 'General')
+COMMON = {'research_dual_loop.max_model_starts', 'research_dual_loop.max_evidence_reads',
+          'autopilot.interval_s', 'autopilot.concurrent_lanes', 'autopilot.max_cycles_per_day',
+          'autopilot.max_cycles_total', 'limits.model_spend_cap_usd', 'brain_api.max_posts_per_24h',
+          'brain_submission.max_posts_per_24h'}
+
+
+def edit_config(cfg):
+    """UI actions build on the saved draft, so separate lane/model edits do not overwrite it."""
+    from . import db
+    conn = db.connect(cfg.db_path)
+    try:
+        doc = pending(conn)
+        return Config(copy.deepcopy(doc['target']) if doc else copy.deepcopy(cfg.data), cfg.root, cfg.path)
+    finally:
+        conn.close()
+
+
+def preference_request(cfg, updates, expected_revision=None):
+    """Apply presentation preferences immediately and rebase a pending operating draft."""
+    from . import db
+    from .wrappers.agent import _acquire_lock
+    if not set(updates) <= PREFERENCES:
+        raise ValueError('Not a presentation preference')
+    lock = _acquire_lock(cfg.run_dir, 'settings')
+    if lock is None:
+        raise ValueError('Settings save in progress; retry')
+    conn = db.connect(cfg.db_path)
+    try:
+        if expected_revision is not None and revision(conn,Config.load(cfg.path,cfg.root))!=expected_revision:
+            raise ValueError('Settings changed since this window was loaded; refresh and review your edits')
+        doc = pending(conn)
+        base = util.read_json(cfg.path)
+        if doc and (doc.get('state') == 'applying' or util.sha256_json(base) != doc['base_hash']):
+            raise ValueError('Pending apply needs recovery before editing preferences')
+        for key, value in updates.items():
+            _set(base, key, value)
+        if doc:
+            for key, value in updates.items():
+                _set(doc['base'], key, value)
+                _set(doc['target'], key, value)
+                doc['updates'].pop(key,None)
+            doc['base_hash'] = util.sha256_json(doc['base'])
+            doc['target_hash'] = util.sha256_json(doc['target'])
+            store.set_flag(conn, PENDING, json.dumps(doc))
+        util.write_json(cfg.path, base)
+        conn.commit()
+        cfg.data = Config.load(cfg.path, cfg.root).data
+        return {'state': 'applied', 'updates': updates}
+    finally:
+        conn.close()
+        os.close(lock)
+
+
 def integer(cfg, key):
     spec=SPECS[key];value=cfg.get(*key.split('.'),default=spec[3])
     if value is None and spec[6]:return None
@@ -83,6 +148,17 @@ def pending(conn):
 
 
 def parse(cfg,key,raw):
+    if key == 'ui.language':
+        if raw not in ('auto', 'zh', 'en'):raise ValueError('Language must be auto, zh or en')
+        return raw
+    if key in TOGGLES:
+        if raw in ('true', 'on', True):return True
+        if raw in ('false', 'off', False):return False
+        raise ValueError('Boolean required: '+key)
+    if key in EXPERIMENT:
+        value=int(raw)
+        if str(value)!=str(raw).strip() or not (2 if key=='experiment_cycles' else 1)<=value<=100000:raise ValueError('Experiment limit out of range')
+        return value
     if key in DEADLINES:
         value=util.parse_iso(raw)
         if not isinstance(raw,str) or not raw.strip() or value<=util.now():raise ValueError('A future ISO8601 time with timezone is required')
@@ -92,6 +168,10 @@ def parse(cfg,key,raw):
     spec=SPECS.get(key) or definitions(cfg).get(key)
     if not spec:raise ValueError('Unknown operating setting: '+key)
     if raw in ('none','',None) and spec[6]:return None
+    if key=='limits.model_spend_cap_usd':
+        value=float(raw)
+        if not math.isfinite(value) or not 0<=value<=100000:raise ValueError('Spend cap must be 0..100000')
+        return value
     try:value=int(raw)
     except (ValueError,TypeError):raise ValueError('Integer required: '+key)
     if str(value)!=str(raw).strip() or not spec[4]<=value<=spec[5]:raise ValueError(f'{key}: {spec[4]}..{spec[5]}')
@@ -111,7 +191,25 @@ def _has_experiment(conn):
     return bool(conn.execute("SELECT 1 FROM sqlite_master WHERE name='learning_experiments'").fetchone() and conn.execute('SELECT 1 FROM learning_experiments').fetchone())
 
 
-def request(cfg,updates):
+def _rebase_preferences(doc, actual):
+    """Only UI preferences may change outside a queued operating transaction."""
+    def operating(data):
+        return {k:v for k,v in data.items() if k not in ('ui','desktop')}
+    if operating(actual) != operating(doc['base']):
+        raise ValueError('Configuration changed outside this request')
+    doc=copy.deepcopy(doc)
+    for section in ('ui','desktop'):
+        for name in ('base','target'):
+            if section in actual:doc[name][section]=copy.deepcopy(actual[section])
+            else:doc[name].pop(section,None)
+    for key in list(doc['updates']):
+        if key in PREFERENCES:doc['updates'].pop(key)
+    doc['base_hash']=util.sha256_json(doc['base'])
+    doc['target_hash']=util.sha256_json(doc['target'])
+    return doc
+
+
+def request(cfg,updates,expected_revision=None):
     """Validated owner action. Never reset used counters or promise pending values are live."""
     from . import db
     from .wrappers.agent import _acquire_lock
@@ -120,18 +218,29 @@ def request(cfg,updates):
     if lock is None:raise ValueError('Another settings save is active; retry')
     conn=db.connect(cfg.db_path)
     try:
+        if expected_revision is not None and revision(conn,Config.load(cfg.path,cfg.root))!=expected_revision:
+            raise ValueError('Settings changed since this window was loaded; refresh and review your edits')
         doc=pending(conn)
         base=util.read_json(cfg.path)
-        if doc and _hash(cfg.path)!=doc['base_hash']:raise ValueError('Pending configuration changed; cancel the pending request before saving')
+        if doc and _hash(cfg.path)!=doc['base_hash']:
+            if doc.get('state')=='applying':raise ValueError('Interrupted settings apply needs recovery')
+            doc=_rebase_preferences(doc,base)
         combined={**(doc or {}).get('updates',{}),**updates}
         root=cfg.get('research_dual_loop','root_id')
         for key,flag in [('research_dual_loop.max_model_starts','dual_model_reservations:'),('research_dual_loop.max_evidence_reads','evidence_reads:')]:
             if key in combined and combined[key]<int(store.get_flag(conn,flag+str(root),'0')):
                 raise ValueError('Limit cannot be lower than already used: '+key)
         target=copy.deepcopy(base)
-        for key,value in combined.items():_set(target,key,value)
-        if target==base:return {'state':'unchanged'}
+        for key,value in combined.items():
+            if key not in EXPERIMENT:_set(target,key,value)
+        if target==base and not set(combined)&EXPERIMENT:return {'state':'unchanged'}
         from . import research_learning
+        if set(combined)&EXPERIMENT:
+            if not _has_experiment(conn):raise ValueError('No active experiment')
+            from . import research_lifecycle as lifecycle
+            budget=lifecycle.experiment_cycle_budget(conn);left=lifecycle.remaining(conn,budget['experiment_id'])
+            if combined.get('experiment_cycles',budget['limit'])<budget['used']:raise ValueError('Cycle limit below usage')
+            if 'experiment_requests_per_arm' in combined and combined['experiment_requests_per_arm']<max(left['used_requests_by_arm'].values()):raise ValueError('Request limit below usage')
         baseline=research_learning.current_baseline(cfg) if _has_experiment(conn) else None
         doc={'updates':combined,'base':base,'base_hash':util.sha256_json(base),'target':target,
              'target_hash':util.sha256_json(target),'source':baseline['source'] if baseline else None,
@@ -175,7 +284,9 @@ def _apply_pending(conn,cfg):
     if conn.execute("SELECT 1 FROM sqlite_master WHERE name='research_cycles'").fetchone() and conn.execute("SELECT 1 FROM research_cycles WHERE state!='closed'").fetchone():return {'state':'pending'}
     try:
         actual=_hash(cfg.path)
-        if actual not in (doc['base_hash'],doc['target_hash']):raise ValueError('Configuration changed outside this request')
+        if actual not in (doc['base_hash'],doc['target_hash']):
+            doc=_rebase_preferences(doc,util.read_json(cfg.path))
+            actual=doc['base_hash']
         from . import research_learning, research_lifecycle
         if doc['source'] and research_learning.current_baseline(cfg)['source']!=doc['source']:
             raise ValueError('Engine changed; resave settings against the installed version')
@@ -183,6 +294,10 @@ def _apply_pending(conn,cfg):
         util.write_json(cfg.path,doc['target'])
         new=Config.load(cfg.path,cfg.root)
         conn.execute('BEGIN IMMEDIATE')
+        if 'experiment_cycles' in doc['updates']:
+            research_lifecycle.set_experiment_cycle_limit(conn,doc['updates']['experiment_cycles'])
+        if 'experiment_requests_per_arm' in doc['updates']:
+            research_lifecycle.set_experiment_request_limit(conn,doc['updates']['experiment_requests_per_arm'])
         if _has_experiment(conn):
             latest=conn.execute('SELECT experiment_id FROM learning_experiments ORDER BY created_at DESC,rowid DESC LIMIT 1').fetchone()[0]
             if research_learning.current_baseline(new)!=research_lifecycle.document(conn,latest)['baseline']:
@@ -199,6 +314,15 @@ def _apply_pending(conn,cfg):
         store.set_flag(conn,LAST,json.dumps(result));conn.execute('DELETE FROM state_flags WHERE key=?',(PENDING,));conn.commit()
         cfg.data=Config.load(cfg.path,cfg.root).data
         return result
+
+
+def revision(conn,cfg):
+    experiment=None
+    if _has_experiment(conn):
+        from . import research_lifecycle as lifecycle
+        budget=lifecycle.experiment_cycle_budget(conn)
+        experiment={k:lifecycle.document(conn,budget['root'])[k] for k in ('max_cycles','max_requests_per_arm')}
+    return util.sha256_json({'config':cfg.data,'pending':(pending(conn) or {}).get('updates',{}),'experiment':experiment})
 
 
 def snapshot(conn,cfg,lang='zh'):
@@ -244,5 +368,27 @@ def snapshot(conn,cfg,lang='zh'):
             rows.append({'key':key,'group':text(lang,*GROUPS['research']),'label':text(lang,*label),'value':value,'used':used,'type':'integer','min':low,'max':100000,'nullable':False,'note':text(lang,'实验轮数增加时会相应提高请求下限；每组请求也可单独设置','Increasing cycle limits also raises the request floor; per-arm requests can be set separately')})
     for key,label in DEADLINES.items():
         rows.append({'key':key,'group':text(lang,*GROUPS['authorization']),'label':text(lang,*label),'value':cfg.get(*key.split('.')),'type':'deadline','note':text(lang,'独立授权；不会自动延长其它期限','Independent authorization; does not extend other deadlines'),'pending':(queued or {}).get('updates',{}).get(key),'has_pending':key in (queued or {}).get('updates',{})})
-    return {'entries':rows,'pending':bool(queued),'last':json.loads(store.get_flag(conn,LAST,'null')),
+    for key,(group,zh,en,default) in TOGGLES.items():
+        note = ''
+        if key=='brain_submission.enabled':
+            note=text(lang,'通过内部验收且授权有效时自动入队；正式提交前复核官方检查。额度已满则进入备选。','Eligible Alphas queue automatically while authorized. Official checks run before submission; a full quota sends them to standby.')
+        if key=='desktop.launch_research':
+            note=text(lang,'尊重手动停止；此选项不会恢复已停止的研究。','Respects a manual stop; this preference does not resume stopped research.')
+        rows.append({'key':key,'group':text(lang,*GROUPS[group]),'group_id':group,'label':text(lang,zh,en),'value':cfg.get(*key.split('.'),default=default),'type':'boolean','note':note,'advanced':key.startswith(('history_', 'research_learning.'))})
+    rows.append({'key':'ui.language','group':text(lang,*GROUPS['general']),'group_id':'general','label':text(lang,'界面语言','Interface language'),'value':cfg.get('ui','language',default='auto'),'type':'choice','choices':[{'value':'auto','label':text(lang,'跟随系统','Follow system')},{'value':'zh','label':'中文'},{'value':'en','label':'English'}]})
+    for row in rows:
+        key=row['key']
+        row.setdefault('group_id', next((g for g,labels in GROUPS.items() if row['group']==text(lang,*labels)), 'research'))
+        row.setdefault('advanced', key not in COMMON and key not in EXPERIMENT and key not in DEADLINES and key not in PREFERENCES and key!='brain_submission.enabled')
+        row['has_pending']=key in (queued or {}).get('updates',{})
+        row['pending']=(queued or {}).get('updates',{}).get(key)
+        row['application']=text(lang,'立即应用','Applies immediately') if key in PREFERENCES else text(lang,'现有任务结束后应用','Applies after existing work finishes')
+        if key.startswith('history_research.') and cfg.get('research_dual_loop','enabled',default=False):
+            row['active']=False;row['note']=text(lang,'双环模式接管历史复盘；修改保留供退出双环后使用。','Dual-loop mode replaces historical review. Changes are retained for use outside dual-loop mode.')
+        row['empty_label']=text(lang,'不限','No cap')
+        if key=='limits.max_agent_parallel':row['empty_label']=text(lang,'跟随泳道','Follow lanes')
+        if key=='routing.retry_delay_s':row['empty_label']=text(lang,'使用路由预设','Use routing preset')
+        if key.startswith('budgets.'):row['empty_label']=text(lang,'未知（阻止调用）','Unknown (blocks calls)')
+        if key in DEADLINES:row['active']=bool(cfg.get(*key.split('.')))
+    return {'pending_keys':list((queued or {}).get('updates',{})), 'revision':revision(conn,cfg),'entries':rows,'pending':bool(queued),'last':json.loads(store.get_flag(conn,LAST,'null')),
             'fixed':[text(lang,'同渠道最多 1 个调用；平台模拟与提交保持串行','One call per channel; platform simulation and submission remain serial'),text(lang,'研究策略及证据合同期限在研究进展中显示；普通额度修改不续期','Policy and evidence expiry are shown in Research progress; limits do not renew them')]}

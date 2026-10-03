@@ -254,6 +254,9 @@ def _coordinate(conn, cfg):
     from . import runtime_settings
     if runtime_settings.pending(conn):
         result=runtime_settings.apply_pending(conn,cfg)
+        if result['state']=='applied':
+            # Start a new batch so pool size, supervisor duration and all cached values reload together.
+            return True
         if result['state']=='pending':
             # Finish already-owned stages without creating more work to drain.
             autopilot.tick(conn,cfg,allow_new=False)
@@ -315,7 +318,9 @@ def _run_once(conn, cfg, lease_s: int) -> tuple[int, list[str]]:
     for r in recovered_calls + recovered_tasks:
         lines.append(f"recover: {r}")
 
-    from . import autopilot
+    from . import autopilot, runtime_settings
+    if store.is_paused(conn) and runtime_settings.pending(conn):
+        runtime_settings.apply_pending(conn,cfg)
     if store.is_paused(conn):
         recovered = autopilot.auto_resume_after_auth(conn, cfg)
         conn.commit()
@@ -327,7 +332,8 @@ def _run_once(conn, cfg, lease_s: int) -> tuple[int, list[str]]:
                      + (', '.join(recovered) if recovered else 'none'))
 
     autopilot.setup(conn)
-    _coordinate(conn, cfg)
+    if _coordinate(conn, cfg):
+        return OK, lines + ['settings applied; next scheduler batch reloads operating limits']
 
     pool = agent_pool_size(cfg)
     if pool <= 1:
@@ -395,7 +401,9 @@ def _supervise(conn, cfg, lease_s, pool, lines) -> tuple[int, list[str]]:
                 lines.extend(task_lines)
                 if code == OK and tcode != OK:
                     code = tcode
-            _coordinate(conn, cfg)
+            if _coordinate(conn, cfg):
+                lines.append('settings applied; restart scheduler batch with new limits')
+                break
             if time.monotonic() < deadline:
                 while len(workers) < pool:
                     task = store.claim_task(conn, owner=owner + '-w', lease_s=agent_lease,

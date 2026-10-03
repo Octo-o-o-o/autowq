@@ -21,6 +21,75 @@ class OperatingSettingsTests(unittest.TestCase):
         util.write_json(self.cfg.path,self.cfg.data)
         self.c.commit()
 
+    def test_preferences_rebase_draft_without_baseline_drift(self):
+        from wq import research_learning as learning
+        before=learning.current_baseline(self.cfg)
+        tid,_=store.enqueue_task(self.c,'agent_call',{},'pref-inflight');self.c.commit()
+        settings.request(self.cfg,{'autopilot.concurrent_lanes':3})
+        settings.preference_request(self.cfg,{'desktop.notifications':False,'ui.language':'en'})
+        self.assertEqual(learning.current_baseline(self.cfg),before)
+        self.assertEqual(settings.pending(self.c)['target']['autopilot']['concurrent_lanes'],3)
+        store.finish_task(self.c,tid,'failed');self.c.commit()
+        result=settings.apply_pending(self.c,self.cfg)
+        self.assertEqual(result['state'],'applied')
+        self.assertFalse(self.cfg.get('desktop','notifications'))
+        self.assertEqual(self.cfg.get('ui','language'),'en')
+
+    def test_settings_batch_validates_every_value_before_mutation(self):
+        from wq import desktop_control
+        original=util.read_json(self.cfg.path)
+        with patch.object(desktop_control,'_cfg',return_value=self.cfg):
+            with self.assertRaises(ValueError):
+                desktop_control.control('settings-save',json.dumps({'research_dual_loop.max_model_starts':'256','autopilot.concurrent_lanes':'99'}))
+            result=desktop_control.control('settings-save',json.dumps({'research_dual_loop.max_model_starts':'256','limits.model_spend_cap_usd':'20.25'}))
+        self.assertEqual(result['state'],'applied')
+        self.assertEqual(self.cfg.get('limits','model_spend_cap_usd'),20.25)
+        self.assertEqual(self.cfg.get('limits','model_spend_as_of'),original.get('limits',{}).get('model_spend_as_of'))
+
+    def test_experiment_request_change_waits_for_owned_work(self):
+        tid,_=store.enqueue_task(self.c,'agent_call',{},'experiment-inflight');self.c.commit()
+        before=lifecycle.document(self.c,'fixture-dual-epoch')['max_requests_per_arm']
+        result=settings.request(self.cfg,{'experiment_requests_per_arm':30})
+        self.assertEqual(result['state'],'pending')
+        self.assertEqual(lifecycle.document(self.c,'fixture-dual-epoch')['max_requests_per_arm'],before)
+        store.finish_task(self.c,tid,'failed');self.c.commit()
+        self.assertEqual(settings.apply_pending(self.c,self.cfg)['state'],'applied')
+        self.assertEqual(lifecycle.document(self.c,'fixture-dual-epoch')['max_requests_per_arm'],30)
+
+    def test_stale_form_cannot_overwrite_newer_settings(self):
+        revision=settings.snapshot(self.c,self.cfg)['revision']
+        settings.preference_request(self.cfg,{'desktop.notifications':False})
+        with self.assertRaisesRegex(ValueError,'changed since'):
+            settings.request(self.cfg,{'autopilot.concurrent_lanes':3},expected_revision=revision)
+        self.assertIsNone(settings.pending(self.c))
+
+    def test_preference_crash_window_rebases_before_drained_apply(self):
+        tid,_=store.enqueue_task(self.c,'agent_call',{},'pref-crash');self.c.commit()
+        settings.request(self.cfg,{'autopilot.concurrent_lanes':3})
+        raw=util.read_json(self.cfg.path);raw['desktop']={'notifications':False};util.write_json(self.cfg.path,raw)
+        store.finish_task(self.c,tid,'failed');self.c.commit()
+        self.assertEqual(settings.apply_pending(self.c,self.cfg)['state'],'applied')
+        self.assertFalse(self.cfg.get('desktop','notifications'))
+        self.assertEqual(self.cfg.get('autopilot','concurrent_lanes'),3)
+
+    def test_apply_ends_old_supervisor_batch_to_reload_cached_limits(self):
+        from wq import runner
+        tid,_=store.enqueue_task(self.c,'agent_call',{},'batch-end');self.c.commit()
+        settings.request(self.cfg,{'limits.max_agent_parallel':2})
+        store.finish_task(self.c,tid,'failed');self.c.commit()
+        self.assertTrue(runner._coordinate(self.c,self.cfg))
+        self.assertEqual(runner.agent_pool_size(self.cfg),2)
+
+    def test_pause_does_not_prevent_recovery_of_drained_settings(self):
+        from wq import runner
+        tid,_=store.enqueue_task(self.c,'agent_call',{},'pause-pending');self.c.commit()
+        settings.request(self.cfg,{'autopilot.interval_s':1200})
+        store.finish_task(self.c,tid,'failed');store.set_flag(self.c,'paused','1');store.set_flag(self.c,'pause_reason','menu:stop-after-cycle');self.c.commit()
+        runner.run_once(self.c,self.cfg)
+        self.assertEqual(self.cfg.get('autopilot','interval_s'),1200)
+        self.assertTrue(store.is_paused(self.c))
+        self.assertIsNone(settings.pending(self.c))
+
     def test_cancel_via_actual_control_keeps_current_values(self):
         from wq import desktop_control
         store.set_flag(self.c,settings.PENDING,json.dumps({'updates':{'research_dual_loop.max_model_starts':256}}));self.c.commit()
@@ -66,7 +135,7 @@ class OperatingSettingsTests(unittest.TestCase):
     def test_external_config_edit_is_preserved_and_failed_apply_is_visible(self):
         tid,_=store.enqueue_task(self.c,'agent_call',{},'settings-busy');self.c.commit()
         settings.request(self.cfg,{'autopilot.interval_s':900})
-        raw=util.read_json(self.cfg.path);raw['ui']={'language':'en'};util.write_json(self.cfg.path,raw)
+        raw=util.read_json(self.cfg.path);raw.setdefault('autopilot',{})['error_cooldown_s']=1234;util.write_json(self.cfg.path,raw)
         store.finish_task(self.c,tid,'failed');self.c.commit()
         result=settings.apply_pending(self.c,self.cfg)
         self.assertEqual(result['state'],'failed')
@@ -134,6 +203,24 @@ class OperatingSettingsTests(unittest.TestCase):
 
 
 class ProviderSettingsTests(unittest.TestCase):
+    def test_model_role_changes_preserve_profile_and_wait_for_drain(self):
+        from wq import providers,routing
+        fixture=test_routing.RoutingTests('test_three_retries_then_fallback_and_preserve_evidence')
+        fixture.setUp();self.addCleanup(fixture.doCleanups)
+        cfg,c=fixture.cfg,fixture.conn
+        path=Path(cfg.resolve(cfg.get('routing','profiles_file',default='config/profiles.json')))
+        before=path.read_bytes();catalog=routing.catalog(cfg)
+        name=next(iter(catalog['providers']))
+        tid,_=store.enqueue_task(c,'agent_call',{},'role-pending');c.commit()
+        result=providers.assign_role(cfg,c,'engineering',name)
+        self.assertEqual(result['state'],'pending')
+        self.assertEqual(path.read_bytes(),before)
+        store.finish_task(c,tid,'failed');c.commit()
+        self.assertEqual(settings.apply_pending(c,cfg)['state'],'applied')
+        self.assertEqual(routing.catalog(cfg)['presets'][result['preset']]['routes']['engineering'][0],name)
+        self.assertEqual(path.read_bytes(),before)
+
+
     def test_retry_and_timeout_values_are_frozen_into_real_dispatch(self):
         f=test_routing.RoutingTests('test_three_retries_then_fallback_and_preserve_evidence')
         f.setUp();self.addCleanup(f.doCleanups)

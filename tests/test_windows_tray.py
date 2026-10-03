@@ -71,106 +71,36 @@ class TrayMenuModelTests(unittest.TestCase):
         # 信息行一律不可点击
         self.assertTrue(all(e['kind'] != 'info' or True for e in entries))
 
-    def test_status_and_settings_rows_carry_actions(self):
-        state = {
-            'status': {'title': '自动研究已启用', 'message': '等待现有任务完成',
-                       'last_tick': '09-26 13:28', 'next_at': '待当前任务完成／调度检查',
-                       'next_models': [{'title': '研究：grok · grok-4.7'}]},
-            'settings': {'active_preset': 'steady', 'notifications': True, 'interval_s': 300,
-                         'max_cycles_per_day': 40, 'max_cycles_total': 149,
-                         'presets': [{'name': 'steady', 'routes': '…'}, {'name': 'core-only', 'routes': '…'}],
-                         'providers': [{'name': 'grok', 'disabled': False, 'reason': ''},
-                                       {'name': 'devin', 'disabled': True, 'reason': '用户已停用此渠道'}]},
-            'history': {'count': 113, 'entries': [
-                {'title': '第 113 轮 · 自由探索', 'badge': None},
-                {'title': '第 108 轮 · 组合实验 · 父轮 3+5 · 已提交', 'badge': 'submitted'},
-                *({'title': f'第 {i} 轮 · 自由探索', 'badge': None} for i in range(107, 70, -1))]},
-            'submissions': {'count': 4, 'entries': [
-                {'title': 'rKO9JAW9 · 2026年09月26日 06:09:53', 'badge': 'submitted'}]},
-        }
-        entries = tray.menu_model(state)
-        texts = [e.get('text', '') for e in entries]
-        self.assertIn('自动研究已启用', texts)
-        self.assertIn('下轮研究：grok · grok-4.7', texts)
-        settings = next(e for e in entries if e.get('text') == '设置')
-        notify = settings['items'][0]
-        self.assertEqual((notify['kind'], notify['action'], notify['arg']), ('check', 'config', 'notifications=off'))
-        queue = settings['items'][1]
-        self.assertEqual((queue['kind'], queue['action'], queue['arg'], queue['checked']),
-                         ('check', 'config', 'submission=on', False))
-        presets = next(e for e in settings['items'] if e['text'] == '路由预设')
-        head = presets['items'][0]['text']
-        self.assertIn('永久预设：steady', head)
-        self.assertNotIn('临时待用', head)   # 无待生效临时预设时不显示，也不显示取消行
-        steady = next(e for e in presets['items'] if e.get('kind') == 'submenu' and e.get('text') == '● steady')
-        core = next(e for e in presets['items'] if e.get('kind') == 'submenu' and e.get('text') == 'core-only')
-        self.assertTrue(steady['text'].startswith('● ')); self.assertFalse(core['text'].startswith('● '))
-        self.assertEqual([c['action'] for c in steady['items']],
-                         ['preset'] + ['preset-once'] * len(tray.TEMP_CYCLE_CHOICES))
-        permanent_row = steady['items'][0]
-        self.assertEqual((permanent_row['arg'], permanent_row['text']), ('steady', '永久切换'))
-        three = next(c for c in steady['items'] if c['arg'] == 'steady:3')
-        self.assertEqual(three['text'], '临时 3 轮')
-        self.assertNotIn('steady:2', [c.get('arg') for c in steady['items']])
-        providers = next(e for e in settings['items'] if e['text'] == '渠道')
-        grok = next(e for e in providers['items'] if e['text'] == 'grok')
-        devin = next(e for e in providers['items'] if e['text'].startswith('devin'))
-        self.assertTrue(grok['checked']); self.assertFalse(devin['checked'])
-        interval = next(e for e in settings['items'] if e['text'] == '运行间隔')
-        five = next(e for e in interval['items'] if e['text'] == '5 分钟')
-        self.assertEqual(five['arg'], 'interval_s=300'); self.assertTrue(five['checked'])
-        total = next(e for e in settings['items'] if e['text'] == '累计轮数上限')
-        unlimited = next(e for e in total['items'] if e['text'] == '不限')
-        self.assertEqual(unlimited['arg'], 'max_cycles_total=none'); self.assertFalse(unlimited['checked'])
-        self.assertIn('当前值 149 轮', [e.get('text') for e in total['items']])
-        history = next(e for e in entries if (e.get('text') or '').startswith('轮次历史'))
-        self.assertEqual(history['text'], '轮次历史（113）')
-        titles = [e['text'] for e in history['items']]
-        self.assertEqual(len(titles), tray.HISTORY_CAP + 1)  # 表头 + 截断后的轮次
-        self.assertIn('★ 第 108 轮 · 组合实验 · 父轮 3+5 · 已提交', titles)
-        quit_row = next(e for e in entries if (e.get('text') or '').startswith('退出'))
-        self.assertEqual(quit_row['kind'], 'submenu')
-        self.assertEqual([item['action'] for item in quit_row['items']],
-                         ['quit-app', 'quit-after-cycle', 'quit-now'])
+    def test_settings_have_one_editor_and_preserve_model_actions(self):
+        rows=tray.settings_items({'notifications':True},'en')
+        self.assertEqual([r['action'] for r in rows],['settings-window','update','logs'])
+        se={'providers':[{'name':'grok','disabled':False}], 'presets':[{'name':'steady','routes':'grok → devin'}], 'permanent_preset':'steady'}
+        menus=tray.settings_command_menus(se,'en','models')
+        self.assertEqual(len(menus),3)
+        provider=menus[2][1][0]
+        self.assertEqual((provider['action'],provider['arg'],provider['checked']),('provider','grok',True))
 
     def test_preset_pending_temp_shows_remaining_and_cancel(self):
-        entries = tray.menu_model({'settings': {
-            'active_preset': 'core-only', 'permanent_preset': 'steady',
-            'preset_once': 'core-only', 'preset_once_cycles': 3, 'cycle_preset': 'core-only',
-            'presets': [{'name': 'steady', 'routes': '…'}, {'name': 'core-only', 'routes': '…'}]}})
-        settings = next(e for e in entries if e.get('text') == '设置')
-        presets = next(e for e in settings['items'] if e['text'] == '路由预设')
-        texts = [e.get('text', '') for e in presets['items']]
-        self.assertIn('永久预设：steady｜本轮临时：core-only｜临时待用：core-only ×3', texts)
-        cancel = next(e for e in presets['items'] if e.get('action') == 'preset-cancel')
-        self.assertEqual(cancel['text'], '取消临时切换（core-only ×3）')
+        rows=tray.preset_items({'permanent_preset':'steady','cycle_preset':'core-only','preset_once':'core-only','preset_once_cycles':3,'presets':[{'name':'steady','routes':'fixture'},{'name':'core-only','routes':'fixture'}]},'zh')
+        self.assertIn('临时待用：core-only ×3',rows[0]['text'])
+        self.assertTrue(any(r.get('action')=='preset-cancel' for r in rows))
 
-    def test_toggle_notification_arg_flips_when_disabled(self):
-        entries = tray.menu_model({'settings': {'notifications': False}})
-        settings = next(e for e in entries if e.get('text') == '设置')
-        notify = settings['items'][0]
-        self.assertEqual(notify['arg'], 'notifications=on')
-        self.assertFalse(notify['checked'])
+    def test_descriptor_editor_distinguishes_false_none_and_pending(self):
+        from wq.desktop_windows import settings_changes,filtered_settings,setting_text
+        entries=[{'key':'desktop.notifications','group_id':'general','label':'Notifications','value':True,'type':'boolean'},
+                 {'key':'limit','group_id':'research','label':'Model starts','value':64,'has_pending':True,'pending':256},
+                 {'key':'retry','group_id':'providers','label':'Retry delay','value':None,'advanced':True}]
+        self.assertEqual(setting_text(False),'false')
+        self.assertEqual(setting_text(None),'none')
+        self.assertEqual(settings_changes(entries,{'limit':'256','desktop.notifications':'false'}),{'desktop.notifications':'false'})
+        self.assertEqual(filtered_settings(entries,'providers'),[])
+        self.assertEqual(filtered_settings(entries,'general','model')[0]['key'],'limit')
+        self.assertEqual(filtered_settings(entries,'providers',advanced=True)[0]['key'],'retry')
 
-    def test_language_submenu_switches_and_renders_english(self):
-        state = {'settings': {'language': 'en', 'language_setting': 'en', 'notifications': True}}
-        entries = tray.menu_model(state)
-        texts = [e.get('text', '') for e in entries]
-        self.assertIn('Settings', texts)
-        self.assertIn('Start automatic research', texts)
-        settings = next(e for e in entries if e.get('text') == 'Settings')
-        language = next(e for e in settings['items'] if e.get('text') == 'Interface language')
-        rows = {row['arg']: row for row in language['items']}
-        self.assertEqual(set(rows), {'language=auto', 'language=zh', 'language=en'})
-        self.assertTrue(rows['language=en']['checked'])
-        self.assertFalse(rows['language=auto']['checked'])
-
-        entries = tray.menu_model({'settings': {'language': 'zh', 'language_setting': 'auto', 'notifications': True}})
-        settings = next(e for e in entries if e.get('text') == '设置')
-        language = next(e for e in settings['items'] if e.get('text') == '界面语言')
-        rows = {row['arg']: row for row in language['items']}
-        self.assertTrue(rows['language=auto']['checked'])
-        self.assertIn('跟随系统（自动）', [row['text'] for row in language['items']])
+    def test_language_renders_shared_settings_entry(self):
+        rows=tray.settings_items({},'en')
+        self.assertEqual(rows[0]['text'],'Open settings…')
+        self.assertEqual(tray.settings_items({},'zh')[0]['text'],'打开设置…')
 
     def test_run_controls_follow_pause_and_the_open_cycle(self):
         paused = tray.menu_model({'status': {'paused': True, 'enabled': True}, 'settings': {'language': 'en'}})
@@ -189,10 +119,7 @@ class TrayMenuModelTests(unittest.TestCase):
         cancel = next(e for e in busy if e.get('text') == 'Cancel current cycle')
         self.assertEqual(cancel['action'], 'cancel-cycle')
         self.assertNotIn('Run next cycle now', [e.get('text') for e in busy])
-        settings = next(e for e in running if e.get('text') == 'Settings')
-        launch = next(e for e in settings['items'] if e.get('text') == 'Start automatic research on launch')
-        self.assertEqual(launch['arg'], 'launch_research=off')
-        self.assertTrue(launch['checked'])
+
 
 
 class SchedulerBackendTests(unittest.TestCase):

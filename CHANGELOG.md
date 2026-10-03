@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.24 (local candidate; not publicly released)
+
+- Replace the macOS tray menu wall with a compact status menu, searchable native settings window and a searchable activity reader.
+- Consolidate settings into a typed shared registry, atomic batch saves, stale-edit detection and persistent pending changes. Keep presentation preferences independent of research baselines.
+- Apply model, provider and lane changes at the same drained boundary; preserve accumulated usage and reload scheduling batches after application.
+- Make Stop finish existing cycles, clarify automatic submission, and preserve the model spend accounting origin.
+- Add a native ttk settings editor to the Python tray. Windows UI behavior still requires Windows acceptance.
+
 ## 0.2.23 (local candidate; not publicly released)
 
 - Expose research, evidence, scheduling, simulation, provider, spend and authorization limits in the desktop settings menu, including active experiment request limits.

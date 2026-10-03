@@ -135,7 +135,7 @@ class ProviderWorkflowTests(unittest.TestCase):
         self.save()
         providers.install_custom(self.cfg, {'name': 'or-a', 'preset': 'openrouter-free', 'roles': []}, key='fixture-provider-secret-one')
         providers.install_custom(self.cfg, {'name': 'or-b', 'preset': 'openrouter-free', 'model': 'google/gemma-4-31b-it:free'}, key='fixture-provider-secret-two')
-        saved = json.loads((self.root/'config/profiles.json').read_text())
+        saved = routing.catalog(self.cfg)
         entry = saved['providers']['or-b']
         self.assertEqual(entry['transport']['base_url'], 'https://openrouter.ai/api/v1')
         self.assertEqual(entry['transport']['model'], 'google/gemma-4-31b-it:free')
@@ -178,14 +178,14 @@ class ProviderWorkflowTests(unittest.TestCase):
             'base_url': 'http://192.168.1.20:8000/v1', 'roles': ['research'],
         }, key='local-secret')
         self.assertEqual(added['name'], 'homelab')
-        saved = json.loads((self.root/'config/profiles.json').read_text())
+        saved = routing.catalog(self.cfg)
         self.assertNotIn('local-secret', json.dumps(saved))
         self.assertEqual(saved['providers']['homelab']['transport']['base_url'], 'http://192.168.1.20:8000/v1')
         self.assertTrue(saved['providers']['homelab']['transport']['api_key_file'])
         self.assertEqual(saved['presets']['test']['routes']['research'][0], 'api')
         assigned = providers.assign_role(self.cfg, self.conn, 'research', 'homelab')
         self.assertEqual(assigned['provider'], 'homelab')
-        routed = json.loads((self.root/'config/profiles.json').read_text())
+        routed = routing.catalog(self.cfg)
         self.assertEqual(routed['presets']['test']['routes']['research'][0], 'homelab')
         with self.assertRaisesRegex(ValueError, '不同'):
             providers.assign_role(self.cfg, self.conn, 'review', 'homelab')

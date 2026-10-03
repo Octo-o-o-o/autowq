@@ -217,7 +217,7 @@ class SettingsControlTests(unittest.TestCase):
             self.assertFalse(desktop.control('settings')['submission_enabled'])
             desktop.control('config', 'submission=on')
             self.assertTrue(desktop.control('settings')['submission_enabled'])
-            self.assertFalse(desktop.control('settings')['automatic_submission'])
+            self.assertTrue(desktop.control('settings')['automatic_submission'])
             desktop.control('config', 'submission=off')
             self.assertFalse(desktop.control('settings')['submission_enabled'])
             desktop.control('config', 'model_spend_cap_usd=20')

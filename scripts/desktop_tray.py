@@ -287,107 +287,18 @@ def preset_items(se, lang):
     return rows
 
 
-def _spend_items(se, lang):
-    known = se.get('spend_known_usd') or 0
-    unknown = se.get('spend_unknown_calls') or 0
-    cap = se.get('spend_cap_usd')
-    rows = [info(text(lang, f'自本次设置起已知花费 ${known:.4f}', f'Known spend since this cap was set: ${known:.4f}'))]
-    if unknown:
-        rows.append(info(text(lang, f'另有 {unknown} 次调用金额未知，未计入，也不记成 $0',
-                              f'{unknown} calls have an unknown price; they are omitted and not treated as $0')))
-    rows.append(radio(text(lang, '不限', 'No cap'), 'config', 'model_spend_cap_usd=none', cap is None))
-    current_shown = False
-    for value in se.get('spend_presets') or [5, 10, 20, 50, 100]:
-        matched = isinstance(cap, (int, float)) and abs(float(cap) - float(value)) < 0.001
-        if matched:
-            current_shown = True
-        rows.append(radio(f'${value}', 'config', f'model_spend_cap_usd={value}', matched))
-    if isinstance(cap, (int, float)) and not current_shown:
-        rows.append(info(text(lang, f'当前上限 ${float(cap):.4f}', f'Current cap ${float(cap):.4f}')))
-    return rows
-
-
 def settings_items(se, lang):
-    if not se:
-        return [info(text(lang, '正在读取设置…', 'Loading settings…'))]
-    notifications = se.get('notifications', True)
-    provider_rows = [check(p['name'] + (text(lang, '（不可用）', ' (unavailable)') if p.get('reason') else ''),
-                           'provider', p['name'], not p.get('disabled'))
-                     for p in se.get('providers') or []]
-    language_rows = [radio(text(lang, zh, en), 'config', f'language={value}',
-                           se.get('language_setting', 'auto') == value)
-                     for value, (zh, en) in LANGUAGES]
-    submission_on = bool(se.get('submission_enabled'))
-    launch_on = se.get('launch_research', True) is not False
-    return [
-        check(text(lang, '系统通知（提交成功/任务失败）', 'System notifications (submission accepted / task failed)'),
-              'config', 'notifications=' + ('off' if notifications else 'on'), notifications),
-        check(text(lang, '提交队列（打开后，内部通过且授权仍有效的 Alpha 会自动入队）',
-                   'Submission queue (a passing Alpha is queued automatically while authorization is valid)'),
-              'config', 'submission=' + ('off' if submission_on else 'on'), submission_on),
-        check(text(lang, '启动时开始自动研究', 'Start automatic research on launch'),
-              'config', 'launch_research=' + ('off' if launch_on else 'on'), launch_on),
-        submenu(text(lang, '界面语言', 'Interface language'), language_rows),
-        submenu(text(lang, '模型', 'Models'), model_items(se, lang)),
-        submenu(text(lang, '运行额度与权限', 'Operating limits and permissions'), operating_items(se.get('operating') or {},lang)),
-        submenu(text(lang, '模型花费上限', 'Model spend cap'), _spend_items(se, lang)),
-        submenu(text(lang, '路由预设', 'Routing presets'), preset_items(se, lang)),
-        submenu(text(lang, '渠道', 'Providers'),
-                [info(text(lang, '勾选表示参与路由，点击切换', 'Checked = used for routing; click to toggle'))] + provider_rows),
-        submenu(text(lang, '运行间隔', 'Run interval'),
-                [radio(text(lang, zh, en), 'config', f'interval_s={value}', se.get('interval_s') == value)
-                 for value, (zh, en) in INTERVALS]
-                + _current_note([(v, 0) for v, _ in INTERVALS], se.get('interval_s'), text(lang, '秒', 's'), lang)),
-        submenu(text(lang, '并行泳道', 'Parallel lanes'),
-                [info(text(lang, '每条泳道是一轮完整的研究→审查→模拟；研究与审查必须不同渠道，'
-                               '同一渠道同一时刻只有一个调用，模拟与提交仍串行。对在途轮次不打断，下一轮起生效。',
-                               'Each lane is a full research→review→simulate cycle; research and review must use different channels, '
-                               'one call per channel at a time, and simulation/submission stay serial. Applies to the next cycles.'))]
-                + [radio(text(lang, zh, en), 'config', f'concurrent_lanes={value}', se.get('concurrent_lanes') == value)
-                   for value, (zh, en) in LANES]
-                + _current_note([(v, 0) for v, _ in LANES], se.get('concurrent_lanes'), text(lang, '条', 'lanes'), lang)),
-        submenu(text(lang, '泳道固定', 'Lane pinning'), lane_pin_items(se, lang)),
-        submenu(text(lang, '每日轮数上限', 'Daily cycle limit'),
-                [radio(text(lang, zh, en), 'config', f'max_cycles_per_day={value}', se.get('max_cycles_per_day') == value)
-                 for value, (zh, en) in DAILIES]
-                + _current_note([(v, 0) for v, _ in DAILIES], se.get('max_cycles_per_day'), text(lang, '轮', 'cycles'), lang)),
-        submenu(text(lang, '累计轮数上限', 'Total cycle limit'),
-                [radio(text(lang, zh, en), 'config', f'max_cycles_total={value}', se.get('max_cycles_total') == value)
-                 for value, (zh, en) in TOTALS]
-                + [radio(text(lang, '不限', 'Unlimited'), 'config', 'max_cycles_total=none', se.get('max_cycles_total') is None)]
-                + _current_note([(v, 0) for v, _ in TOTALS], se.get('max_cycles_total'), text(lang, '轮', 'cycles'), lang)),
-        action(text(lang, '检查更新', 'Check for updates'), 'update'),
-        action(text(lang, '打开运行日志', 'Open run log'), 'logs'),
-    ]
+    return [action(text(lang,'打开设置…','Open settings…'),'settings-window'),
+            action(text(lang,'检查更新','Check for updates'),'update'),
+            action(text(lang,'打开运行日志','Open run log'),'logs')]
 
 
-def operating_items(data,lang):
-    groups={}
-    rows=[]
-    if data.get('pending'):
-        rows.append(info(text(lang,'修改待现有任务结束后应用','Changes pending until existing work finishes')))
-        rows.append(action(text(lang,'取消待应用修改','Cancel pending changes'),'operating-cancel'))
-    if (data.get('last') or {}).get('state')=='failed':rows.append(info(str(data['last'].get('error'))))
-    for entry in data.get('entries',[]):
-        value=entry.get('value');label=entry['label']+': '+('none' if value is None else str(value))
-        if entry.get('used') is not None:label+=text(lang,f"（已用 {entry['used']}）",f" (used {entry['used']})")
-        if entry.get('has_pending'):label+=text(lang,' → 待应用 ',' → pending ')+str(entry.get('pending'))
-        if entry.get('active') is False:label+=text(lang,'（当前不生效）',' (inactive)')
-        groups.setdefault(entry['group'],[]).append(action(label,'operating-edit',json.dumps(entry,ensure_ascii=False)))
-    rows += [submenu(group,items) for group,items in groups.items()]
-    rows += [info(line) for line in data.get('fixed',[])]
-    return rows
-
-
-def ask_operating_value(entry,lang):
-    import tkinter as tk
-    from tkinter import simpledialog
-    root=tk.Tk();root.withdraw()
-    try:
-        value=entry.get('pending') if entry.get('has_pending') else entry.get('value')
-        hint=entry.get('note','')+'\n'+text(lang,'填写数字；none 表示自动值／不限。日期需附时区。现有任务结束后生效。','Enter a number, none for automatic/unlimited, or a date with timezone. Applies after existing work finishes.')
-        return simpledialog.askstring(entry['label'],hint,initialvalue='none' if value is None else str(value),parent=root)
-    finally:root.destroy()
+def settings_command_menus(se,lang,group):
+    if group=='scheduling':return [(text(lang,'泳道模型分配','Models per lane'),lane_pin_items(se,lang))]
+    providers=[check(p['name']+(text(lang,'（不可用）',' (unavailable)') if p.get('reason') else ''),'provider',p['name'],not p.get('disabled')) for p in se.get('providers',[])]
+    return [(text(lang,'默认模型','Default models'),model_items(se,lang)),
+            (text(lang,'路由预设','Routing presets'),preset_items(se,lang)),
+            (text(lang,'渠道开关','Provider availability'),providers)]
 
 
 def model_items(se, lang):
@@ -400,7 +311,7 @@ def model_items(se, lang):
             ('review', 'review_provider', '审查模型', 'Review model')):
         rows.append(sep())
         rows.append(info(text(lang, zh, en)))
-        head = se.get(head_key) or ''
+        head = se.get('editable_'+head_key) or se.get(head_key) or ''
         for provider in providers:
             name = provider.get('name') or ''
             rows.append(radio(provider.get('label') or name, 'provider-role', f'{role}:{name}', name == head))
@@ -445,7 +356,9 @@ def run_actions(st, lang):
         rows.append(action(text(lang, '取消当前轮次', 'Cancel current cycle'), 'cancel-cycle'))
     elif not paused:
         rows.append(action(text(lang, '立刻运行下一轮', 'Run next cycle now'), 'run-next'))
-    if (not paused) and enabled:
+    if st.get('stop_after_cycle'):
+        rows.append(info(text(lang,'正在等待现有泳道完成…','Finishing active lanes…')))
+    elif (not paused) and enabled:
         rows.append(action(text(lang, '停止自动研究', 'Stop automatic research'), 'pause'))
     else:
         rows.append(action(text(lang, '开始自动研究', 'Start automatic research'), 'start'))
@@ -567,6 +480,7 @@ class Tray:
     def __init__(self):
         self.state = {}
         self.icon = None
+        self.settings_window_open = False
         self.stop = threading.Event()
 
     def call(self, act, arg=None, quiet=False):
@@ -594,12 +508,14 @@ class Tray:
             logging.exception('通知失败')
 
     def on_action(self, act, arg):
+        if act=='settings-window':
+            if self.settings_window_open:return
+            self.settings_window_open=True
         def worker():
             try:
-                if act == 'operating-edit':
-                    entry=json.loads(arg);lang=(self.state.get('settings') or {}).get('language','zh')
-                    value=ask_operating_value(entry,lang)
-                    if value is not None:self.call('operating-setting',entry['key']+'='+value.strip())
+                if act == 'settings-window':
+                    from wq.desktop_windows import show_settings
+                    show_settings(bridge.control,settings_command_menus)
                 elif act == 'logs':
                     open_path(bridge.runner_log())
                 elif act in ('quit-app', 'quit-after-cycle', 'quit-now'):
@@ -616,6 +532,7 @@ class Tray:
                 if act in ('preset', 'preset-once', 'preset-cancel', 'provider', 'config'):
                     self.call('settings', quiet=True)   # 立即反映新勾选状态，不等周期轮询
             finally:
+                if act=='settings-window':self.settings_window_open=False
                 if act not in ('quit-app', 'quit-after-cycle', 'quit-now'):
                     self.refresh()
         threading.Thread(target=worker, daemon=True).start()

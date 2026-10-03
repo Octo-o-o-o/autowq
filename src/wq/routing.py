@@ -21,6 +21,10 @@ MAX_ONCE_CYCLES = 100   # 临时预设最多覆盖的新建轮次数；更久的
 def catalog(cfg):
     path = cfg.resolve(cfg.get('routing', 'profiles_file', default='config/profiles.json'))
     data = util.read_json(path)
+    data.setdefault('providers',{}).update(copy.deepcopy(cfg.get('routing','custom_providers',default={})))
+    for preset_name, roles in cfg.get('routing','route_overrides',default={}).items():
+        if preset_name not in data.get('presets',{}):raise ValueError('Unknown preset override: '+preset_name)
+        data['presets'][preset_name].setdefault('routes',{}).update(copy.deepcopy(roles))
     providers = data.get('providers', {})
     presets = data.get('presets', {})
     if not providers or not presets or data.get('default') not in presets:

@@ -138,43 +138,39 @@ def install_custom(cfg, spec, key=None):
         api = api_definition(protocol, model, base_url, env_name)
     if allow_no_key:
         api['allow_no_key'] = True
-    path = Path(cfg.resolve(cfg.get('routing', 'profiles_file', default='config/profiles.json')))
-    profiles = json.loads(path.read_text(encoding='utf-8'))
-    providers = profiles.setdefault('providers', {})
-    if name in providers:
+    from . import routing, runtime_settings
+    draft=runtime_settings.edit_config(cfg)
+    profiles=routing.catalog(draft)
+    if name in profiles['providers']:
         raise ValueError('已经有同名渠道')
     if key:
-        api['api_key_file'] = save_key(cfg.ensure_private_dir(), name, key)
-    providers[name] = definition(protocol, model, api=api)
-    providers[name]['label'] = name + ' / ' + model
+        api['api_key_file']=save_key(cfg.ensure_private_dir(),name,key)
+    provider=definition(protocol,model,api=api)
+    provider['label']=name+' / '+model
     if spec.get('preset'):
-        providers[name]['timeout_s'] = api['timeout_s'] + 60
-        providers[name]['free_preset'] = spec['preset']
-        if quota_reset:
-            providers[name]['quota_reset'] = quota_reset
-    if not profiles.get('presets'):
-        raise ValueError('还没有路由预设，请先完成初始化')
-    util.write_json(str(path), profiles)
-    path.chmod(0o600)
-    cfg.data.setdefault('models', {})[name] = {'enabled': True, 'timeout_s': providers[name]['timeout_s']}
-    cfg.data.setdefault('budgets', {})[name] = {
-        'enabled': True, 'remaining': 10000, 'unit': 'calls', 'as_of': util.now_iso()}
-    util.write_json(cfg.path, cfg.data)
-    return {'name': name, 'roles': list(roles)}
+        provider['timeout_s']=api['timeout_s']+60
+        provider['free_preset']=spec['preset']
+        if quota_reset:provider['quota_reset']=quota_reset
+    updates={f'routing.custom_providers.{name}':provider,
+             f'models.{name}':{'enabled':True,'timeout_s':provider['timeout_s']},
+             f'budgets.{name}':{'enabled':True,'remaining':10000,'unit':'calls','as_of':util.now_iso()}}
+    result=runtime_settings.request(cfg,updates)
+    if result['state']=='failed':raise ValueError(result['error'])
+    return {'name':name,'roles':list(roles),'state':result['state']}
 
 
 def assign_role(cfg, conn, role, provider):
     """把一个已保存的模型放到当前预设里该角色的第一位。研究和审查的第一位不能相同。"""
-    from . import routing, store, util
+    from . import routing, store, util, runtime_settings
     if role not in ('research', 'review', 'engineering'):
         raise ValueError('角色只接受 research、review、engineering')
-    path = Path(cfg.resolve(cfg.get('routing', 'profiles_file', default='config/profiles.json')))
-    profiles = json.loads(path.read_text(encoding='utf-8'))
+    profiles = routing.catalog(runtime_settings.edit_config(cfg))
     if provider not in profiles.get('providers', {}):
         raise ValueError('还没有这个模型')
     if store.get_flag(conn, f'provider_disabled:{provider}') == '1':
         raise ValueError('这个渠道未打开。请先在渠道里打开，再把它设为研究或审查')
     preset_name = store.get_flag(conn, 'active_preset') or profiles.get('default')
+    if preset_name=='advanced':raise ValueError('Workflow routes are edited in the workflow definition')
     preset = (profiles.get('presets') or {}).get(preset_name)
     if not isinstance(preset, dict):
         raise ValueError('当前预设由流程文件固定，不能在菜单里改研究和审查的模型')
@@ -187,10 +183,9 @@ def assign_role(cfg, conn, role, provider):
             raise ValueError('研究和审查要使用不同的模型（同一服务地址或同一 CLI 算同一渠道）')
     chain = [provider] + [item for item in (routes.get(role) or []) if item != provider]
     routes[role] = chain
-    util.write_json(str(path), profiles)
-    path.chmod(0o600)
-    routing.catalog(cfg)
-    return {'preset': preset_name, 'role': role, 'provider': provider}
+    result=runtime_settings.request(cfg,{f'routing.route_overrides.{preset_name}.{role}':chain})
+    if result['state']=='failed':raise ValueError(result['error'])
+    return {'preset':preset_name,'role':role,'provider':provider,'state':result['state']}
 
 
 def runtime_argv(cfg, definition):

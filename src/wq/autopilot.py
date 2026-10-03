@@ -560,6 +560,7 @@ def status(conn,cfg):
                             'review_preferred':(plan or {}).get('review_preferred')})
     return {'total_cycles':conn.execute('SELECT COUNT(*) FROM research_cycles').fetchone()[0],
             'max_cycles_total':cfg.get('autopilot','max_cycles_total'),
+            'stop_after_cycle':store.get_flag(conn,'autopilot_stop_after_cycle')=='1',
             'enabled':enabled(conn,cfg),'run_next_requested':run_next_requested(conn),'paused':store.is_paused(conn),'message':text,
             'concurrent_lanes':lane_limit(cfg),
             'open_cycles':open_cycles,
