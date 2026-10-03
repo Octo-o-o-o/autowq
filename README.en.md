@@ -1,5 +1,7 @@
 # autowq
 
+For continuous operation and exact epoch recovery, see the [operations guide](docs/reliable-automation.md). Source version 0.2.22 is not publicly released; public downloads below remain 0.2.21.
+
 English | [简体中文](README.md)
 
 **Official site: [autowq.octoooo.com](https://autowq.octoooo.com)** — product overview, macOS DMG downloads and the quick-start guide.

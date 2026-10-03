@@ -54,7 +54,7 @@
       "featureList": [
         "Cross-provider review: research and review channels are forced apart",
         "Per-provider budget and authorization gates, all off by default",
-        "Multi-lane research: parallel lanes each run research → review → simulation; one call per provider at a time, simulation and submission stay serial; any lane can be pinned to a chosen pair",
+        "Source-only feature (not in the public macOS 0.2.21 download): parallel lanes each run research → review → simulation; one call per provider at a time, simulation and submission stay serial; any lane can be pinned to a chosen pair",
         "Local SQLite ledger with real-outcome diagnostics",
         "Independent pre-submission acceptance gates",
         "Continuous-research framework after Gold: bounded evidence collection, late reassessment, findings that feed the next round",
@@ -216,7 +216,7 @@
   <div class="principles rise">
     <div class="p"><div class="idx">STEP 1</div><h3>Run the wizard once</h3><p>It detects the agent CLIs you already subscribe to, writes config from your choices and launches BRAIN + provider logins — the demo above. You never repeat it.</p></div>
     <div class="p"><div class="idx">STEP 2</div><h3>Set budget &amp; window</h3><p>Enable research inside your own budget and authorization window. Models, research and submission are all off by default; nothing runs until you say so.</p></div>
-    <div class="p"><div class="idx">STEP 3</div><h3>Every cycle, automated</h3><p>Hypothesis → cross-provider review → bounded simulation. Research and review channels are forced apart; lanes run in parallel while simulation and submission stay serial.</p></div>
+    <div class="p"><div class="idx">STEP 3</div><h3>Every cycle, automated</h3><p>Hypothesis → cross-provider review → bounded simulation. Research and review channels are forced apart. Multi-lane concurrency is source-only for now; the public macOS 0.2.21 download uses one lane. Simulation and submission stay serial.</p></div>
     <div class="p"><div class="idx">STEP 4</div><h3>Read real outcomes</h3><p>Cycle history, real receipts, failures and UNKNOWNs are all recorded as-is; failed candidates carry their reasons and never silently retry.</p></div>
     <div class="p"><div class="idx">STEP 5</div><h3>Gate, then submit</h3><p>Qualified candidates pass an independent pre-submission acceptance gate, then you verify the platform receipt — and the next cycle tightens the loop again.</p></div>
     <div class="p"><div class="idx">ALWAYS ON</div><h3>Everything in the tray</h3><p>Per-lane cycles, provider pairs and cooldowns, next research / review providers, submitted alphas, real receipts and blocked states — visible, pausable, cancellable per lane.</p></div>

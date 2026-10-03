@@ -33,6 +33,16 @@ class AppSetupTests(unittest.TestCase):
     def install(self):
         with contextlib.redirect_stdout(io.StringIO()): setup.setup(str(self.workspace))
 
+    def test_explicit_engine_snapshot_wins_over_editable_workspace(self):
+        source=self.root/'release/src'
+        (source/'wq').mkdir(parents=True)
+        (source/'wq/__init__.py').write_text('')
+        with patch.dict(setup.os.environ,{'WQ_ENGINE_SOURCE':str(source),'PYTHONPATH':'/old/source'}):
+            self.assertEqual(setup._python_env(self.workspace)['PYTHONPATH'],str(source))
+        with patch.dict(setup.os.environ,{'WQ_ENGINE_SOURCE':str(self.root/'missing')}):
+            with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
+                setup._python_env(self.workspace)
+
     def test_changed_wheel_same_version_reinstalls_and_identical_wheel_skips(self):
         self.install()
         command = self.run.call_args_list[0].args[0]

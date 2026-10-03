@@ -117,6 +117,14 @@ def required_epoch(conn,cfg,cycle_id=None):
     if any(lifecycle.stop_kind(conn,e)=='owner_stop' for e in lifecycle.lineage(conn,eid)[1]):raise ValueError('Owner stopped dual-loop lineage')
     if lifecycle.stop_kind(conn,eid):raise ValueError('Dual-loop epoch stopped; exact successor required')
     if learning.current_baseline(cfg)!=doc['baseline']:raise ValueError('Dual-loop baseline not approved')
+    # Registered paired research has its own campaign request ledger. It must not
+    # be placed into the ordinary baseline/learning comparison to get permission.
+    from . import research_campaign
+    if cycle_id and research_campaign.assignment(conn,cycle_id):
+        resource=conn.execute('SELECT * FROM learning_resource_cycles WHERE cycle_id=?',(cycle_id,)).fetchone()
+        if resource and (resource['experiment_id']!=eid or resource['work_kind']!='campaign'):
+            raise ValueError('Campaign belongs to another epoch or population')
+        return eid
     own=conn.execute('SELECT * FROM learning_assignments WHERE cycle_id=?',(cycle_id,)).fetchone() if cycle_id else None
     left=lifecycle.remaining(conn,eid)
     if not own and left['cycles']<=0:raise ValueError('Dual-loop cumulative cycles exhausted')
@@ -146,13 +154,51 @@ def discovery_permission(conn,cfg,p,cycle_id=None):
     sources=framework.latest(conn,'research_evidence_source','gap_id')
     material={k:framework.file_identity(v['source']['path']) for k,v in sources.items() if v['adapter']=='local_material_v1'}
     # Neither generated issue IDs, closed-cycle watermarks nor our own events refill this allowance.
-    identity=util.sha256_json({'policy':p,'sources':sources,'material':material,'bundle':BUNDLE})
+    inputs={'policy':p,'sources':sources,'material':material,'bundle':BUNDLE}
+    try:observations=observation_fingerprint(conn,cfg)
+    except ValueError:
+        return {'allowed':False,'reason':'waiting_unreadable_or_changed_consumed_receipt'}
+    # Preserve the pre-upgrade episode identity when there is no new information.
+    if observations is not None:inputs['observations']=observations
+    identity=util.sha256_json(inputs)
     if any(value is None or value!=sources[k]['source']['sha256'] for k,value in material.items()):return {'allowed':False,'reason':'waiting_unreadable_or_changed_registered_material'}
     row=store.get_flag(conn,'discovery_episode:'+identity)
     doc=json.loads(row) if row else {'input_hash':identity,'empty_cycles':[]}
-    allowed=len(doc['empty_cycles'])<2 and int(store.get_flag(conn,'dual_model_reservations:'+cfg.get('research_dual_loop','root_id'),'0'))<64
-    reason='bounded_discovery' if allowed else 'waiting_changed_observation'
+    budget_left=int(store.get_flag(conn,'dual_model_reservations:'+cfg.get('research_dual_loop','root_id'),'0'))<64
+    allowed=len(doc['empty_cycles'])<2 and budget_left
+    reason='bounded_discovery' if allowed else 'waiting_changed_observation' if budget_left else 'dual_model_budget_exhausted'
     return {'allowed':allowed,'reason':reason, 'episode':identity,'empty_cycles':doc['empty_cycles']}
+
+
+def observation_fingerprint(conn,cfg):
+    """Only verified, already consumed real receipts can change discovery inputs.
+
+    A closed-cycle counter or generated proposal is not new information. This
+    keeps two old failed discoveries from suppressing later genuine observations.
+    Cumulative model/request budgets remain attached to the original root.
+    """
+    receipts=[]
+    for row in conn.execute("SELECT key,value FROM state_flags WHERE key LIKE 'information_consumed:%' ORDER BY key"):
+        try:cid=int(row['value'])
+        except (ValueError,TypeError):continue
+        if store.get_flag(conn,'dual_cycle:'+str(cid))!=cfg.get('research_dual_loop','learning_root'):continue
+        tid=row['key'].split(':',1)[1]
+        if not information_receipt(conn,cid,tid):
+            raise ValueError('Consumed observation no longer validates')
+        run=conn.execute('SELECT alpha_id,evidence_path FROM brain_runs WHERE task_id=?',(tid,)).fetchone()
+        try:digest=util.sha256_json(util.read_json(run['evidence_path']))
+        except (OSError,ValueError,TypeError) as exc:
+            raise ValueError('Consumed observation is unreadable') from exc
+        receipt={'task':tid,'cycle':cid,'alpha':run['alpha_id'],'sha256':digest}
+        key='discovery_observation:'+tid
+        previous=store.get_flag(conn,key)
+        if previous and json.loads(previous)!=receipt:
+            raise ValueError('Consumed observation identity changed')
+        # Keep the original fingerprint format for upgrades. Missing or edited
+        # files cannot remove an accepted observation or mint a fresh episode.
+        if not previous:store.set_flag(conn,key,json.dumps(receipt))
+        receipts.append(receipt)
+    return util.sha256_json(receipts) if receipts else None
 
 
 def record_discovery(conn,cfg,cid,has_information,p):
@@ -192,7 +238,19 @@ def information_receipt(conn,cid,tid):
 
 
 def reserve_model(conn,cfg,task_id=None,provider=None):
+    """Durable reservation under a write lock shared by every model worker."""
     if not enabled(cfg):return
+    owns_transaction=not conn.in_transaction
+    if owns_transaction:conn.execute('BEGIN IMMEDIATE')
+    try:
+        _reserve_model(conn,cfg,task_id,provider)
+        conn.commit()
+    except BaseException:
+        if owns_transaction:conn.rollback()
+        raise
+
+
+def _reserve_model(conn,cfg,task_id,provider):
     if not authority(cfg):raise ValueError('Dual-loop model authority expired')
     if task_id:
         task=conn.execute('SELECT payload_json FROM tasks WHERE task_id=?',(task_id,)).fetchone()
@@ -201,15 +259,27 @@ def reserve_model(conn,cfg,task_id=None,provider=None):
         if cid is not None or role in ('research','review'):
             if type(cid) is not int or cid<=0 or role not in ('research','review'):raise ValueError('Dual-loop model requires an assigned Quant cycle')
             cycle=conn.execute('SELECT * FROM research_cycles WHERE cycle_id=?',(cid,)).fetchone()
-            if not cycle or cycle['state']!=('researching' if role=='research' else 'reviewing') or cycle[role+'_task']!=task_id:raise ValueError('Dual-loop model task does not own the active cycle stage')
-            if not conn.execute('SELECT 1 FROM learning_assignments WHERE cycle_id=?',(cid,)).fetchone():raise ValueError('Dual-loop model cycle has no frozen assignment')
-            required_epoch(conn,cfg,cid)
+            owns_stage=bool(cycle and cycle[role+'_task']==task_id)
+            if cycle and role=='review':
+                from . import research_campaign_v2
+                pair=research_campaign_v2.pair_for_cycle(conn,cid)
+                if pair:
+                    owns_stage=task_id in research_campaign_v2.review_refs(conn,pair['pair_id']).values()
+            if not cycle or cycle['state']!=('researching' if role=='research' else 'reviewing') or not owns_stage:raise ValueError('Dual-loop model task does not own the active cycle stage')
+            eid=required_epoch(conn,cfg,cid)
+            from . import research_campaign
+            population='campaign' if research_campaign.assignment(conn,cid) else 'ordinary'
+            resource=conn.execute('SELECT * FROM learning_resource_cycles WHERE cycle_id=?',(cid,)).fetchone()
+            if population=='campaign':
+                if not resource or resource['experiment_id']!=eid or resource['work_kind']!=population:
+                    raise ValueError('Dual-loop campaign has no frozen resource ownership')
+            elif not conn.execute('SELECT 1 FROM learning_assignments WHERE cycle_id=?',(cid,)).fetchone():
+                raise ValueError('Dual-loop model cycle has no frozen assignment')
     root=cfg.get('research_dual_loop','root_id');key='dual_model_reservations:'+root
     used=int(store.get_flag(conn,key,'0'))
     if used>=64:raise ValueError('Dual-loop model start reservation cap 64 reached')
     store.set_flag(conn,key,str(used+1))
     if task_id:store.add_attempt(conn,task_id,'model_start_reserved','reserved',{'root':root,'reservation':used+1,'provider':provider})
-    conn.commit()
 
 
 def restore_deployment_pause(conn,cfg,receipt):

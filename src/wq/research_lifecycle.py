@@ -95,6 +95,61 @@ def approve_transition(conn, cfg, doc):
     return record
 
 
+def prepare_transition(conn, cfg, owner='local-owner', reason='Reviewed local code/configuration update'):
+    """Build the exact, reviewable migration document without changing an epoch."""
+    from . import research_learning as learning, autopilot, research_meta
+    row=conn.execute('SELECT * FROM learning_experiments ORDER BY created_at DESC,rowid DESC LIMIT 1').fetchone()
+    if not row:raise ValueError('No experiment to migrate')
+    eid=row['experiment_id'];old=json.loads(row['document_json']);target=learning.current_baseline(cfg)
+    if any(stop_kind(conn,e)=='owner_stop' for e in lineage(conn,eid)[1]):
+        raise ValueError('Owner stopped this experiment lineage')
+    kind=stop_kind(conn,eid)
+    if kind not in (None,'baseline_superseded'):
+        raise ValueError('This stop cannot be resolved by a baseline migration: '+kind)
+    if kind is None and target==old['baseline']:
+        raise ValueError('Current experiment already matches the installed baseline')
+    deadlines=[autopilot.policy(cfg)['valid_until'],cfg.get('brain_api','authorized_until'),cfg.get('routing','authorized_until')]
+    if research_meta.enabled(cfg):deadlines.append(cfg.get('research_dual_loop','valid_until'))
+    if any(not d or util.now()>=util.parse_iso(d) for d in deadlines):
+        raise ValueError('Existing research authorization expired or missing')
+    transition_id='local-'+util.sha256_json({'from':eid,'to':target})[:24]
+    return {'transition_id':transition_id,'from_experiment':eid,'from_baseline_hash':old['baseline_hash'],
+            'to_baseline':target,'valid_until':min(deadlines,key=util.parse_iso),
+            'reason':reason,'approved_by':owner}
+
+
+def apply_transition(conn,cfg,doc):
+    """Explicit owner operation; caller holds the runner lock. Never renew budgets."""
+    from . import research_learning as learning, store
+    conn.execute('SAVEPOINT owner_epoch_transition')
+    try:
+        latest=conn.execute('SELECT * FROM learning_experiments ORDER BY created_at DESC,rowid DESC LIMIT 1').fetchone()
+        if not latest or not isinstance(doc,dict):raise ValueError('Exact epoch transition contract required')
+        current=json.loads(latest['document_json'])
+        # Retrying a successful operation returns its durable result.
+        if current.get('transition_id')==doc.get('transition_id') and current['baseline']==doc.get('to_baseline'):
+            result={'state':'already_created','experiment':latest['experiment_id'],'remaining':remaining(conn,latest['experiment_id'])}
+        else:
+            if latest['experiment_id']!=doc.get('from_experiment'):raise ValueError('Transition no longer targets the latest experiment')
+            if doc.get('to_baseline')!=learning.current_baseline(cfg) or doc.get('from_baseline_hash')!=current['baseline_hash']:
+                raise ValueError('Installed source/configuration changed; prepare a new exact transition')
+            if conn.execute("SELECT 1 FROM research_cycles WHERE state!='closed'").fetchone() or conn.execute("SELECT 1 FROM tasks WHERE status IN ('claimed','running','unknown')").fetchone():
+                raise ValueError('Drain or reconcile existing work before migrating the epoch')
+            if stop_kind(conn,latest['experiment_id']) is None:
+                if current['baseline']==doc['to_baseline']:raise ValueError('Current baseline does not need migration')
+                learning.stop_experiment(conn,latest['experiment_id'],'Explicit local migration of changed baseline',stop_type='baseline_superseded')
+            approve_transition(conn,cfg,doc)
+            result=advance(conn,cfg)
+            if result['state']!='created':raise ValueError('Epoch migration is blocked: '+result['state'])
+            store.set_flag(conn,'research_learning_state',json.dumps({'mode':'shadow',
+                'reason':'Approved successor inherits remaining lineage budget','experiment':result['experiment']}))
+        conn.execute('RELEASE owner_epoch_transition')
+        return result
+    except BaseException:
+        conn.execute('ROLLBACK TO owner_epoch_transition');conn.execute('RELEASE owner_epoch_transition')
+        raise
+
+
 def advance(conn,cfg):
     from . import research_learning as learning, research_campaign_v2 as events, autopilot
     learning.setup(conn)
@@ -114,7 +169,7 @@ def advance(conn,cfg):
     if not autopilot.enabled(conn,cfg):return {'state':'autopilot_disabled','experiment':eid}
     for deadline in (autopilot.policy(cfg)['valid_until'],cfg.get('brain_api','authorized_until'),cfg.get('routing','authorized_until')):
         if not deadline or util.now()>=util.parse_iso(deadline):return {'state':'authority_expired','experiment':eid}
-    if conn.execute("SELECT 1 FROM tasks WHERE status IN ('claimed','running','unknown')").fetchone():return {'state':'waiting_inflight','experiment':eid}
+    if conn.execute("SELECT 1 FROM tasks WHERE status IN ('claimed','running','unknown')").fetchone() or conn.execute("SELECT 1 FROM research_cycles WHERE state!='closed'").fetchone():return {'state':'waiting_inflight','experiment':eid}
     left=remaining(conn,eid)
     if left['cycles']<2 or any(n<=0 for n in left['requests_by_arm'].values()):return {'state':'budget_exhausted','remaining':left}
     approval=approvals[-1];new_id='epoch-'+util.sha256_json({'root':root,'approval':approval})[:20]

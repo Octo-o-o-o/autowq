@@ -484,6 +484,15 @@ NOTIFY_SOURCES = (
 def pending_notifications(conn, lang='zh'):
     """消费自上次检查以来的新事件并推进水位线；返回待通知列表（需写连接）。"""
     items = []
+    # Persistent, actionable stops deserve one notification per distinct state,
+    # rather than an otherwise healthy timer silently repeating an idle message.
+    message=store.get_flag(conn,'autopilot_message','')
+    actionable=any(token in message for token in ('需迁移研究基线','框架检查失败','累计模型启动额度已用尽'))
+    last=store.get_flag(conn,'desktop_research_block_notified','')
+    if actionable and message!=last:
+        items.append({'id':'research-block:'+util.sha256_json(message)[:16],'kind':'research',
+            'title':text(lang,'自动研究需要处理','Automatic research needs attention'),'body':message})
+    store.set_flag(conn,'desktop_research_block_notified',message if actionable else '')
     pending=store.get_flag(conn,'handoff_batch_pending')
     if pending:
         batch=json.loads(pending)
@@ -660,6 +669,13 @@ def research(conn, cfg, lang='zh'):
                      text(lang,'冻结基线变化：','Frozen baseline changes: ')+', '.join(experiment_health['baseline_changes']),
                      text(lang,'同一研究预算剩余：','Remaining lineage budget: ')+json.dumps(experiment_health['remaining'],ensure_ascii=False),
                      text(lang,'后续动作：','Next action: ')+experiment_health['next_action']]
+        learning.extend(experiment_health.get('recovery_commands',[]))
+    if health.get('dual_resources'):
+        resources=health['dual_resources']
+        learning.append(text(lang,'累计模型启动：','Cumulative model starts: ')+
+                        f"{resources['model_starts']['used']}/{resources['model_starts']['limit']}")
+        learning.append(text(lang,'累计取证读取：','Cumulative evidence reads: ')+
+                        f"{resources['evidence_reads']['used']}/{resources['evidence_reads']['limit']}")
     if 'learning_experiments' in tables:
         exp = conn.execute('SELECT * FROM learning_experiments ORDER BY created_at DESC LIMIT 1').fetchone()
         if exp:

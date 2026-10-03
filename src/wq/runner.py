@@ -193,9 +193,10 @@ def _settle(conn, cfg, task, outcome, detail, error) -> tuple[int, list[str]]:
 def _agent_worker(cfg, task, results):
     """模型调用工作线程：独立 SQLite 连接完成分派与落账，结果回传 supervisor。"""
     from . import db as _db
-    conn = _db.connect(cfg.db_path)
+    conn = None
     tid = task["task_id"]
     try:
+        conn = _db.connect(cfg.db_path)
         store.set_task_running(conn, tid)
         outcome, detail, error = dispatch_task(conn, cfg, task)
         code, lines = _settle(conn, cfg, task, outcome, detail, error)
@@ -203,15 +204,16 @@ def _agent_worker(cfg, task, results):
         results.put((tid, code, lines))
     except Exception as exc:
         try:
-            conn.rollback()
-            store.finish_task(conn, tid, store.TASK_FAILED,
-                              {"error": str(exc)[:300]}, str(exc)[:300])
-            conn.commit()
+            if conn is not None:
+                conn.rollback()
+                store.finish_task(conn, tid, store.TASK_FAILED,
+                                  {"error": str(exc)[:300]}, str(exc)[:300])
+                conn.commit()
         except Exception:
             pass
         results.put((tid, ERR, [f"task {tid} worker error: {exc}"]))
     finally:
-        conn.close()
+        if conn is not None:conn.close()
 
 
 def agent_pool_size(cfg) -> int:
@@ -234,8 +236,13 @@ _FRAMEWORK_WAITING_ZH = {
     'queued': '研究框架工作项已入队',
     'waiting_for_changed_evidence': '等待足以改变决策的新证据',
     'dual_loop_authority_expired': '双环路学习授权已到期',
+    'dual_model_budget_exhausted': '双环路累计模型启动额度已用尽；重启或迁移不会补充额度',
     'Dual-loop baseline not approved': '双环路冻结基线未审批',
+    'Dual-loop epoch stopped; exact successor required': '代码或配置已更新，需迁移研究基线；运行 wq research-framework prepare-epoch',
+    'Dual-loop cumulative cycles exhausted': '实验累计轮数已用尽；检查研究资源预算',
+    'Dual-loop next arm request budget exhausted': '下一实验组的模拟预算已用尽；检查研究资源预算',
     'waiting_unreadable_or_changed_registered_material': '已登记材料不可读或已变更',
+    'waiting_unreadable_or_changed_consumed_receipt': '已消费回执缺失或已变更：恢复原回执后继续，不重置发现额度',
     'waiting_changed_observation': '发现额度暂尽：等待可改变观察的新证据登记',
     'bounded_discovery': '有界发现进行中',
 }
@@ -254,11 +261,13 @@ def _coordinate(conn, cfg):
             allow_new = work.get('allow_new_quant_cycle', True)
         else:
             research_maintenance.tick(conn, cfg)
+        store.set_flag(conn, 'research_learning_maintenance_error', '')
         conn.commit()
     except (ValueError, OSError, KeyError, TypeError) as exc:
         conn.rollback()
         if research_framework.enabled(cfg):
             allow_research = False
+            work = {'state': 'framework_error', 'reason': '框架检查失败：' + str(exc)[:160]}
         store.set_flag(conn, 'research_learning_maintenance_error', str(exc)[:200])
         conn.commit()
     if allow_research:

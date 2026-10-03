@@ -632,6 +632,13 @@ def combination_diagnostics(conn, max_plans=2, min_parent_sharpe=MIN_PARENT_SHAR
         a,b=[parents[x] for x in ids]
         pa,pb=[policies[x] for x in ids]
         if simulation_settings(pa['settings'])!=simulation_settings(pb['settings']):block('SETTINGS_MISMATCH')
+        target=current_policy or pa
+        for aid,parent_policy in zip(ids,(pa,pb)):
+            if simulation_settings(parent_policy['settings'])!=simulation_settings(target['settings']):
+                block('CURRENT_SETTINGS_MISMATCH')
+            for role in research_dsl.roles_used(candidates[aid]['ast']):
+                if parent_policy['bindings'].get(role)!=target['bindings'].get(role):
+                    block('CURRENT_BINDINGS_MISMATCH')
         corr={'value':None}
         # 已经有阻断原因时，相关性数值不会改变首因，也不参与下一对选择。只保留能把「阻断」改成「未知」的便宜判断。
         if all(x in pnls for x in ids):

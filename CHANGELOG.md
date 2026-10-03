@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.22 (local candidate; not publicly released)
+
+- Enforce total-cycle and no-information discovery limits for every new lane, and serialize cumulative model-start reservations across workers.
+- Wake discovery only when verified, consumed real observations change the input; preserve exhausted pre-upgrade episodes when no such observation exists.
+- Retain consumed receipt identities and stop new discovery when receipt files disappear or change, without replenishing exhausted episodes.
+- Allow registered campaigns to use their separate resource ledger without contaminating ordinary learning comparisons.
+- Add exact, repeatable epoch migration commands that retain cumulative budgets and owner stops; display actionable framework errors and remaining dual-loop resources.
+- Reject combinations whose historical field bindings/settings differ from current execution, and choose the first calibratable reference before freezing a contribution experiment.
+- Keep pinned local engine snapshots separate from development edits, and identify source-only multi-lane features on the public 0.2.21 download pages.
+
 ## 0.2.21
 
 - Menu-bar app UI refresh: shared design tokens (4pt spacing grid, five-level type scale, semantic badge colors), wrapping menu rows that no longer truncate long status text, and a card-based Research progress window rebuilt on Auto Layout with a header toolbar and elastic spacer.

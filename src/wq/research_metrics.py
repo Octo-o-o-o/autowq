@@ -153,21 +153,28 @@ def prepare_contributions(conn, trials):
     for candidate in trials:
         tid=candidate['trial_id']
         if tid in complete:continue
-        references=[t for t in trials if t['trial_id']!=tid and
+        references=sorted([t for t in trials if t['trial_id']!=tid and
                     t['document'].get('settings')==candidate['document'].get('settings') and
-                    t['execution_id']!=candidate['execution_id']]
-        inputs={'candidate':(tid,candidate['outcome_version']),
+                    t['execution_id']!=candidate['execution_id']],key=lambda t:t['trial_id'])
+        inputs={'selection':'first_calibratable_v2','candidate':(tid,candidate['outcome_version']),
                 'references':[(t['trial_id'],t['outcome_version']) for t in references]}
         digest=util.sha256_json(inputs)
         if previous.get(tid,{}).get('input_hash')==digest:continue
         doc={'candidate':tid,'input_hash':digest,'state':'waiting_reference',
              'reason':'A separate comparable reference is required','pool_id':None}
         if references:
-            pid='auto-contrib-'+util.sha256_json(tid)[:12]+'-'+digest[:16]
-            old=conn.execute('SELECT document_json FROM learning_pool_contracts WHERE pool_id=?',(pid,)).fetchone()
-            contract=json.loads(old[0]) if old else freeze_contract(conn,pid,[references[0]['trial_id']],tid)
-            doc.update(pool_id=pid,state='frozen' if contract['status']=='frozen' else 'waiting_calibration',
-                       reason=contract.get('errors') or None)
+            # Eligibility uses pre-freeze coverage and nonzero variance only;
+            # never select a reference on forward performance or refit a frozen one.
+            doc['reference_checks']=[]
+            for reference in references:
+                pid='auto-contrib-'+util.sha256_json(tid)[:12]+'-'+digest[:16]+'-'+util.sha256_json(reference['trial_id'])[:12]
+                old=conn.execute('SELECT document_json FROM learning_pool_contracts WHERE pool_id=?',(pid,)).fetchone()
+                contract=json.loads(old[0]) if old else freeze_contract(conn,pid,[reference['trial_id']],tid)
+                doc['reference_checks'].append({'trial_id':reference['trial_id'],'status':contract['status'],
+                                                'errors':contract.get('errors')})
+                doc.update(pool_id=pid,state='frozen' if contract['status']=='frozen' else 'waiting_calibration',
+                           reason=contract.get('errors') or None)
+                if contract['status']=='frozen':break
         records.append_once(conn,'contribution:'+tid+':'+digest,'contribution_prepared',doc)
         return doc
     return {'state':'no_changed_inputs'}

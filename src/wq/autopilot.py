@@ -749,9 +749,14 @@ def make_job(conn,cfg,cid,role,text,exclude=None,order=None):
     if role=='research':
         if dual:
             research_meta.required_epoch(conn,cfg,cid)
-            store.set_flag(conn,'dual_cycle:'+str(cid),cfg.get('research_dual_loop','learning_root'))
             cycle_doc=conn.execute('SELECT policy_json FROM research_cycles WHERE cycle_id=?',(cid,)).fetchone()
-            if cycle_doc:research_meta.record_discovery(conn,cfg,cid,False,json.loads(cycle_doc[0]))
+            if cycle_doc:
+                cycle_policy=json.loads(cycle_doc[0])
+                permit=research_meta.discovery_permission(conn,cfg,cycle_policy,cid)
+                if not permit['allowed']:
+                    raise ValueError(permit['reason'])
+                research_meta.record_discovery(conn,cfg,cid,False,cycle_policy)
+            store.set_flag(conn,'dual_cycle:'+str(cid),cfg.get('research_dual_loop','learning_root'))
         experiment=learning.active_experiment(conn)
         if experiment and not conn.execute('SELECT 1 FROM learning_assignments WHERE cycle_id=?',(cid,)).fetchone():
             learning.assign(conn,cid,experiment['experiment_id'],learning.current_baseline(cfg))
@@ -1627,7 +1632,12 @@ def _create_cycle(conn,cfg,lane,p,data,taken,campaign_on):
             if not tid:raise ValueError('Registered followup lacks original research author')
             from . import research_learning
             experiment=research_learning.active_experiment(conn)
-            if experiment:research_learning.assign(conn,cid,experiment['experiment_id'],research_learning.current_baseline(cfg))
+            if experiment:
+                research_learning.assign(conn,cid,experiment['experiment_id'],research_learning.current_baseline(cfg))
+                from . import research_meta
+                if research_meta.enabled(cfg):
+                    research_meta.required_epoch(conn,cfg,cid)
+                    store.set_flag(conn,'dual_cycle:'+str(cid),cfg.get('research_dual_loop','learning_root'))
             event(conn,cid,'research_author_inherited',tid)
         else:
             tid=make_job(conn,cfg,cid,'research',research_prompt,None,order)
@@ -1720,6 +1730,7 @@ def tick(conn,cfg,allow_new=True):
         created=[]
         blocked_notes=[]
         for lane in free:
+            if cycle_limit_reached(conn,cfg):break
             gate=_lane_gate_at(conn,lane,cfg)
             if gate and util.now()<util.parse_iso(gate):continue
             if count+len(created)>=int(cfg.get('autopilot','max_cycles_per_day',default=4)):break

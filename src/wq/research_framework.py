@@ -2,6 +2,7 @@
 import datetime as dt
 import hashlib
 import json
+import os
 import time
 from pathlib import Path
 from . import util, store
@@ -374,6 +375,16 @@ def progress(conn,cfg):
     tables={r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     result={'recent_window':20,'recent_closed':0,'meta_mechanism':research_meta.state(conn),'base_status_counts':{},'learning_configured':cfg.get('research_learning','enabled',default=True),
             'learning_state':research_maintenance.state(conn),'experiment':None}
+    result['maintenance_error']=store.get_flag(conn,'research_learning_maintenance_error') or None
+    result['runtime_source']=str(Path(__file__).resolve().parent)
+    if research_meta.enabled(cfg):
+        root=cfg.get('research_dual_loop','root_id')
+        used=int(store.get_flag(conn,'dual_model_reservations:'+root,'0'))
+        reads=int(store.get_flag(conn,'evidence_reads:'+root,'0'))
+        result['dual_resources']={'root':root,'valid_until':cfg.get('research_dual_loop','valid_until'),
+            'model_starts':{'used':used,'limit':64,'remaining':max(0,64-used)},
+            'evidence_reads':{'used':reads,'limit':24,'remaining':max(0,24-reads)},
+            'renewed_by_restart':False}
     if 'research_cycles' in tables:
         cycles=list(conn.execute("SELECT cycle_id,simulation_task FROM research_cycles WHERE state='closed' ORDER BY cycle_id DESC LIMIT 20"))
         result['recent_closed']=len(cycles)
@@ -398,6 +409,10 @@ def progress(conn,cfg):
             result['experiment']={'id':row['experiment_id'],'stop_type':stopped,'baseline_changes':drift,
                                   'remaining':lifecycle.remaining(conn,row['experiment_id']),
                                   'next_action':'approve_current_epoch' if stopped=='baseline_superseded' else 'retain_owner_stop' if stopped=='owner_stop' else 'review_baseline_change' if drift else 'observe_registered_comparison'}
+            if stopped=='baseline_superseded' or drift:
+                result['experiment']['recovery_commands']=[
+                    'wq research-framework prepare-epoch --file epoch-transition.json',
+                    'wq research-framework approve-epoch --file epoch-transition.json']
     return result
 
 
@@ -416,26 +431,37 @@ def command(args):
     from .config import Config
     from . import db,autopilot,research_agenda,research_lifecycle,research_knowledge
     cfg=Config.load(args.config,str(Path.cwd()));conn=db.connect(cfg.db_path)
+    lock=None
     try:
         if args.action=='report':result={**report(conn),'agenda':research_agenda.report(conn),'enabled':enabled(cfg),'progress':progress(conn,cfg)}
+        elif args.action=='prepare-epoch':
+            result=research_lifecycle.prepare_transition(conn,cfg,args.owner,args.reason)
+            if args.file:util.write_json(args.file,result)
         else:
+            from .wrappers.agent import _acquire_lock
+            lock=_acquire_lock(cfg.run_dir,'runner')
+            if lock is None:raise ValueError('Runner is active; retry at a drained cycle boundary')
             setup(conn)
             doc=util.read_json(args.file) if args.file else None
             if args.action=='propose':result=research_agenda.propose(conn,autopilot.policy(cfg),doc)
             elif args.action=='register':result=research_agenda.register(conn,cfg,doc)
             elif args.action=='source':result=register_source(conn,cfg,doc)
-            elif args.action=='approve-epoch':result=research_lifecycle.approve_transition(conn,cfg,doc)
+            elif args.action=='approve-epoch':result=research_lifecycle.apply_transition(conn,cfg,doc)
             elif args.action=='resolve-proposal':
                 if not isinstance(doc,dict):raise ValueError('Proposal resolution document required')
                 result=research_knowledge.resolve_proposal(conn,doc['pair_id'],doc['status'],doc['reason'],doc['owner'],doc.get('authorization'))
             elif args.action=='tick':result=tick(conn,cfg)
             conn.commit()
         print(json.dumps(result,ensure_ascii=False,indent=2));return 0
-    finally:conn.close()
+    finally:
+        conn.close()
+        if lock is not None:os.close(lock)
 
 
 def add_parser(sub,lang='zh'):
     parser=sub.add_parser('research-framework',help='Continuous research gaps, work, knowledge and registered issues')
-    parser.add_argument('action',choices=['report','tick','propose','register','source','approve-epoch','resolve-proposal'],nargs='?',default='report')
+    parser.add_argument('action',choices=['report','tick','propose','register','source','prepare-epoch','approve-epoch','resolve-proposal'],nargs='?',default='report')
     parser.add_argument('--file',help='Explicit local owner input; report and tick need no file')
+    parser.add_argument('--owner',default='local-owner',help='Owner recorded in a prepared epoch transition')
+    parser.add_argument('--reason',default='Reviewed local code/configuration update',help='Reason for preparing an exact epoch transition')
     parser.set_defaults(fn=command)

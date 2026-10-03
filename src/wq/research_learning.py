@@ -543,7 +543,7 @@ def check_request_budget(conn, cycle_id, cfg=None):
     setup(conn)
     assignment=conn.execute('SELECT * FROM learning_assignments WHERE cycle_id=?',(cycle_id,)).fetchone()
     if not assignment:
-        if store.get_flag(conn,'dual_cycle:'+str(cycle_id)):raise ValueError('Dual-loop request has no experiment assignment')
+        check_campaign_epoch(conn,cfg,cycle_id)
         return
     if conn.execute('SELECT 1 FROM learning_experiment_stops WHERE experiment_id=?',(assignment['experiment_id'],)).fetchone():raise ValueError('Experiment stopped before dispatch')
     experiment=json.loads(conn.execute('SELECT document_json FROM learning_experiments WHERE experiment_id=?',(assignment['experiment_id'],)).fetchone()[0])
@@ -603,13 +603,26 @@ def pool_report(conn,at=None):
     return out
 
 
+def check_campaign_epoch(conn,cfg,cycle_id):
+    """Campaigns keep resource ownership without entering the ordinary experiment."""
+    from . import research_campaign, research_meta
+    resource=conn.execute('SELECT * FROM learning_resource_cycles WHERE cycle_id=?',(cycle_id,)).fetchone()
+    dual=bool(store.get_flag(conn,'dual_cycle:'+str(cycle_id))) or bool(cfg and research_meta.enabled(cfg))
+    if not dual:return
+    if not cfg or not resource or resource['work_kind']!='campaign' or not research_campaign.assignment(conn,cycle_id):
+        raise ValueError('Dual-loop request has no experiment assignment')
+    if not research_meta.authority(cfg):raise ValueError('Dual-loop request authority expired or disabled')
+    if research_meta.required_epoch(conn,cfg,cycle_id)!=resource['experiment_id']:
+        raise ValueError('Campaign request belongs to another epoch')
+
+
 def validate_dispatch(conn,cfg,task_id,payload):
     cycle=payload.get('research_cycle_id')
     if cycle is None:return
     setup(conn)
     assignment=conn.execute('SELECT * FROM learning_assignments WHERE cycle_id=?',(cycle,)).fetchone()
     if not assignment:
-        if store.get_flag(conn,'dual_cycle:'+str(cycle)):raise ValueError('Dual-loop request has no experiment assignment')
+        check_campaign_epoch(conn,cfg,cycle)
         return
     if conn.execute('SELECT 1 FROM learning_experiment_stops WHERE experiment_id=?',(assignment['experiment_id'],)).fetchone():raise ValueError('Experiment stopped before dispatch')
     experiment=json.loads(conn.execute('SELECT document_json FROM learning_experiments WHERE experiment_id=?',(assignment['experiment_id'],)).fetchone()[0])

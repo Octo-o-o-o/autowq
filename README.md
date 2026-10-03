@@ -1,5 +1,7 @@
 # autowq
 
+持续运行与故障恢复见 [持续运行指南](docs/reliable-automation.md)。源码版 0.2.22 尚未公开发布；下方公开下载仍为 0.2.21。
+
 [English](README.en.md) | 简体中文
 
 **官网：[autowq.octoooo.com](https://autowq.octoooo.com)** —— 产品介绍、macOS DMG 下载与快速上手指南。

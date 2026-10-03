@@ -247,6 +247,12 @@ def setup(workspace, allow_busy=False):
 
 def _python_env(workspace):
     env = os.environ.copy()
+    if env.get('WQ_ENGINE_SOURCE'):
+        source=Path(env['WQ_ENGINE_SOURCE'])
+        if not source.is_absolute() or not (source/'wq/__init__.py').is_file():
+            fail(_t('固定引擎目录不可用，请恢复本地部署', 'Pinned engine directory unavailable; restore the local deployment'))
+        env['PYTHONPATH']=str(source)
+        return env
     src = Path(workspace) / 'src'
     if (src / 'wq' / '__init__.py').exists():
         env['PYTHONPATH'] = str(src) + ((':' + env['PYTHONPATH']) if env.get('PYTHONPATH') else '')
@@ -323,7 +329,7 @@ def activate(workspace, app, runner_only=False):
         'Label': RUNNER_LABEL,
         'ProgramArguments': [str(venv_python), '-m', 'wq', 'run-once', '--lease', '3600'],
         'WorkingDirectory': str(workspace),
-        'EnvironmentVariables': {'PATH': PATH_ENV},
+        'EnvironmentVariables': {'PATH': PATH_ENV, **({k:_python_env(workspace)[k] for k in ('WQ_ENGINE_SOURCE','PYTHONPATH')} if os.environ.get('WQ_ENGINE_SOURCE') else {})},
         'RunAtLoad': True, 'StartInterval': 60, 'ProcessType': 'Background',
         'StandardOutPath': str(workspace / 'var/run/launchd.out.log'),
         'StandardErrorPath': str(workspace / 'var/run/launchd.err.log')}))
@@ -340,6 +346,7 @@ def activate(workspace, app, runner_only=False):
                    'The menu-bar LaunchAgent points to another app; refusing to overwrite. Run deactivate first to migrate.'))
     menu_plist.write_bytes(plistlib.dumps({
         'Label': MENU_LABEL, 'ProgramArguments': [str(binary)],
+        **({'EnvironmentVariables': {'WQ_ENGINE_SOURCE': _python_env(workspace)['WQ_ENGINE_SOURCE']}} if os.environ.get('WQ_ENGINE_SOURCE') else {}),
         'RunAtLoad': True, 'ProcessType': 'Interactive', 'WorkingDirectory': str(workspace),
         'StandardOutPath': str(workspace / 'var/run/menubar.out.log'),
         'StandardErrorPath': str(workspace / 'var/run/menubar.err.log')}))

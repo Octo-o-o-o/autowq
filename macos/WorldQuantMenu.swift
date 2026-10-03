@@ -200,6 +200,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var ready = false
     var root: String { UserDefaults.standard.string(forKey: "WQWorkspace") ?? "" }
     var python: String { UserDefaults.standard.string(forKey: "WQPython") ?? "" }
+    var engineSource: String? {
+        ProcessInfo.processInfo.environment["WQ_ENGINE_SOURCE"] ?? UserDefaults.standard.string(forKey: "WQEngineSource")
+    }
     var configured: Bool { !root.isEmpty && !python.isEmpty }
     let activateRow = NSMenuItem(title: "", action: #selector(activate), keyEquivalent: "")
     let activateSep = NSMenuItem.separator()
@@ -635,6 +638,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: self.setupPython())
             process.arguments = ["-B", script] + arguments
+            if let source = self.engineSource, !source.isEmpty {
+                var environment = ProcessInfo.processInfo.environment
+                environment["WQ_ENGINE_SOURCE"] = source
+                process.environment = environment
+            }
             let pipe = Pipe(); process.standardOutput = pipe; process.standardError = pipe
             var result: [String: Any]
             do {
@@ -1460,7 +1468,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             process.currentDirectoryURL = URL(fileURLWithPath: self.root)
             var environment = ProcessInfo.processInfo.environment
             for (key, value) in env { environment[key] = value }
-            if FileManager.default.fileExists(atPath: self.root + "/src/wq/__init__.py") {
+            if let source = self.engineSource, !source.isEmpty {
+                environment["WQ_ENGINE_SOURCE"] = source
+                environment["PYTHONPATH"] = source
+            } else if FileManager.default.fileExists(atPath: self.root + "/src/wq/__init__.py") {
                 let src = self.root + "/src"
                 environment["PYTHONPATH"] = environment["PYTHONPATH"].map { src + ":" + $0 } ?? src
             }
@@ -1468,6 +1479,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let pipe = Pipe(); process.standardOutput = pipe; process.standardError = pipe
             var result: [String: Any] = [:]; var success = false
             do {
+                if let source = self.engineSource, !source.isEmpty,
+                   !FileManager.default.fileExists(atPath: source + "/wq/__init__.py") {
+                    throw NSError(domain: "WorldQuant", code: 1, userInfo: [NSLocalizedDescriptionKey:
+                        self.t("固定引擎目录不可用，请恢复本地部署", "Pinned engine directory unavailable; restore the local deployment")])
+                }
                 try process.run()
                 let data = pipe.fileHandleForReading.readDataToEndOfFile()
                 process.waitUntilExit()
