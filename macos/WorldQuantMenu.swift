@@ -1691,8 +1691,28 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
         completionHandler([.banner, .sound])
     }
 }
+func installEditingMenu() {
+    let main = NSMenu()
+    let application = NSMenu(title: "WorldQuant")
+    application.addItem(withTitle: "Settings…", action: #selector(AppDelegate.showSettings), keyEquivalent: ",")
+    application.addItem(.separator())
+    application.addItem(withTitle: "Hide WorldQuant", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+    application.addItem(withTitle: "Quit WorldQuant…", action: #selector(AppDelegate.quit), keyEquivalent: "q")
+    let appItem = NSMenuItem(title: "WorldQuant", action: nil, keyEquivalent: ""); appItem.submenu = application; main.addItem(appItem)
+    let edit = NSMenu(title: "Edit")
+    for (title, action, key) in [("Undo", "undo:", "z"), ("Redo", "redo:", "Z"), ("Cut", "cut:", "x"), ("Copy", "copy:", "c"), ("Paste", "paste:", "v"), ("Select All", "selectAll:", "a")] {
+        edit.addItem(withTitle: title, action: Selector(action), keyEquivalent: key)
+    }
+    let item = NSMenuItem(title: "Edit", action: nil, keyEquivalent: ""); item.submenu = edit; main.addItem(item)
+    let window = NSMenu(title: "Window")
+    window.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+    window.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+    let windowItem = NSMenuItem(title: "Window", action: nil, keyEquivalent: ""); windowItem.submenu = window; main.addItem(windowItem)
+    NSApp.mainMenu = main
+}
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
+installEditingMenu()
 let delegate = AppDelegate()
 app.delegate = delegate
 app.run()
