@@ -251,6 +251,15 @@ _FRAMEWORK_WAITING_ZH = {
 def _coordinate(conn, cfg):
     """状态机推进只在 supervisor 主线程串行执行。返回不产生副作用之外的标志。"""
     from . import autopilot, history_research, research_maintenance, research_framework
+    from . import runtime_settings
+    if runtime_settings.pending(conn):
+        result=runtime_settings.apply_pending(conn,cfg)
+        if result['state']=='pending':
+            # Finish already-owned stages without creating more work to drain.
+            autopilot.tick(conn,cfg,allow_new=False)
+            autopilot.message(conn,'运行设置待应用：现有任务结束后自动切换，当前生效值保持不变')
+            conn.commit()
+            return
     allow_research = True
     allow_new = True
     work = {}

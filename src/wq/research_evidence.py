@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 from . import util, store, research_campaign_v2 as events
 from . import research_framework as framework, research_meta as meta
+from .runtime_settings import integer as operating_limit
 
 
 def receipt_candidates(conn,cfg):
@@ -30,7 +31,7 @@ def reserve_read(conn,cfg,source):
     # Revisions and gap IDs do not grant more attempts at an identical source.
     root=cfg.get('research_dual_loop','root_id');n=int(store.get_flag(conn,'evidence_reads:'+root,'0'))
     used=int(store.get_flag(conn,'evidence_source_reads:'+root+':'+key,'0'))
-    if n>=24 or used>=3:raise ValueError('Delegated evidence attempts exhausted')
+    if n>=operating_limit(cfg,'research_dual_loop.max_evidence_reads') or used>=operating_limit(cfg,'research_dual_loop.max_reads_per_source'):raise ValueError('Delegated evidence attempts exhausted')
     store.set_flag(conn,'evidence_reads:'+root,str(n+1));store.set_flag(conn,'evidence_source_reads:'+root+':'+key,str(used+1))
     events.append_once(conn,'evidence-attempt:'+root+':'+str(n+1),'research_aux_attempt_started',{'root':root,'attempt':n+1,'source_identity':key})
     conn.commit()
@@ -92,7 +93,7 @@ def prepare(conn,cfg,p):
             except (OSError,ValueError,KeyError,TypeError):continue
         registration={'gap_id':gap['gap_id'],'revision':1,'adapter':'local_material_v1' if source else 'brain_field_metadata_v1',
             'source':source or {'field_id':field,'query':gap['query']},'approved_by':'delegation:'+cfg.get('research_dual_loop','root_id'),
-            'valid_until':cfg.get('research_dual_loop','valid_until'),'max_attempts':3}
+            'valid_until':cfg.get('research_dual_loop','valid_until'),'max_attempts':operating_limit(cfg,'research_dual_loop.max_reads_per_source')}
         framework.register_source(conn,cfg,registration)
         if gap['campaign_id'].startswith('ordinary:'):
             framework.record_gap(conn,{**gap,'state':'fetchable','source_hash':util.sha256_json(registration),
@@ -149,5 +150,5 @@ def incoming(conn,cfg):
             framework.record_gap(conn,{**gap,'receipt':receipt,'receipt_kind':'delegated_inbox_envelope','state':'collected','verification':None,'next_trigger':'semantic_contract_verification'})
 
 
-def daily_capacity(conn):
-    return conn.execute("SELECT COUNT(*) FROM tasks WHERE kind IN ('research_evidence','research_evidence_verify') AND created_at>=?",(util.now().date().isoformat(),)).fetchone()[0]<4
+def daily_capacity(conn,cfg):
+    return conn.execute("SELECT COUNT(*) FROM tasks WHERE kind IN ('research_evidence','research_evidence_verify') AND created_at>=?",(util.now().date().isoformat(),)).fetchone()[0]<operating_limit(cfg,'research_dual_loop.max_evidence_tasks_per_day')

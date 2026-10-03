@@ -6,6 +6,7 @@ import statistics
 import time
 from pathlib import Path
 from . import util, store, research_campaign_v2 as events
+from .runtime_settings import integer as operating_limit
 
 BUNDLE={'schema':'wq.meta/v1','dimension':'gap_recheck','modes':['full','dependency_cache'],
         'minimum_pairs':8,'maximum_opportunities':12,'hours':72,'median_gain':.20,
@@ -164,8 +165,8 @@ def discovery_permission(conn,cfg,p,cycle_id=None):
     if any(value is None or value!=sources[k]['source']['sha256'] for k,value in material.items()):return {'allowed':False,'reason':'waiting_unreadable_or_changed_registered_material'}
     row=store.get_flag(conn,'discovery_episode:'+identity)
     doc=json.loads(row) if row else {'input_hash':identity,'empty_cycles':[]}
-    budget_left=int(store.get_flag(conn,'dual_model_reservations:'+cfg.get('research_dual_loop','root_id'),'0'))<64
-    allowed=len(doc['empty_cycles'])<2 and budget_left
+    budget_left=int(store.get_flag(conn,'dual_model_reservations:'+cfg.get('research_dual_loop','root_id'),'0'))<operating_limit(cfg,'research_dual_loop.max_model_starts')
+    allowed=len(doc['empty_cycles'])<operating_limit(cfg,'research_dual_loop.max_empty_discoveries') and budget_left
     reason='bounded_discovery' if allowed else 'waiting_changed_observation' if budget_left else 'dual_model_budget_exhausted'
     return {'allowed':allowed,'reason':reason, 'episode':identity,'empty_cycles':doc['empty_cycles']}
 
@@ -277,7 +278,8 @@ def _reserve_model(conn,cfg,task_id,provider):
                 raise ValueError('Dual-loop model cycle has no frozen assignment')
     root=cfg.get('research_dual_loop','root_id');key='dual_model_reservations:'+root
     used=int(store.get_flag(conn,key,'0'))
-    if used>=64:raise ValueError('Dual-loop model start reservation cap 64 reached')
+    limit=operating_limit(cfg,'research_dual_loop.max_model_starts')
+    if used>=limit:raise ValueError(f'Dual-loop model start reservation cap {limit} reached')
     store.set_flag(conn,key,str(used+1))
     if task_id:store.add_attempt(conn,task_id,'model_start_reserved','reserved',{'root':root,'reservation':used+1,'provider':provider})
 

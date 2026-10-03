@@ -697,8 +697,8 @@ def research(conn, cfg, lang='zh'):
             text(lang,'工程策略状态：','Engineering policy: ')+str(meta.get('status'))+' / '+str(meta.get('mode')),
             text(lang,'有效影子配对：','Valid shadow pairs: ')+str(len(meta.get('pairs',[])))+' / 8',
             text(lang,'局部耗时中位改善：','Median local runtime gain: ')+str(meta.get('median_gain','not_evaluated')),
-            text(lang,'资料采集尝试：','Evidence collection attempts: ')+store.get_flag(conn,'evidence_reads:'+root,'0')+' / 24',
-            text(lang,'模型启动预约：','Model start reservations: ')+store.get_flag(conn,'dual_model_reservations:'+root,'0')+' / 64',
+            text(lang,'资料采集尝试：','Evidence collection attempts: ')+store.get_flag(conn,'evidence_reads:'+root,'0')+' / '+str(resources['evidence_reads']['limit']),
+            text(lang,'模型启动预约：','Model start reservations: ')+store.get_flag(conn,'dual_model_reservations:'+root,'0')+' / '+str(resources['model_starts']['limit']),
             text(lang,'材料核验不等于语义资格；工程晋级不等于金融学习晋级。原权限、期限和预算仍有效。',
                  'Material identity is separate from semantic eligibility; engineering promotion is not financial promotion. Original authority and quotas remain.')])
 

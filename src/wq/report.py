@@ -27,7 +27,7 @@ def build_report(conn, cfg, include_synthetic: bool = False) -> str:
     fams = _rows(conn, "SELECT family_id, hypothesis_id, origin, synthetic, status FROM families")
     cands = _rows(conn, "SELECT family_id, status, synthetic FROM candidates")
     real_f = [f for f in fams if include_synthetic or not f["synthetic"]]
-    L.append(f"## 研究\n- 假设族 {len(real_f)} / 上限 {cfg.get('limits','families_max')}；"
+    L.append(f"## 研究\n- 假设族 {len(real_f)}；"
              f"候选 {len([c for c in cands if include_synthetic or not c['synthetic']])}")
     for f in real_f:
         n = len([c for c in cands if c["family_id"] == f["family_id"]])

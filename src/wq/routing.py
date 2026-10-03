@@ -36,6 +36,9 @@ def catalog(cfg):
             raise ValueError(f'{name}: argv 必须为字符串数组')
         if not os.path.isabs(argv[0]):
             raise ValueError(f'{name}: executable 必须为绝对路径，避免 PATH 同名冲突')
+        timeout=cfg.get('routing','provider_timeouts',name,default=item.get('timeout_s',900))
+        if type(timeout) is not int or not 1<=timeout<=3600:raise ValueError(f'{name}: timeout_s 超出范围')
+        item['timeout_s']=timeout
         if not 1 <= item.get('timeout_s', 900) <= 3600:
             raise ValueError(f'{name}: timeout_s 超出范围')
     for name, preset in presets.items():
@@ -238,14 +241,15 @@ def _snapshot(conn, cfg, tid, payload):
     if not chain:
         raise ValueError('排除提案渠道后没有可用审查渠道')
     if payload.get('single_attempt'): chain = chain[:1]
-    snapshot = {'preset': name, 'chain': chain, 'retries': 0 if payload.get('single_attempt') else 3,
-                'delays': preset.get('retry_delays_s', [30, 60, 120]),
+    from .runtime_settings import integer as operating_limit
+    snapshot = {'preset': name, 'chain': chain, 'retries': 0 if payload.get('single_attempt') else operating_limit(cfg,'routing.max_retries'),
+                'delays': ([operating_limit(cfg,'routing.retry_delay_s')]*3 if operating_limit(cfg,'routing.retry_delay_s') is not None else preset.get('retry_delays_s', [30, 60, 120])),
                 'providers': {p: data['providers'][p] for p in chain},
                 'version': util.sha256_json(data), 'created_at': util.now_iso(),
                 'authorized_until': cfg.get('routing', 'authorized_until')}
     conn.execute('INSERT INTO task_routes(task_id,snapshot_json,updated_at) VALUES(?,?,?)',
                  (tid, json.dumps(snapshot, ensure_ascii=False), util.now_iso()))
-    conn.execute('UPDATE tasks SET max_attempts=? WHERE task_id=?', (1 if payload.get('single_attempt') else 4 * len(chain), tid))
+    conn.execute('UPDATE tasks SET max_attempts=? WHERE task_id=?', (1 if payload.get('single_attempt') else (snapshot['retries'] + 1) * len(chain), tid))
     store.add_attempt(conn, tid, 'route_snapshot', 'frozen', snapshot)
     return dict(conn.execute('SELECT * FROM task_routes WHERE task_id=?', (tid,)).fetchone())
 
@@ -592,7 +596,7 @@ def dispatch_routed(conn, cfg, task, payload):
             return _backoff(conn, tid, 0, f'{provider} 要求等待至 {until}；不缩短 Retry-After，到点自动恢复')
         _save(conn, tid, retry_index=retry + 1)
         return _backoff(conn, tid, delay,
-                        f'{provider} 失败；安排第 {retry + 1}/3 次重试，之前的副本保留')
+                        f"{provider} 失败；安排第 {retry + 1}/{snap['retries']} 次重试，之前的副本保留")
     capacity = capacity_failure(conn, out.call_id)
     if capacity:
         pause_for_quota(conn, cfg, provider, definition, max(3600, retry_after(conn, out.call_id)), '容量或限流持续失败')

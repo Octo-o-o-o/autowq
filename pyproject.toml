@@ -1,6 +1,6 @@
 [project]
 name = "wq-pilot"
-version = "0.2.22"
+version = "0.2.23"
 description = "Local research orchestration with gated providers and recoverable simulations"
 readme = "README.en.md"
 license = {text = "Apache-2.0"}

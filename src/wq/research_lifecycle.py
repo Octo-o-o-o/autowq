@@ -65,6 +65,21 @@ def _write_cycle_limit(conn, experiment_id, max_cycles, request_floor):
     conn.execute('UPDATE learning_experiments SET document_json=? WHERE experiment_id=?', (json.dumps(doc), experiment_id))
 
 
+def set_experiment_request_limit(conn, limit):
+    if type(limit) is not int or not 1<=limit<=100000:
+        raise ValueError('每组请求上限需为 1–100000 的整数')
+    budget=experiment_cycle_budget(conn)
+    if not budget:raise ValueError('当前没有研究实验')
+    left=remaining(conn,budget['experiment_id'])
+    if any(limit<n for n in left['used_requests_by_arm'].values()):
+        raise ValueError('请求上限不能低于任一组已使用的次数')
+    root,ids=lineage(conn,budget['experiment_id'])
+    for eid in ids:
+        doc=document(conn,eid);doc['max_requests_per_arm']=limit
+        conn.execute('UPDATE learning_experiments SET document_json=? WHERE experiment_id=?',(json.dumps(doc),eid))
+    return remaining(conn,budget['experiment_id'])
+
+
 def remaining(conn, experiment_id):
     root,ids=lineage(conn,experiment_id);contract=document(conn,root)
     cycles=sum(r[0] in ids for r in conn.execute('SELECT experiment_id FROM learning_assignments'))

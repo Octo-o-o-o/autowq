@@ -329,6 +329,7 @@ def settings_items(se, lang):
               'config', 'launch_research=' + ('off' if launch_on else 'on'), launch_on),
         submenu(text(lang, '界面语言', 'Interface language'), language_rows),
         submenu(text(lang, '模型', 'Models'), model_items(se, lang)),
+        submenu(text(lang, '运行额度与权限', 'Operating limits and permissions'), operating_items(se.get('operating') or {},lang)),
         submenu(text(lang, '模型花费上限', 'Model spend cap'), _spend_items(se, lang)),
         submenu(text(lang, '路由预设', 'Routing presets'), preset_items(se, lang)),
         submenu(text(lang, '渠道', 'Providers'),
@@ -358,6 +359,35 @@ def settings_items(se, lang):
         action(text(lang, '检查更新', 'Check for updates'), 'update'),
         action(text(lang, '打开运行日志', 'Open run log'), 'logs'),
     ]
+
+
+def operating_items(data,lang):
+    groups={}
+    rows=[]
+    if data.get('pending'):
+        rows.append(info(text(lang,'修改待现有任务结束后应用','Changes pending until existing work finishes')))
+        rows.append(action(text(lang,'取消待应用修改','Cancel pending changes'),'operating-cancel'))
+    if (data.get('last') or {}).get('state')=='failed':rows.append(info(str(data['last'].get('error'))))
+    for entry in data.get('entries',[]):
+        value=entry.get('value');label=entry['label']+': '+('none' if value is None else str(value))
+        if entry.get('used') is not None:label+=text(lang,f"（已用 {entry['used']}）",f" (used {entry['used']})")
+        if entry.get('has_pending'):label+=text(lang,' → 待应用 ',' → pending ')+str(entry.get('pending'))
+        if entry.get('active') is False:label+=text(lang,'（当前不生效）',' (inactive)')
+        groups.setdefault(entry['group'],[]).append(action(label,'operating-edit',json.dumps(entry,ensure_ascii=False)))
+    rows += [submenu(group,items) for group,items in groups.items()]
+    rows += [info(line) for line in data.get('fixed',[])]
+    return rows
+
+
+def ask_operating_value(entry,lang):
+    import tkinter as tk
+    from tkinter import simpledialog
+    root=tk.Tk();root.withdraw()
+    try:
+        value=entry.get('pending') if entry.get('has_pending') else entry.get('value')
+        hint=entry.get('note','')+'\n'+text(lang,'填写数字；none 表示自动值／不限。日期需附时区。现有任务结束后生效。','Enter a number, none for automatic/unlimited, or a date with timezone. Applies after existing work finishes.')
+        return simpledialog.askstring(entry['label'],hint,initialvalue='none' if value is None else str(value),parent=root)
+    finally:root.destroy()
 
 
 def model_items(se, lang):
@@ -566,7 +596,11 @@ class Tray:
     def on_action(self, act, arg):
         def worker():
             try:
-                if act == 'logs':
+                if act == 'operating-edit':
+                    entry=json.loads(arg);lang=(self.state.get('settings') or {}).get('language','zh')
+                    value=ask_operating_value(entry,lang)
+                    if value is not None:self.call('operating-setting',entry['key']+'='+value.strip())
+                elif act == 'logs':
                     open_path(bridge.runner_log())
                 elif act in ('quit-app', 'quit-after-cycle', 'quit-now'):
                     if act != 'quit-app':

@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from . import util, store
+from .runtime_settings import integer as operating_limit
 
 
 def state(conn):
@@ -41,7 +42,7 @@ def tick(conn,cfg,force=False):
         return {'status':'disabled'}
     if store.is_paused(conn):return {'status':'paused'}
     last=store.get_flag(conn,'research_learning_maintenance_at')
-    if not force and last and (util.now()-util.parse_iso(last)).total_seconds()<21600:
+    if not force and last and (util.now()-util.parse_iso(last)).total_seconds()<operating_limit(cfg,'research_learning.maintenance_interval_s'):
         return {'status':'not_due'}
     # 多泳道下轮次常态开放，维护不能再等「周期边界」；它只做本地台账核对与
     # 有上限的回填任务登记。UNKNOWN 冻结一切，在途模型调用由渠道串行槽约束。

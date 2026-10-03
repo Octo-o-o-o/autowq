@@ -241,11 +241,12 @@ def _tick(conn,cfg):
     if conn.execute("SELECT 1 FROM tasks WHERE status='queued' AND kind!='agent_call' AND not_before<=?",(util.now_iso(),)).fetchone():
         return {'state':'waiting_queue','allow_research':False}
     candidates=reassessment_candidates(conn)
-    if not research_meta.enabled(cfg) or research_evidence.daily_capacity(conn):
+    if not research_meta.enabled(cfg) or research_evidence.daily_capacity(conn,cfg):
         candidates+=research_evidence.receipt_candidates(conn,cfg) if research_meta.enabled(cfg) else []
         candidates+=evidence_candidates(conn,cfg)
     last=store.get_flag(conn,'research_learning_maintenance_at')
-    if cfg.get('research_learning','maintenance_enabled',default=False) and (not last or (util.now()-util.parse_iso(last)).total_seconds()>=21600):
+    from .runtime_settings import integer as operating_limit
+    if cfg.get('research_learning','maintenance_enabled',default=False) and (not last or (util.now()-util.parse_iso(last)).total_seconds()>=operating_limit(cfg,'research_learning.maintenance_interval_s')):
         candidates.append({'id':'maintenance:'+(last or 'initial'),'kind':'maintenance','first_seen':last or util.now_iso(),
                            'reason':'Due learning and contribution maintenance','estimated_model_calls':0,'estimated_api_reads':0})
     permit=research_meta.discovery_permission(conn,cfg,p) if research_meta.enabled(cfg) else {'allowed':True}
@@ -381,9 +382,12 @@ def progress(conn,cfg):
         root=cfg.get('research_dual_loop','root_id')
         used=int(store.get_flag(conn,'dual_model_reservations:'+root,'0'))
         reads=int(store.get_flag(conn,'evidence_reads:'+root,'0'))
+        from .runtime_settings import integer as operating_limit
+        model_limit=operating_limit(cfg,'research_dual_loop.max_model_starts')
+        read_limit=operating_limit(cfg,'research_dual_loop.max_evidence_reads')
         result['dual_resources']={'root':root,'valid_until':cfg.get('research_dual_loop','valid_until'),
-            'model_starts':{'used':used,'limit':64,'remaining':max(0,64-used)},
-            'evidence_reads':{'used':reads,'limit':24,'remaining':max(0,24-reads)},
+            'model_starts':{'used':used,'limit':model_limit,'remaining':max(0,model_limit-used)},
+            'evidence_reads':{'used':reads,'limit':read_limit,'remaining':max(0,read_limit-reads)},
             'renewed_by_restart':False}
     if 'research_cycles' in tables:
         cycles=list(conn.execute("SELECT cycle_id,simulation_task FROM research_cycles WHERE state='closed' ORDER BY cycle_id DESC LIMIT 20"))

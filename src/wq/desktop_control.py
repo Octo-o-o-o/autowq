@@ -18,7 +18,7 @@ LABEL = 'com.worldquant.wq-runner'
 RUNNER_TASK = 'WorldQuantWQRunner'   # Windows 任务计划程序任务名
 MACOS = sys.platform == 'darwin'
 BRAIN_REGISTER_URL = 'https://platform.worldquantbrain.com/sign-up'
-from wq import desktop, routing, store
+from wq import desktop, routing, store, runtime_settings
 from wq.config import Config
 from wq.i18n import default_language, stored_language, text, translate, write_language
 
@@ -94,7 +94,7 @@ def wq(*args):
         env = None
     else:
         env = os.environ.copy()
-        env['PYTHONPATH'] = str(ROOT / 'src')
+        env['PYTHONPATH'] = env.get('WQ_ENGINE_SOURCE') or str(ROOT / 'src')
         argv = [sys.executable, '-m', 'wq', *args]
     result = subprocess.run(argv, cwd=ROOT, env=env, capture_output=True, text=True,
                             errors='replace', timeout=25)
@@ -118,6 +118,9 @@ def _engine_argv(*args):
 
 def _child_env():
     env = os.environ.copy()
+    if env.get('WQ_ENGINE_SOURCE'):
+        env['PYTHONPATH']=env['WQ_ENGINE_SOURCE']
+        return env
     src = ROOT / 'src'
     if (src / 'wq' / '__init__.py').exists():
         env['PYTHONPATH'] = str(src) + (os.pathsep + env['PYTHONPATH'] if env.get('PYTHONPATH') else '')
@@ -492,6 +495,7 @@ def settings_snapshot(cfg, conn, lang='zh'):
             'submission_enabled': cfg.get('brain_submission', 'enabled') is True,
             'launch_research': launch_research_enabled(cfg),
             'automatic_submission': False,
+            'operating': runtime_settings.snapshot(conn,cfg,lang),
             **_spend_snapshot(cfg, conn)}
 
 
@@ -535,6 +539,14 @@ def _begin_research(lang, automatic=False):
     wq('resume')
     return {'started': True, 'message': text(lang, '已开始自动运行，调度器按既有间隔推进',
                                              'Automatic research started; the scheduler follows the configured interval')}
+
+
+def _save_operating(cfg,updates,lang):
+    from wq import runtime_settings
+    result=runtime_settings.request(cfg,updates)
+    if result['state']=='failed':raise ValueError(result['error'])
+    result['message']=text(lang,'已保存待应用值；现有任务结束后自动切换。当前生效值保持不变。','Pending values saved; applied after existing work finishes. Current effective values are unchanged.') if result['state']=='pending' else text(lang,'运行设置已生效，累计用量未清零。','Operating settings applied; cumulative usage was preserved.')
+    return result
 
 
 def control(action, arg=None):
@@ -616,6 +628,19 @@ def control(action, arg=None):
                 return {'message': translate(result.get('message') or '', lang) + ' ' + note + str(exc)[:160]}
             return {'message': translate(result.get('message') or '', lang)}
         return _begin_research(lang)
+    if action == 'operating-cancel':
+        result=runtime_settings.cancel(_cfg())
+        result['message']=text(lang,'已取消待应用修改，当前配置未改变。','Pending changes cancelled; current configuration is unchanged.')
+        return result
+    if action == 'operating-setting':
+        cfg=_cfg();key,sep,raw=(arg or '').partition('=')
+        if not sep:raise ValueError('Setting value required')
+        if key == 'limits.model_spend_cap_usd':
+            return control('config','model_spend_cap_usd='+raw)
+        if key in ('experiment_cycles','experiment_requests_per_arm'):
+            return control('config',arg)
+        value=runtime_settings.parse(cfg,key,raw)
+        return _save_operating(cfg,{key:value},lang)
     if action == 'settings':
         cfg = _cfg()
         conn = desktop.connect_readonly(cfg)
@@ -774,8 +799,9 @@ def control(action, arg=None):
             slot = str(lane_no - 1)
             if pair_s == 'off' or not pair_s:
                 pins.pop(slot, None)
-                _write_config_values(cfg.path, 'autopilot', {'lane_pins': pins or None})
-                return {'message': text(lang, f'泳道{lane_no}已恢复自动错开渠道。', f'Lane {lane_no} is back to automatic staggering.')}
+                result=_save_operating(cfg,{'autopilot.lane_pins':pins or None},lang)
+                result['message']=text(lang,f'泳道{lane_no}：',f'Lane {lane_no}: ')+result['message']
+                return result
             research, _, review = pair_s.partition(':')
             try:
                 data = routing.catalog(cfg)
@@ -798,9 +824,9 @@ def control(action, arg=None):
             if not preset.get('solo') and routing.same_channel(data, research, review):
                 raise ValueError(text(lang, '研究与审查必须不同渠道', 'Research and review must be different channels'))
             pins[slot] = {'research': research, 'review': review}
-            _write_config_values(cfg.path, 'autopilot', {'lane_pins': pins})
-            return {'message': text(lang, f'泳道{lane_no}已固定为 {research} → {review}；下一次该泳道建轮生效，渠道不可用时该泳道等待而不换对。',
-                                    f'Lane {lane_no} pinned to {research} → {review}; applies to its next cycle, and the lane waits instead of substituting when a provider is unavailable.')}
+            result=_save_operating(cfg,{'autopilot.lane_pins':pins},lang)
+            result['message']=text(lang,f'泳道{lane_no}：',f'Lane {lane_no}: ')+result['message']
+            return result
         if key == 'notifications':
             if raw not in ('on', 'off'):
                 raise ValueError(text(lang, '通知开关只接受 on/off', 'The notifications switch accepts on/off only'))
@@ -828,9 +854,7 @@ def control(action, arg=None):
             if not cfg.path:
                 raise RuntimeError(text(lang, '未找到 config/config.json，无法保存设置', 'config/config.json not found; cannot save settings'))
             if raw in ('none', 'off', ''):
-                _write_config_values(cfg.path, 'limits', {'model_spend_cap_usd': None})
-                return {'message': text(lang, '已取消模型花费上限。之后的模型调用不再按美元合计拦截。',
-                                        'Model spend cap removed. Later model calls are no longer blocked by a dollar total.')}
+                return _save_operating(cfg,{'limits.model_spend_cap_usd':None},lang)
             try:
                 cap = float(raw)
             except ValueError:
@@ -838,9 +862,18 @@ def control(action, arg=None):
             if cap != cap or cap < 0 or cap > 100000:
                 raise ValueError(text(lang, '花费上限需为 0–100000 的美元数，或 none',
                                       'The spend cap must be a dollar amount from 0 to 100000, or none'))
-            _write_config_values(cfg.path, 'limits', {'model_spend_cap_usd': cap, 'model_spend_as_of': util.now_iso()})
-            return {'message': text(lang, f'模型花费上限已设为 ${cap:g}。从现在起计算已知金额，达到后停止新的模型调用。金额未知的调用不记成 $0，也不计入这个上限。',
-                                    f'Model spend cap set to ${cap:g}. Known dollars count from now; new model calls stop when the cap is reached. Calls with an unknown price are not treated as $0 and are not added to this total.')}
+            updates={'limits.model_spend_cap_usd':cap}
+            if not cfg.get('limits','model_spend_as_of'):updates['limits.model_spend_as_of']=util.now_iso()
+            return _save_operating(cfg,updates,lang)
+        if key == 'experiment_requests_per_arm':
+            from wq.db import connect
+            from wq.research_lifecycle import set_experiment_request_limit
+            conn=connect(cfg.db_path)
+            try:
+                conn.execute('BEGIN IMMEDIATE')
+                result=set_experiment_request_limit(conn,int(raw));conn.commit()
+            finally:conn.close()
+            return {'message':text(lang,'每组请求上限已生效，已用次数保留。','Per-arm request limit applied; usage preserved.'),'remaining':result}
         if key == 'experiment_cycles':
             from wq.db import connect
             from wq.research_lifecycle import set_experiment_cycle_limit
@@ -851,6 +884,7 @@ def control(action, arg=None):
             cfg = _cfg()
             conn = connect(cfg.db_path)
             try:
+                conn.execute('BEGIN IMMEDIATE')
                 budget = set_experiment_cycle_limit(conn, chosen)
                 conn.commit()
             finally:
@@ -869,21 +903,7 @@ def control(action, arg=None):
             raise ValueError(text(lang, f'{label} 需在 {low}–{high} 之间', f'{label} must be between {low} and {high}'))
         if not cfg.path:
             raise RuntimeError(text(lang, '未找到 config/config.json，无法保存设置', 'config/config.json not found; cannot save settings'))
-        write_config(cfg.path, key, value)
-        if key == 'interval_s':
-            shown = text(lang, f'{value // 60} 分钟', f'{value // 60} minutes') if value >= 60 else text(lang, f'{value} 秒', f'{value} seconds')
-            return {'message': text(lang, f'运行间隔已设为 {shown}；下一次调度起采用。', f'Run interval set to {shown}; applies from the next scheduling tick.')}
-        if key == 'concurrent_lanes':
-            return {'message': text(lang,
-                f'并行泳道已设为 {value}。每条泳道仍是一轮完整的研究→审查→模拟：研究与审查必须不同渠道，'
-                '同一渠道同一时刻只有一个调用，平台模拟与提交保持串行，授权/预算/UNKNOWN 门禁不变。对在途轮次不打断。',
-                f'Parallel lanes set to {value}. Each lane remains a full research→review→simulate cycle: research and review '
-                'must use different channels, one call per channel at a time, platform simulation and submission stay serial, '
-                'and authorization/budget/UNKNOWN gates are unchanged. In-flight cycles are not interrupted.')}
-        if key == 'max_cycles_per_day':
-            return {'message': text(lang, f'每日轮数上限已设为 {value}；按 UTC 日计。', f'Daily cycle limit set to {value} (UTC days).')}
-        return {'message': text(lang, '已取消累计轮数上限。', 'Total cycle limit removed.') if value is None
-                else text(lang, f'累计轮数上限已设为 {value}。', f'Total cycle limit set to {value}.')}
+        return _save_operating(cfg,{'autopilot.'+key:value},lang)
     if action in ('history', 'submissions', 'standby', 'research'):
         cfg = _cfg()
         conn = desktop.connect_readonly(cfg)

@@ -7,11 +7,9 @@
   },
   "limits": {
     "sims_per_week": 24,
-    "sim_concurrency": 1,
     "grok_calls_per_week": 3,
     "devin_tickets_per_week": 1,
     "max_repair_attempts_per_incident": 2,
-    "families_max": 3,
     "configs_per_family_max": 4,
     "rate_limit_max_wait_s": 900
   },
@@ -118,5 +116,13 @@
       "min_years": 3,
       "max_negative_years": 0
     }
+  },
+  "research_dual_loop": {
+    "enabled": false,
+    "max_model_starts": 64,
+    "max_evidence_reads": 24,
+    "max_reads_per_source": 3,
+    "max_empty_discoveries": 2,
+    "max_evidence_tasks_per_day": 4
   }
 }

@@ -181,6 +181,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var totalMenu = NSMenu()
     var languageMenu = NSMenu()
     var spendMenu = NSMenu()
+    var operatingMenu = NSMenu()
     var timer: Timer?
     var notifyTimer: Timer?
     var actionBusy = false
@@ -826,6 +827,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         experimentMenu = NSMenu(title: t("实验轮数上限", "Experiment cycle limit"))
         totalMenu = NSMenu(title: t("累计轮数上限", "Total cycle limit"))
         languageMenu = NSMenu(title: t("界面语言", "Interface language"))
+        operatingMenu = NSMenu(title: t("运行额度与权限", "Operating limits and permissions"))
         spendMenu = NSMenu(title: t("模型花费上限", "Model spend cap"))
         settingsMenu.autoenablesItems = false; settingsMenu.delegate = self
         launchRow.target = self
@@ -854,6 +856,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             (t("渠道", "Providers"), providerMenu,
              t("临时停用或恢复单个渠道；不打断在途调用，预算闸门保留。",
                "Temporarily disable or re-enable one provider; in-flight calls are unaffected, budget gates remain.")),
+            (t("运行额度与权限", "Operating limits and permissions"), operatingMenu,
+             t("显示当前生效值、累计用量及待应用值；现有任务结束后切换。", "Shows effective values, usage and pending changes; applies after existing work finishes.")),
             (t("模型花费上限", "Model spend cap"), spendMenu,
              t("已知模型花费达到该美元数后，停止新的模型调用。未知金额不记成 $0。",
                "Stops new model calls once known spend reaches this dollar amount. Unknown prices are not counted as $0.")),
@@ -1411,7 +1415,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let known = response["spend_known_usd"] as? Double ?? 0
         let unknown = response["spend_unknown_calls"] as? Int ?? 0
         let capNumber = response["spend_cap_usd"] as? Double
-        spendMenu.addItem(info(String(format: t("自本次设置起已知花费 $%.4f", "Known spend since this cap was set: $%.4f"), known)))
+        spendMenu.addItem(info(String(format: t("自计数起点已知花费 $%.4f", "Known spend since the counting origin: $%.4f"), known)))
         if unknown > 0 {
             spendMenu.addItem(info(t("另有 \(unknown) 次调用金额未知，未计入，也不记成 $0",
                                     "\(unknown) calls have an unknown price; they are omitted and not treated as $0")))
@@ -1422,13 +1426,74 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for value in presets {
             let matched = capNumber != nil && abs(capNumber! - Double(value)) < 0.001
             pickRow("$\(value)", "config=model_spend_cap_usd=\(value)", on: matched,
-                    tip: t("从现在起，已知花费达到 $\(value) 后停止新的模型调用",
-                           "From now, stop new model calls once known spend reaches $\(value)"), in: spendMenu)
+                    tip: t("保留原计数起点，已知花费达到 $\(value) 后停止新的模型调用",
+                           "Preserve the counting origin; stop new model calls once known spend reaches $\(value)"), in: spendMenu)
         }
         if let capNumber, !presets.contains(where: { abs(capNumber - Double($0)) < 0.001 }) {
             spendMenu.addItem(info(String(format: t("当前上限 $%.4f", "Current cap $%.4f"), capNumber)))
         }
+        fillOperating(response["operating"] as? [String: Any] ?? [:])
         fetched["settings"] = Date()
+    }
+
+    func settingValue(_ value: Any?) -> String {
+        guard let value, !(value is NSNull) else { return "none" }
+        return String(describing: value)
+    }
+    func fillOperating(_ response: [String: Any]) {
+        operatingMenu.removeAllItems()
+        operatingMenu.addItem(info(t("点击参数输入值；累计用量不会清零。", "Click a setting to edit it; usage counters are preserved.")))
+        if response["pending"] as? Bool == true {
+            operatingMenu.addItem(info(t("有待应用修改：现有任务结束后切换", "Pending changes apply after existing work finishes")))
+            let cancel = NSMenuItem(title: t("取消待应用修改", "Cancel pending changes"), action: #selector(cancelOperatingChanges), keyEquivalent: "")
+            cancel.target = self; operatingMenu.addItem(cancel)
+        }
+        if let last = response["last"] as? [String: Any], last["state"] as? String == "failed" {
+            operatingMenu.addItem(info(t("上次应用失败：", "Last apply failed: ") + (last["error"] as? String ?? "")))
+        }
+        var groups: [String: NSMenu] = [:]
+        for entry in response["entries"] as? [[String: Any]] ?? [] {
+            let group = entry["group"] as? String ?? ""
+            if groups[group] == nil {
+                let submenu = NSMenu(title: group); submenu.autoenablesItems = false
+                let row = NSMenuItem(title: group, action: nil, keyEquivalent: "")
+                row.submenu = submenu; operatingMenu.addItem(row); groups[group] = submenu
+            }
+            let label = entry["label"] as? String ?? ""
+            var title = label + ": " + settingValue(entry["value"])
+            if let used = entry["used"], !(used is NSNull) { title += t("（已用 \(settingValue(used))）", " (used \(settingValue(used)))") }
+            if entry["has_pending"] as? Bool == true { title += t(" → 待应用 ", " → pending ") + settingValue(entry["pending"]) }
+            if entry["active"] as? Bool == false { title += t("（当前不生效）", " (inactive)") }
+            let row = NSMenuItem(title: title, action: #selector(editOperatingSetting(_:)), keyEquivalent: "")
+            row.target = self; row.representedObject = entry
+            row.toolTip = entry["note"] as? String
+            groups[group]?.addItem(row)
+        }
+        for line in response["fixed"] as? [String] ?? [] { operatingMenu.addItem(info(line)) }
+    }
+    @objc func cancelOperatingChanges() { perform("operating-cancel") }
+    @objc func editOperatingSetting(_ sender: NSMenuItem) {
+        guard let entry = sender.representedObject as? [String: Any], let key = entry["key"] as? String else { return }
+        let box = NSAlert(); box.messageText = entry["label"] as? String ?? key
+        var detail = t("当前生效：", "Effective: ") + settingValue(entry["value"])
+        if let effective = entry["effective"], settingValue(effective) != settingValue(entry["value"]) {
+            detail += t("，实际采用 ", ", resolved to ") + settingValue(effective)
+        }
+        if entry["type"] as? String == "deadline" {
+            detail += t("\n填写带时区的日期，例如 2026-10-10T00:00:00+08:00。只修改这一项授权。", "\nEnter a date with timezone, e.g. 2026-10-10T00:00:00+08:00. Only this authorization changes.")
+        } else {
+            detail += t("\n范围：", "\nRange: ") + settingValue(entry["min"]) + "–" + settingValue(entry["max"])
+            if entry["nullable"] as? Bool == true { detail += t("；none 使用自动值／取消该上限", "; none selects automatic / removes this cap") }
+        }
+        detail += "\n" + (entry["note"] as? String ?? "")
+        detail += t("\n现有任务完成后应用；累计用量保持不变。", "\nApplies after existing work finishes; usage is preserved.")
+        box.informativeText = detail
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 26))
+        field.stringValue = settingValue(entry["has_pending"] as? Bool == true ? entry["pending"] : entry["value"])
+        box.accessoryView = field; box.addButton(withTitle: t("保存", "Save")); box.addButton(withTitle: t("取消", "Cancel"))
+        box.window.initialFirstResponder = field
+        guard runAlert(box) == .alertFirstButtonReturn else { return }
+        perform("operating-setting", key + "=" + field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     @objc func addCustomProvider() {

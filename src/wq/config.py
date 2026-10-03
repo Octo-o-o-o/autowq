@@ -24,11 +24,9 @@ DEFAULTS: dict = {
     },
     "limits": {
         "sims_per_week": 24,
-        "sim_concurrency": 1,
         "grok_calls_per_week": 3,
         "devin_tickets_per_week": 1,
         "max_repair_attempts_per_incident": 2,
-        "families_max": 3,
         "configs_per_family_max": 4,
         "rate_limit_max_wait_s": 900,
     },

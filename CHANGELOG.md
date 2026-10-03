@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.23 (local candidate; not publicly released)
+
+- Expose research, evidence, scheduling, simulation, provider, spend and authorization limits in the desktop settings menu, including active experiment request limits.
+- Apply operating changes durably after existing work drains, migrate the exact research epoch, and preserve cumulative usage; show pending, failed, waived and inactive settings explicitly.
+- Wire dual-loop caps, provider retry counts and timeouts to their execution gates; remove unused family-count and simulation-concurrency settings.
+- Preserve the installed engine source for desktop child commands.
+
 ## 0.2.22 (local candidate; not publicly released)
 
 - Enforce total-cycle and no-information discovery limits for every new lane, and serialize cumulative model-start reservations across workers.
